@@ -100,8 +100,7 @@ cp .env.example .env
 # Edit .env if you want to customize cache directory, ports, etc.
 ```
 
-4. Ensure provider configuration files exist in `configurations/providers/`:
-   - Each provider should have a JSON file (e.g., `provider-1.json`, `provider-2.json`)
+4. Ensure provider configuration exists in `data/settings/iptv-providers.json`:
    - See the [Configurations](#configurations) section below for details
 
 5. Run the full stack (engine + API):
@@ -147,7 +146,6 @@ The workflow uses Docker Buildx for multi-platform builds and includes automated
 docker run -d \
   --name playarr \
   -p 3000:3000 \
-  -v $(pwd)/configurations:/app/configurations \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/cache:/app/cache \
   -v $(pwd)/logs:/app/logs \
@@ -168,13 +166,13 @@ docker-compose down
 ### Docker Compose Configuration
 
 The `docker-compose.yml` file includes:
-- Volume mounts for configurations (read-write for UI configuration), data, cache, and logs
+- Volume mounts for data, cache, and logs
 - Port mapping for API (port 3000)
 - Health checks
 - Automatic restart policy
 - Environment variable configuration
 
-**Note**: Configurations, data, and cache directories are **not** included in the Docker image and **must** be mounted as volumes. The UI will be used to configure providers and settings.
+**Note**: Data and cache directories are **not** included in the Docker image and **must** be mounted as volumes. The UI will be used to configure providers and settings.
 
 ### Docker Image Details
 
@@ -187,7 +185,7 @@ The Dockerfile uses:
 - **Node.js 20 Alpine**: Lightweight base image
 - **dumb-init**: Proper signal handling for graceful shutdowns in containers
 - **Health check**: Verifies data and cache directories are accessible
-- **`.dockerignore`**: Excludes unnecessary files (configurations, data, cache, logs, node_modules, etc.) from the build context
+- **`.dockerignore`**: Excludes unnecessary files (data, cache, logs, node_modules, etc.) from the build context
 - **Single container**: Runs both engine and API together
 
 ### Environment Variables
@@ -197,7 +195,6 @@ You can customize the Docker container using environment variables:
 - `CACHE_DIR`: Cache directory path (default: `/app/cache`)
 - `DATA_DIR`: Data directory path (default: `/app/data`)
 - `LOGS_DIR`: Logs directory path (default: `/app/logs`)
-- `CONFIG_DIR`: Configuration directory path (default: `/app/configurations`)
 - `PORT`: API server port (default: `3000`)
 - `NODE_ENV`: Node environment (default: `production`)
 - `DEFAULT_ADMIN_USERNAME`: Default admin username (default: `admin`)
@@ -208,37 +205,39 @@ You can customize the Docker container using environment variables:
 
 ## Configurations
 
-The engine requires configuration files in the `configurations/` directory. There are two types of configuration files:
+Configuration files are now stored in the `data/settings/` directory. The engine and API share the same configuration files:
 
 ### Provider Configurations
 
-Provider configuration files are stored in `configurations/providers/` directory. Each provider should have its own JSON file named after the provider ID (e.g., `provider-1.json`, `provider-2.json`).
+Provider configurations are stored in a single file `data/settings/iptv-providers.json` containing an array of provider objects. Each provider has an `id` field that serves as the unique identifier.
 
 #### Provider Configuration Structure
 
 Each provider JSON file should contain the following fields:
 
 ```json
-{
-  "id": "provider-id",           // Unique identifier (must match filename without .json)
-  "type": "agtv" | "xtream",     // Provider type
-  "enabled": true,                // Whether this provider is active (default: true)
-  "priority": 1,                  // Processing priority (lower = higher priority)
-  "api_url": "https://example.com", // Base API URL
-  "username": "your-username",   // Provider username
-  "password": "your-password",    // Provider password
-  "streams_urls": [              // Array of stream URLs (optional)
-    "https://example.com"
-  ],
-  "cleanup": {                    // Regex patterns for title cleanup (optional)
-    "pattern": "replacement"
-  },
-  "ignored_titles": {},          // Titles to ignore (optional)
-  "api_rate": {                  // Rate limiting configuration
-    "concurrect": 10,            // Number of concurrent requests (note: typo "concurrect" is supported)
-    "duration_seconds": 1        // Time window in seconds
+[
+  {
+    "id": "provider-id",           // Unique identifier
+    "type": "agtv" | "xtream",     // Provider type
+    "enabled": true,                // Whether this provider is active (default: true)
+    "priority": 1,                  // Processing priority (lower = higher priority)
+    "api_url": "https://example.com", // Base API URL
+    "username": "your-username",   // Provider username
+    "password": "your-password",    // Provider password
+    "streams_urls": [              // Array of stream URLs (optional)
+      "https://example.com"
+    ],
+    "cleanup": {                    // Regex patterns for title cleanup (optional)
+      "pattern": "replacement"
+    },
+    "ignored_titles": {},          // Titles to ignore (optional)
+    "api_rate": {                  // Rate limiting configuration
+      "concurrect": 10,            // Number of concurrent requests (note: typo "concurrect" is supported)
+      "duration_seconds": 1        // Time window in seconds
+    }
   }
-}
+]
 ```
 
 #### Provider Type: AGTV
@@ -297,7 +296,7 @@ Xtream Codec providers use the Xtream API. Example configuration:
 
 #### Configuration Fields Explained
 
-- **id**: Unique identifier for the provider. Must match the filename (without `.json` extension).
+- **id**: Unique identifier for the provider. Used to reference the provider throughout the system.
 - **type**: Provider type - either `"agtv"` for Apollo Group TV or `"xtream"` for Xtream Codec.
 - **enabled**: Set to `false` to disable this provider without deleting the configuration file.
 - **priority**: Lower numbers are processed first. Useful when providers have overlapping content.
@@ -312,7 +311,7 @@ Xtream Codec providers use the Xtream API. Example configuration:
 
 ### Settings Configuration
 
-The settings file is located at `configurations/settings.json` and contains global configuration:
+The settings file is located at `data/settings/settings.json` and contains global configuration:
 
 ```json
 {
@@ -333,7 +332,7 @@ The settings file is located at `configurations/settings.json` and contains glob
 
 ### Cache Policy Configuration
 
-The cache policy file is located at `configurations/cache-policy.json` and controls automatic cache expiration and purging. The `CachePurgeJob` runs every 15 minutes to remove expired cache files based on TTL (Time To Live) values specified in hours.
+The cache policy file is located at `data/settings/cache-policy.json` and controls automatic cache expiration and purging. The `CachePurgeJob` runs every 15 minutes to remove expired cache files based on TTL (Time To Live) values specified in hours.
 
 ```json
 {
@@ -366,12 +365,13 @@ Files older than their TTL are automatically purged, and empty directories are c
 
 ### Configuration File Location
 
-All configuration files should be placed in:
-- **Provider configs**: `configurations/providers/*.json`
-- **Settings**: `configurations/settings.json`
-- **Cache policy**: `configurations/cache-policy.json` (optional, defaults to no expiration if not present)
+All configuration files are stored in `data/settings/`:
+- **Provider configs**: `data/settings/iptv-providers.json` (single file with array of providers)
+- **Settings**: `data/settings/settings.json` (TMDB token, API rate limits)
+- **Cache policy**: `data/settings/cache-policy.json` (optional, defaults to no expiration if not present)
+- **Users**: `data/settings/users.json` (API user accounts)
 
-The engine automatically loads all enabled providers from the `configurations/providers/` directory and processes them in priority order.
+The engine automatically loads all enabled providers from `data/settings/iptv-providers.json` and processes them in priority order.
 
 ## Features
 
@@ -427,47 +427,49 @@ The default admin user credentials are set via environment variables:
 
 ```
 playarr/
-├── configurations/
-│   ├── providers/          # Provider configuration files
-│   ├── settings.json       # Global settings (TMDB token, etc.)
-│   └── cache-policy.json   # Cache expiration policies
 ├── data/
-│   ├── categories/         # Provider categories (generated)
-│   ├── main/               # Main titles (generated)
-│   ├── titles/             # Processed titles (generated)
-│   ├── users.json          # User accounts (API)
-│   ├── settings.json       # API settings
-│   └── stats.json          # API statistics
-├── cache/                  # Raw API response cache
+│   ├── settings/              # Configuration files
+│   │   ├── iptv-providers.json # Provider configurations (array)
+│   │   ├── settings.json       # Global settings (TMDB token, etc.)
+│   │   ├── cache-policy.json  # Cache expiration policies
+│   │   └── users.json         # User accounts (API)
+│   ├── categories/            # Provider categories (generated)
+│   ├── main/                  # Main titles (generated)
+│   ├── titles/                # Processed titles (generated)
+│   └── stats.json             # API statistics
+├── cache/                     # Raw API response cache
+├── logs/                      # Application logs
+│   ├── engine.log             # Engine logs
+│   └── api.log                # API logs
 ├── engine/
-│   ├── jobs/               # Job implementations
-│   ├── managers/           # Storage manager
-│   ├── providers/          # Provider implementations
-│   ├── utils/              # Utility functions
-│   ├── workers/            # Worker scripts for Bree.js scheduler
-│   ├── package.json        # Engine dependencies
-│   └── index.js            # Main entry point
+│   ├── jobs/                  # Job implementations
+│   ├── managers/              # Storage manager
+│   ├── providers/             # Provider implementations
+│   ├── utils/                 # Utility functions
+│   ├── workers/               # Worker scripts for Bree.js scheduler
+│   ├── package.json           # Engine dependencies
+│   └── index.js               # Main entry point
 ├── web-api/
 │   ├── src/
-│   │   ├── config/         # Configuration (database, collections)
-│   │   ├── middleware/     # Auth middleware
-│   │   ├── routes/         # API routes
-│   │   ├── services/       # Business logic services
-│   │   └── utils/          # Utility functions
-│   ├── package.json        # API dependencies
-│   └── src/index.js        # API server entry point
+│   │   ├── config/            # Configuration (database, collections)
+│   │   ├── middleware/        # Auth middleware
+│   │   ├── routes/            # API routes
+│   │   ├── services/           # Business logic services
+│   │   └── utils/             # Utility functions
+│   ├── package.json           # API dependencies
+│   └── src/index.js           # API server entry point
 ├── web-ui/
-│   ├── src/                # React source code
-│   ├── build/              # Built UI (generated)
-│   ├── package.json        # UI dependencies
-│   └── public/             # Static assets
+│   ├── src/                   # React source code
+│   ├── build/                 # Built UI (generated)
+│   ├── package.json           # UI dependencies
+│   └── public/                # Static assets
 ├── .github/
 │   └── workflows/
-│       └── docker-build.yml # CI/CD workflow for Docker builds
-├── Dockerfile              # Docker image definition
-├── docker-compose.yml      # Docker Compose configuration
-├── .dockerignore          # Files excluded from Docker builds
-├── package.json            # Root package (monorepo scripts)
-└── README.md
+│       └── docker-build.yml   # CI/CD workflow for Docker builds
+├── Dockerfile                 # Docker image definition
+├── docker-compose.yml         # Docker Compose configuration
+├── .dockerignore             # Files excluded from Docker builds
+├── package.json              # Root package (monorepo scripts)
+└── README.md                 # This file
 ```
 

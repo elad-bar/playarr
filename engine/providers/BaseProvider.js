@@ -15,26 +15,33 @@ const __dirname = path.dirname(__filename);
  */
 export class BaseProvider {
   /**
-   * Load all enabled provider configurations from JSON files
+   * Load all enabled provider configurations from JSON file
    * @returns {Promise<Object[]>} Array of provider configuration objects, sorted by priority
    */
   static async loadProviders() {
-    const providersDir = path.join(__dirname, '../../configurations/providers');
-    const files = await fs.readdir(providersDir);
+    const providersFile = path.join(__dirname, '../../data/settings/iptv-providers.json');
     
-    const providers = [];
+    let providers = [];
     
-    for (const file of files) {
-      if (file.endsWith('.json')) {
-        const filePath = path.join(providersDir, file);
-        const providerData = await fs.readJson(filePath);
-        
-        // Only load enabled providers
-        if (providerData.enabled !== false) {
-          providers.push(providerData);
+    if (await fs.pathExists(providersFile)) {
+      try {
+        const providersData = await fs.readJson(providersFile);
+        // Handle both array format and legacy object format
+        if (Array.isArray(providersData)) {
+          providers = providersData;
+        } else {
+          // Legacy format: convert object to array
+          providers = Object.values(providersData);
         }
+      } catch (error) {
+        const logger = createLogger('BaseProvider');
+        logger.error(`Error loading providers from ${providersFile}:`, error);
+        return [];
       }
     }
+    
+    // Only load enabled providers
+    providers = providers.filter(p => p.enabled !== false);
     
     // Sort by priority (lower number = higher priority)
     return providers.sort((a, b) => (a.priority || 999) - (b.priority || 999));
@@ -47,10 +54,11 @@ export class BaseProvider {
    * @throws {Error} If provider is not found
    */
   static async loadProvider(providerId) {
-    const providerPath = path.join(__dirname, '../../configurations/providers', `${providerId}.json`);
+    const providers = await this.loadProviders();
+    const provider = providers.find(p => p.id === providerId);
     
-    if (await fs.pathExists(providerPath)) {
-      return await fs.readJson(providerPath);
+    if (provider) {
+      return provider;
     }
     
     throw new Error(`Provider ${providerId} not found`);

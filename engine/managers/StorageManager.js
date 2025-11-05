@@ -19,7 +19,7 @@ export class StorageManager {
     this.storageDir = storageDir;
     this.wrapData = wrapData;
     this.logger = createLogger('StorageManager');
-    this.cachePolicyPath = path.join(__dirname, '../../configurations/cache-policy.json');
+    this.cachePolicyPath = path.join(__dirname, '../../data/settings/cache-policy.json');
   }
 
   /**

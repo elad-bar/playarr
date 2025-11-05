@@ -12,93 +12,36 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Get config directory from environment or use default
-// Path: from web-api/src/services/ to root: ../../../configurations
-const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, '../../../configurations');
-const PROVIDERS_DIR = path.join(CONFIG_DIR, 'providers');
+// Path: from web-api/src/services/ to root: ../../../data/settings
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../../data');
+const PROVIDERS_FILE = path.join(DATA_DIR, 'settings', 'iptv-providers.json');
 
 const logger = createLogger('ProvidersService');
 
 /**
  * Providers service for handling IPTV provider operations
- * Reads/writes directly from configurations/providers/*.json files
+ * Reads/writes from data/settings/iptv-providers.json (single file with array of providers)
  */
 class ProvidersService {
   constructor() {
-    this._providersDir = PROVIDERS_DIR;
-    this._ensureProvidersDir();
+    this._providersFile = PROVIDERS_FILE;
+    this._ensureProvidersFile();
   }
 
   /**
-   * Ensure providers directory exists
+   * Ensure providers file and directory exist
    * @private
    */
-  _ensureProvidersDir() {
+  _ensureProvidersFile() {
     try {
-      fs.ensureDirSync(this._providersDir);
-    } catch (error) {
-      logger.error('Error ensuring providers directory:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get file path for a provider
-   * @private
-   */
-  _getProviderFilePath(providerId) {
-    return path.join(this._providersDir, `${providerId}.json`);
-  }
-
-  /**
-   * Read all provider files
-   * @private
-   */
-  async _readAllProviders() {
-    try {
-      await this._ensureProvidersDir();
-      const files = await fs.readdir(this._providersDir);
-      const providers = [];
-
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          const filePath = path.join(this._providersDir, file);
-          try {
-            const provider = await fs.readJson(filePath);
-            // Ensure id matches filename
-            const providerId = file.replace('.json', '');
-            provider.id = providerId;
-            providers.push(provider);
-          } catch (error) {
-            logger.error(`Error reading provider file ${file}:`, error);
-          }
-        }
+      fs.ensureDirSync(path.dirname(this._providersFile));
+      // Create empty array file if it doesn't exist
+      if (!fs.pathExistsSync(this._providersFile)) {
+        fs.writeJsonSync(this._providersFile, [], { spaces: 2 });
       }
-
-      return providers;
     } catch (error) {
-      logger.error('Error reading providers:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Write provider to file
-   * @private
-   */
-  async _writeProvider(provider) {
-    const filePath = this._getProviderFilePath(provider.id);
-    await fs.ensureDir(path.dirname(filePath));
-    await fs.writeJson(filePath, provider, { spaces: 2 });
-  }
-
-  /**
-   * Delete provider file
-   * @private
-   */
-  async _deleteProvider(providerId) {
-    const filePath = this._getProviderFilePath(providerId);
-    if (await fs.pathExists(filePath)) {
-      await fs.remove(filePath);
+      logger.error('Error ensuring providers file:', error);
+      throw error;
     }
   }
 
@@ -139,6 +82,36 @@ class ProvidersService {
   }
 
   /**
+   * Read all providers from file
+   * @private
+   */
+  async _readAllProviders() {
+    try {
+      await this._ensureProvidersFile();
+      if (await fs.pathExists(this._providersFile)) {
+        const providers = await fs.readJson(this._providersFile);
+        return Array.isArray(providers) ? providers : [];
+      }
+      return [];
+    } catch (error) {
+      logger.error('Error reading providers:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Write all providers to file
+   * @private
+   */
+  async _writeAllProviders(providers) {
+    await this._ensureProvidersFile();
+    // Write to temp file first, then rename (atomic operation)
+    const tempPath = `${this._providersFile}.tmp`;
+    await fs.writeJson(tempPath, providers, { spaces: 2 });
+    await fs.move(tempPath, this._providersFile, { overwrite: true });
+  }
+
+  /**
    * Get all IPTV providers
    */
   async getProviders() {
@@ -163,17 +136,15 @@ class ProvidersService {
    */
   async getProvider(providerId) {
     try {
-      const filePath = this._getProviderFilePath(providerId);
-      
-      if (!(await fs.pathExists(filePath))) {
+      const providers = await this._readAllProviders();
+      const provider = providers.find(p => p.id === providerId);
+
+      if (!provider) {
         return {
           response: { error: 'Provider not found' },
           statusCode: 404,
         };
       }
-
-      const provider = await fs.readJson(filePath);
-      provider.id = providerId;
 
       return {
         response: provider,
@@ -216,8 +187,8 @@ class ProvidersService {
       providerData.id = providedId;
 
       // Check if provider already exists
-      const filePath = this._getProviderFilePath(providedId);
-      if (await fs.pathExists(filePath)) {
+      const providers = await this._readAllProviders();
+      if (providers.some(p => p.id === providedId)) {
         return {
           response: { error: 'Provider with this id already exists' },
           statusCode: 409,
@@ -233,16 +204,16 @@ class ProvidersService {
       }
 
       if (providerData.priority === undefined) {
-        const providersResponse = await this.getProviders();
         const maxPriority = Math.max(
-          ...providersResponse.response.providers.map(p => p.priority || 0),
+          ...providers.map(p => p.priority || 0),
           0
         );
         providerData.priority = maxPriority + 1;
       }
 
-      // Save provider
-      await this._writeProvider(providerData);
+      // Add provider to array and save
+      providers.push(providerData);
+      await this._writeAllProviders(providers);
 
       // Broadcast WebSocket event
       webSocketService.broadcastEvent('provider_changed', {
@@ -268,18 +239,18 @@ class ProvidersService {
    */
   async updateProvider(providerId, providerData) {
     try {
-      // Check if provider exists
-      const filePath = this._getProviderFilePath(providerId);
-      
-      if (!(await fs.pathExists(filePath))) {
+      // Load all providers
+      const providers = await this._readAllProviders();
+      const providerIndex = providers.findIndex(p => p.id === providerId);
+
+      if (providerIndex === -1) {
         return {
           response: { error: 'Provider not found' },
           statusCode: 404,
         };
       }
 
-      const existingProvider = await fs.readJson(filePath);
-      existingProvider.id = providerId;
+      const existingProvider = providers[providerIndex];
 
       // Normalize URLs
       this._normalizeUrls(providerData, existingProvider);
@@ -291,8 +262,9 @@ class ProvidersService {
         id: providerId, // Ensure id doesn't change
       };
 
-      // Save updated provider
-      await this._writeProvider(updatedProvider);
+      // Update in array and save
+      providers[providerIndex] = updatedProvider;
+      await this._writeAllProviders(providers);
 
       // Broadcast WebSocket event
       webSocketService.broadcastEvent('provider_changed', {
@@ -318,18 +290,20 @@ class ProvidersService {
    */
   async deleteProvider(providerId) {
     try {
-      // Check if provider exists
-      const filePath = this._getProviderFilePath(providerId);
-      
-      if (!(await fs.pathExists(filePath))) {
+      // Load all providers
+      const providers = await this._readAllProviders();
+      const providerIndex = providers.findIndex(p => p.id === providerId);
+
+      if (providerIndex === -1) {
         return {
           response: { error: 'Provider not found' },
           statusCode: 404,
         };
       }
 
-      // Delete provider
-      await this._deleteProvider(providerId);
+      // Remove provider from array and save
+      providers.splice(providerIndex, 1);
+      await this._writeAllProviders(providers);
 
       // Broadcast WebSocket event
       webSocketService.broadcastEvent('provider_changed', {
@@ -370,23 +344,24 @@ class ProvidersService {
    */
   async updateProviderPriorities(prioritiesData) {
     try {
-      const providers = prioritiesData.providers || [];
+      const allProviders = await this._readAllProviders();
+      const priorityUpdates = prioritiesData.providers || [];
 
       // Update each provider's priority
-      for (const provider of providers) {
-        const providerId = provider.id;
-        const priority = provider.priority;
+      for (const update of priorityUpdates) {
+        const providerId = update.id;
+        const priority = update.priority;
 
         if (providerId && priority !== undefined && priority !== null) {
-          const filePath = this._getProviderFilePath(providerId);
-          if (await fs.pathExists(filePath)) {
-            const existingProvider = await fs.readJson(filePath);
-            existingProvider.priority = priority;
-            existingProvider.id = providerId;
-            await this._writeProvider(existingProvider);
+          const providerIndex = allProviders.findIndex(p => p.id === providerId);
+          if (providerIndex !== -1) {
+            allProviders[providerIndex].priority = priority;
           }
         }
       }
+
+      // Save all providers
+      await this._writeAllProviders(allProviders);
 
       // Broadcast WebSocket event
       webSocketService.broadcastEvent('provider_changed', {

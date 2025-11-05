@@ -12,7 +12,6 @@ const __dirname = path.dirname(__filename);
 // Get data directory from environment or use default
 // Path: from web-api/src/config/ to root: ../../../data
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../../data');
-const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, '../../../configurations');
 
 const logger = createLogger('FileStorage');
 
@@ -23,7 +22,6 @@ const logger = createLogger('FileStorage');
 class FileStorageManager {
   constructor() {
     this.dataDir = DATA_DIR;
-    this.configDir = CONFIG_DIR;
     this._ensureDirectories();
   }
 
@@ -34,8 +32,7 @@ class FileStorageManager {
   _ensureDirectories() {
     try {
       fs.ensureDirSync(this.dataDir);
-      fs.ensureDirSync(this.configDir);
-      fs.ensureDirSync(path.join(this.configDir, 'providers'));
+      fs.ensureDirSync(path.join(this.dataDir, 'settings'));
     } catch (error) {
       logger.error('Error ensuring directories:', error);
       throw error;
@@ -50,8 +47,8 @@ class FileStorageManager {
   _getCollectionPath(collectionName) {
     // Map collection names to file paths
     const collectionMap = {
-      'users': path.join(this.dataDir, 'users.json'),
-      'settings': path.join(this.dataDir, 'settings.json'),
+      'users': path.join(this.dataDir, 'settings', 'users.json'),
+      'settings': path.join(this.dataDir, 'settings', 'settings.json'),
       'stats': path.join(this.dataDir, 'stats.json'),
     };
 

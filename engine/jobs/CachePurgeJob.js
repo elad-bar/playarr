@@ -20,7 +20,7 @@ export class CachePurgeJob extends BaseJob {
    */
   constructor(cache, data, providers, tmdbProvider) {
     super('CachePurgeJob', cache, data, providers, tmdbProvider);
-    this.cachePolicyPath = path.join(__dirname, '../../configurations/cache-policy.json');
+    this.cachePolicyPath = path.join(__dirname, '../../data/settings/cache-policy.json');
   }
 
   /**

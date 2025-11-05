@@ -2,6 +2,7 @@ import { BaseProvider } from './BaseProvider.js';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createLogger } from '../utils/logger.js';
 import { extractYearFromTitle, extractBaseTitle, extractYearFromReleaseDate } from '../utils/titleUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -23,8 +24,18 @@ export class TMDBProvider extends BaseProvider {
    */
   static getInstance(cache, data) {
     if (!TMDBProvider.instance) {
-      const settingsPath = path.join(__dirname, '../../configurations/settings.json');
-      const settings = fs.readJsonSync(settingsPath);
+      const settingsPath = path.join(__dirname, '../../data/settings/settings.json');
+      let settings = {};
+      
+      // Load settings if file exists
+      if (fs.existsSync(settingsPath)) {
+        try {
+          settings = fs.readJsonSync(settingsPath);
+        } catch (error) {
+          const logger = createLogger('TMDBProvider');
+          logger.warn(`Failed to load settings from ${settingsPath}:`, error);
+        }
+      }
       
       const providerData = {
         id: 'tmdb',

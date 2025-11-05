@@ -64,7 +64,7 @@ COPY --from=engine-builder /app/engine/node_modules ./engine/node_modules
 # Copy engine source code
 COPY engine/ ./engine/
 
-# Create logs directory (configurations, data, and cache will be mounted as volumes)
+# Create logs directory (data and cache will be mounted as volumes)
 RUN mkdir -p /app/logs
 
 # Create startup script to run both engine and API
@@ -78,7 +78,6 @@ ENV NODE_ENV=production
 ENV CACHE_DIR=/app/cache
 ENV DATA_DIR=/app/data
 ENV LOGS_DIR=/app/logs
-ENV CONFIG_DIR=/app/configurations
 ENV PORT=3000
 
 # Expose API port
