@@ -134,7 +134,7 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
     useEffect(() => {
         // Set the first season as selected when title changes or streams load
         const details = fullTitleDetails || title;
-        if (details?.type === 'shows' && details.streams?.length > 0) {
+        if (details?.type === 'tvshows' && details.streams?.length > 0) {
             const seasonStreams = getSeasonStreams(details.streams);
             const seasons = Object.keys(seasonStreams).sort((a, b) => parseInt(a) - parseInt(b));
             setSelectedSeason(seasons[0]);
@@ -273,8 +273,8 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                                     <Box display="flex" alignItems="center" gap={2}>
                                         <Box display="flex" gap={1}>
                                             <Chip
-                                                icon={details.type === 'shows' ? <Tv /> : <Movie />}
-                                                label={details.type === 'shows' ? 'TV Show' : 'Movie'}
+                                                icon={details.type === 'tvshows' ? <Tv /> : <Movie />}
+                                                label={details.type === 'tvshows' ? 'TV Show' : 'Movie'}
                                                 size="small"
                                                 sx={{
                                                     backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -297,7 +297,7 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                                             {details.streams?.length > 0 && (
                                                 <Chip
                                                     icon={<Stream />}
-                                                    label={`${details.streams.length} ${details.type === 'shows' ? 'Episodes' : 'Available'}`}
+                                                    label={`${details.streams.length} ${details.type === 'tvshows' ? 'Episodes' : 'Available'}`}
                                                     size="small"
                                                     sx={{
                                                         backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -348,7 +348,7 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                                         </Typography>
                                     )}
 
-                                    {details.type === 'shows' && details.streams && details.streams.length > 0 && (
+                                    {details.type === 'tvshows' && details.streams && details.streams.length > 0 && (
                                         <Box>
                                             <Typography variant="h6" gutterBottom sx={{ color: 'white', mb: 2 }}>
                                                 Episodes

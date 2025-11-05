@@ -140,7 +140,7 @@ const TMDBWatchlistImport = () => {
             const titles = selectedItems.map(id => {
                 const item = listItems.find(item => item.id === id);
                 return {
-                    key: `${item.media_type === 'movie' ? 'movies' : 'shows'}-${id}`,
+                    key: `${item.media_type === 'movie' ? 'movies' : 'tvshows'}-${id}`,
                     watchlist: true
                 };
             });

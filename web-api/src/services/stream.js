@@ -89,7 +89,7 @@ class StreamService {
     const streams = titleData.streams || {};
     let streamId = 'main';
 
-    if (mediaType === 'shows') {
+    if (mediaType === 'tvshows') {
       const seasonNum = this._getSeasonNumber(seasonNumber);
       const episodeNum = this._getEpisodeNumber(episodeNumber);
       streamId = `${seasonNum}-${episodeNum}`;

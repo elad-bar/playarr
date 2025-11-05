@@ -1,6 +1,17 @@
-import { databaseService } from './database.js';
-import { DatabaseCollections, toCollectionName } from '../config/collections.js';
 import { createLogger } from '../utils/logger.js';
+import fs from 'fs-extra';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Get data directory from environment or use default
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../../data');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings', 'settings.json');
 
 const logger = createLogger('SettingsService');
 
@@ -10,7 +21,40 @@ const logger = createLogger('SettingsService');
  */
 class SettingsService {
   constructor() {
-    this._settingsCollection = toCollectionName(DatabaseCollections.SETTINGS);
+    this._settingsFile = SETTINGS_FILE;
+  }
+
+  /**
+   * Read settings file as object
+   * @private
+   * @returns {Promise<Object>} Settings object
+   */
+  async _readSettingsFile() {
+    try {
+      if (await fs.pathExists(this._settingsFile)) {
+        const content = await fs.readJson(this._settingsFile);
+        return content && typeof content === 'object' && !Array.isArray(content) ? content : {};
+      }
+      return {};
+    } catch (error) {
+      logger.error(`Error reading settings file: ${error.message}`);
+      return {};
+    }
+  }
+
+  /**
+   * Write settings file
+   * @private
+   * @param {Object} settings - Settings object to write
+   */
+  async _writeSettingsFile(settings) {
+    try {
+      await fs.ensureDir(path.dirname(this._settingsFile));
+      await fs.writeJson(this._settingsFile, settings, { spaces: 2 });
+    } catch (error) {
+      logger.error(`Error writing settings file: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
@@ -20,11 +64,11 @@ class SettingsService {
    */
   async getSetting(key) {
     try {
-      const query = { key };
-      const data = await databaseService.getData(this._settingsCollection, query);
+      const settings = await this._readSettingsFile();
+      const value = settings[key] !== undefined ? settings[key] : null;
       
       return {
-        response: { value: data?.token || null },
+        response: { value },
         statusCode: 200,
       };
     } catch (error) {
@@ -44,16 +88,9 @@ class SettingsService {
    */
   async setSetting(key, value) {
     try {
-      const query = { key };
-      const data = { key, token: value };
-
-      const currentData = await databaseService.getData(this._settingsCollection, query);
-      
-      if (!currentData) {
-        await databaseService.insertData(this._settingsCollection, data);
-      } else {
-        await databaseService.updateData(this._settingsCollection, data, query);
-      }
+      const settings = await this._readSettingsFile();
+      settings[key] = value;
+      await this._writeSettingsFile(settings);
 
       return {
         response: { value },
@@ -75,8 +112,11 @@ class SettingsService {
    */
   async deleteSetting(key) {
     try {
-      const query = { key };
-      await databaseService.deleteData(this._settingsCollection, query);
+      const settings = await this._readSettingsFile();
+      if (settings.hasOwnProperty(key)) {
+        delete settings[key];
+        await this._writeSettingsFile(settings);
+      }
       
       return {
         response: { success: true },

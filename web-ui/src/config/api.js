@@ -21,7 +21,7 @@ export const API_ENDPOINTS = {
 
     // Stream endpoints
     streamMovie: (titleId) => `/api/stream/movies/${titleId}`,
-    streamShow: (titleId, seasonNumber, episodeNumber) => `/api/stream/shows/${titleId}/${seasonNumber}/${episodeNumber}`,
+    streamShow: (titleId, seasonNumber, episodeNumber) => `/api/stream/tvshows/${titleId}/${seasonNumber}/${episodeNumber}`,
 
     // Providers endpoints
     providers: `/iptv/providers`,

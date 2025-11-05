@@ -1,4 +1,5 @@
 import { BaseJob } from './BaseJob.js';
+import { generateTitleKey } from '../utils/titleUtils.js';
 
 /**
  * Job for processing main titles
@@ -287,10 +288,11 @@ export class ProcessMainTitlesJob extends BaseJob {
       return 0;
     }
 
-    // Load existing main titles to preserve createdAt timestamps and check for regeneration needs
-    const existingMainTitles = this.data.get('main', `${type}.json`) || [];
+    // Load existing main titles from consolidated file to preserve createdAt timestamps and check for regeneration needs
+    const allMainTitles = this.data.get('titles', 'main.json') || [];
+    const existingMainTitles = allMainTitles.filter(t => t.type === type);
     const existingMainTitleMap = new Map(
-      existingMainTitles.map(t => [t.title_id, t])
+      existingMainTitles.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t])
     );
 
     // Filter titles that need regeneration
@@ -300,7 +302,8 @@ export class ProcessMainTitlesJob extends BaseJob {
     
     for (const tmdbId of uniqueTMDBIds) {
       const providerTitleGroups = providerTitlesByTMDB.get(tmdbId);
-      const existingMainTitle = existingMainTitleMap.get(tmdbId);
+      const titleKey = generateTitleKey(type, tmdbId);
+      const existingMainTitle = existingMainTitleMap.get(titleKey);
       
       if (this._needsRegeneration(existingMainTitle, providerTitleGroups)) {
         titlesToProcess.push(tmdbId);
@@ -358,8 +361,13 @@ export class ProcessMainTitlesJob extends BaseJob {
           );
 
           if (mainTitle) {
+            // Ensure type and title_key are set (TMDBProvider should already set them, but double-check)
+            mainTitle.type = type;
+            mainTitle.title_key = mainTitle.title_key || generateTitleKey(type, tmdbId);
+            
             // Preserve createdAt if title already exists
-            const existing = existingMainTitleMap.get(tmdbId);
+            const titleKey = mainTitle.title_key;
+            const existing = existingMainTitleMap.get(titleKey);
             if (existing && existing.createdAt) {
               mainTitle.createdAt = existing.createdAt;
             }
@@ -397,40 +405,61 @@ export class ProcessMainTitlesJob extends BaseJob {
   }
 
   /**
-   * Save main titles to data directory
+   * Save main titles to consolidated data directory
    * @private
    * @param {string} type - Media type ('movies' or 'tvshows')
    * @param {Array<Object>} newMainTitles - Array of new main titles to save
-   * @param {Map<number, Object>} existingMainTitleMap - Map of existing main titles by title_id
+   * @param {Map<string, Object>} existingMainTitleMap - Map of existing main titles by title_key
    * @returns {Promise<void>}
    */
   async _saveMainTitles(type, newMainTitles, existingMainTitleMap) {
-    const cacheKey = ['main', `${type}.json`];
-    const existingTitles = this.data.get(...cacheKey) || [];
+    const cacheKey = ['titles', 'main.json'];
+    const allExistingTitles = this.data.get(...cacheKey) || [];
+    
+    // Filter existing titles of other types (keep them unchanged)
+    const existingTitlesOtherTypes = allExistingTitles.filter(t => t.type !== type);
+    
+    // Get existing titles of this type
+    const existingTitlesThisType = allExistingTitles.filter(t => t.type === type);
 
-    // Create map of new titles by title_id
-    const newTitleMap = new Map(newMainTitles.map(t => [t.title_id, t]));
+    // Ensure all new titles have type and title_key
+    newMainTitles = newMainTitles.map(t => {
+      if (!t.type) t.type = type;
+      if (!t.title_key) t.title_key = generateTitleKey(t.type, t.title_id);
+      return t;
+    });
+
+    // Create map of new titles by title_key
+    const newTitleMap = new Map(newMainTitles.map(t => [t.title_key, t]));
 
     // Merge: update existing titles that are in newTitles, keep others unchanged
-    const updatedTitles = existingTitles.map(existing => {
-      const updated = newTitleMap.get(existing.title_id);
+    const updatedTitlesThisType = existingTitlesThisType.map(existing => {
+      const existingKey = existing.title_key || generateTitleKey(existing.type, existing.title_id);
+      const updated = newTitleMap.get(existingKey);
       return updated || existing;
     });
 
     // Add new titles that don't exist yet
-    const existingIds = new Set(existingTitles.map(t => t.title_id));
+    const existingKeys = new Set(existingTitlesThisType.map(t => t.title_key || generateTitleKey(t.type, t.title_id)));
     newMainTitles.forEach(newTitle => {
-      if (!existingIds.has(newTitle.title_id)) {
-        updatedTitles.push(newTitle);
+      if (!existingKeys.has(newTitle.title_key)) {
+        updatedTitlesThisType.push(newTitle);
       }
     });
 
-    // Sort by title_id for consistency
-    updatedTitles.sort((a, b) => a.title_id - b.title_id);
+    // Combine all titles (other types + updated type)
+    const allTitles = [...existingTitlesOtherTypes, ...updatedTitlesThisType];
+
+    // Sort by title_key for consistency
+    allTitles.sort((a, b) => {
+      const keyA = a.title_key || generateTitleKey(a.type, a.title_id);
+      const keyB = b.title_key || generateTitleKey(b.type, b.title_id);
+      return keyA.localeCompare(keyB);
+    });
 
     try {
-      this.data.set(updatedTitles, ...cacheKey);
-      this.logger.info(`Saved ${newMainTitles.length} main ${type} titles (total: ${updatedTitles.length})`);
+      this.data.set(allTitles, ...cacheKey);
+      this.logger.info(`Saved ${newMainTitles.length} main ${type} titles (total: ${updatedTitlesThisType.length} ${type} titles)`);
     } catch (error) {
       this.logger.error(`Error saving main ${type} titles: ${error.message}`);
       throw error;
@@ -464,16 +493,20 @@ export class ProcessMainTitlesJob extends BaseJob {
    * @returns {Promise<void>}
    */
   async _enrichSimilarTitlesForType(type, batchSize) {
-    // Load all main titles for this type
-    const mainTitles = this.data.get('main', `${type}.json`) || [];
+    // Load all main titles from consolidated file and filter by type
+    const allMainTitles = this.data.get('titles', 'main.json') || [];
+    const mainTitles = allMainTitles.filter(t => t.type === type);
     
     if (mainTitles.length === 0) {
       this.logger.info(`No ${type} main titles found for similar titles enrichment`);
       return;
     }
 
-    // Create a Set of available title_ids for fast lookup
+    // Create a Set of available title_ids for fast lookup (for filtering similar titles)
     const availableTitleIds = new Set(mainTitles.map(t => t.title_id));
+    
+    // Create a Set of available title_keys for matching similar titles
+    const availableTitleKeys = new Set(mainTitles.map(t => t.title_key || generateTitleKey(t.type, t.title_id)));
     
     this.logger.info(`Enriching similar titles for ${mainTitles.length} main ${type} titles...`);
 
@@ -482,9 +515,8 @@ export class ProcessMainTitlesJob extends BaseJob {
     let processedCount = 0;
 
     // Load existing main titles to preserve other properties
-    const existingMainTitles = this.data.get('main', `${type}.json`) || [];
     const existingMainTitleMap = new Map(
-      existingMainTitles.map(t => [t.title_id, t])
+      mainTitles.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t])
     );
 
     // Save callback for progress tracking
@@ -515,21 +547,25 @@ export class ProcessMainTitlesJob extends BaseJob {
             const similarTitleIds = await this._fetchSimilarTitleIds(
               tmdbType,
               mainTitle.title_id,
-              availableTitleIds
+              availableTitleIds,
+              type
             );
 
-            // Create updated title with similar titles
+            const titleKey = mainTitle.title_key || generateTitleKey(mainTitle.type, mainTitle.title_id);
+            
+            // Create updated title with similar titles (store as title_keys)
             const updatedTitle = {
-              ...existingMainTitleMap.get(mainTitle.title_id) || mainTitle,
+              ...existingMainTitleMap.get(titleKey) || mainTitle,
               similar: similarTitleIds
             };
 
             updatedTitles.push(updatedTitle);
             processedCount++;
           } catch (error) {
+            const titleKey = mainTitle.title_key || generateTitleKey(mainTitle.type, mainTitle.title_id);
             this.logger.error(`Error enriching similar titles for ${type} ID ${mainTitle.title_id}: ${error.message}`);
             // Still add the title without similar titles to preserve it
-            const existingTitle = existingMainTitleMap.get(mainTitle.title_id) || mainTitle;
+            const existingTitle = existingMainTitleMap.get(titleKey) || mainTitle;
             if (!existingTitle.similar) {
               existingTitle.similar = [];
             }
@@ -566,16 +602,17 @@ export class ProcessMainTitlesJob extends BaseJob {
 
   /**
    * Fetch all similar title IDs for a given TMDB ID, handling pagination
-   * Only returns title_ids that exist in the available titles set
+   * Only returns title_keys that exist in the available titles set
    * Limited to a maximum of 10 pages
    * @private
    * @param {string} tmdbType - TMDB type ('movie' or 'tv')
    * @param {number} tmdbId - TMDB ID
-   * @param {Set<number>} availableTitleIds - Set of available title IDs from main titles
-   * @returns {Promise<Array<number>>} Array of similar title IDs that exist in main titles
+   * @param {Set<number>} availableTitleIds - Set of available title IDs from main titles (for filtering)
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @returns {Promise<Array<string>>} Array of similar title_keys that exist in main titles
    */
-  async _fetchSimilarTitleIds(tmdbType, tmdbId, availableTitleIds) {
-    const similarTitleIds = [];
+  async _fetchSimilarTitleIds(tmdbType, tmdbId, availableTitleIds, type) {
+    const similarTitleKeys = [];
     let page = 1;
     const maxPages = 10; // Limit to 10 pages
     let hasMorePages = true;
@@ -589,11 +626,13 @@ export class ProcessMainTitlesJob extends BaseJob {
         }
 
         // Filter results to only include titles that exist in main titles
-        const filteredIds = response.results
+        // Convert matching IDs to title_keys
+        const filteredKeys = response.results
           .map(result => result.id)
-          .filter(id => availableTitleIds.has(id));
+          .filter(id => availableTitleIds.has(id))
+          .map(id => generateTitleKey(type, id));
 
-        similarTitleIds.push(...filteredIds);
+        similarTitleKeys.push(...filteredKeys);
 
         // Check if there are more pages (but respect maxPages limit)
         const totalPages = response.total_pages || 1;
@@ -605,7 +644,7 @@ export class ProcessMainTitlesJob extends BaseJob {
       }
     }
 
-    return similarTitleIds;
+    return similarTitleKeys;
   }
 }
 

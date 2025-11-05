@@ -37,3 +37,23 @@ export function extractYearFromReleaseDate(releaseDate) {
   return match ? parseInt(match[1], 10) : null;
 }
 
+/**
+ * Generate title_key from type and title_id
+ * @param {string} type - Media type ('movies' or 'tvshows')
+ * @param {number|string} titleId - Title ID
+ * @returns {string} Formatted title_key: {type}-{title_id}
+ */
+export function generateTitleKey(type, titleId) {
+  return `${type}-${titleId}`;
+}
+
+/**
+ * Generate category_key from type and category_id
+ * @param {string} type - Category type ('movies' or 'tvshows')
+ * @param {number|string} categoryId - Category ID
+ * @returns {string} Formatted category_key: {type}-{category_id}
+ */
+export function generateCategoryKey(type, categoryId) {
+  return `${type}-${categoryId}`;
+}
+

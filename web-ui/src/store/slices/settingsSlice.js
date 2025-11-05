@@ -80,7 +80,7 @@ const settingsSlice = createSlice({
     updateListItemsWatchlistStatus: (state, action) => {
       const updatedTitles = action.payload;
       state.tmdb.listItems = state.tmdb.listItems.map(item => {
-        const titleKey = `${item.media_type === 'movie' ? 'movies' : 'shows'}-${item.id}`;
+        const titleKey = `${item.media_type === 'movie' ? 'movies' : 'tvshows'}-${item.id}`;
         if (updatedTitles.some(t => t.key === titleKey)) {
           return { ...item, in_watchlist: true };
         }

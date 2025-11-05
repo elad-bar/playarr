@@ -245,10 +245,10 @@ class TitlesService {
     startsWith = '',
   }) {
     try {
-      // Validate media type
-      if (mediaType && !['movies', 'shows'].includes(mediaType)) {
+      // Validate media type (use engine format: tvshows)
+      if (mediaType && !['movies', 'tvshows'].includes(mediaType)) {
         return {
-          response: { error: "Invalid media type. Must be 'movies' or 'shows'" },
+          response: { error: "Invalid media type. Must be 'movies' or 'tvshows'" },
           statusCode: 400,
         };
       }
@@ -362,7 +362,7 @@ class TitlesService {
         };
 
         // Add show-specific fields
-        if (titleType === 'shows') {
+        if (titleType === 'tvshows') {
           const { seasons, episodes } = this._getShowInfo(streams);
           titleResponse.number_of_seasons = seasons;
           titleResponse.number_of_episodes = episodes;
@@ -439,10 +439,10 @@ class TitlesService {
       const mediaType = titleData.type || '';
       const streams = titleData.streams || {};
 
-      // Get seasons and episodes count for shows
+      // Get seasons and episodes count for tvshows
       let numSeasons = null;
       let numEpisodes = null;
-      if (mediaType === 'shows') {
+      if (mediaType === 'tvshows') {
         const showInfo = this._getShowInfo(streams);
         numSeasons = showInfo.seasons;
         numEpisodes = showInfo.episodes;

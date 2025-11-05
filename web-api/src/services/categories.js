@@ -1,7 +1,15 @@
-import { databaseService } from './database.js';
 import { cacheService } from './cache.js';
-import { DatabaseCollections, toCollectionName } from '../config/collections.js';
 import { createLogger } from '../utils/logger.js';
+import fs from 'fs-extra';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Get data directory from environment or use default
+// Path: from web-api/src/services/ to root: ../../../data
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../../data');
 
 const logger = createLogger('CategoriesService');
 
@@ -29,6 +37,43 @@ class CategoriesService {
   }
 
   /**
+   * Load categories from engine file format
+   * Reads from data/categories/{providerId}.categories.json (plain array format)
+   * @private
+   */
+  async _loadCategoriesFromFiles(providerId) {
+    const filePath = path.join(DATA_DIR, 'categories', `${providerId}.categories.json`);
+    
+    try {
+      if (await fs.pathExists(filePath)) {
+        const categories = await fs.readJson(filePath);
+        
+        if (Array.isArray(categories)) {
+          // Transform categories to API format (no normalization - use engine format directly)
+          const transformedCategories = categories.map(cat => {
+            // Use category_key if available, otherwise generate from type and category_id
+            const categoryKey = cat.category_key || `${cat.type}-${cat.category_id}`;
+            
+            return {
+              key: categoryKey,
+              type: cat.type, // Use engine type directly (tvshows or movies)
+              category_id: cat.category_id,
+              category_name: cat.category_name,
+              enabled: cat.enabled !== undefined ? cat.enabled : false
+            };
+          });
+          
+          return transformedCategories;
+        }
+      }
+    } catch (error) {
+      logger.warn(`Error reading categories file ${filePath}:`, error.message);
+    }
+
+    return [];
+  }
+
+  /**
    * Get categories for a specific provider
    * Matches Python's CategoriesService.get_categories()
    */
@@ -52,22 +97,8 @@ class CategoriesService {
         };
       }
 
-      // Get categories for the provider
-      const collectionName = toCollectionName(DatabaseCollections.CATEGORIES, providerId);
-      const categories = await databaseService.getDataList(collectionName);
-
-      if (!categories) {
-        return {
-          response: [],
-          statusCode: 200,
-        };
-      }
-
-      // Remove any _id fields if present (for compatibility)
-      const categoriesList = categories.map(category => {
-        const { _id, ...categoryData } = category;
-        return categoryData;
-      });
+      // Load categories from engine file format
+      const categoriesList = await this._loadCategoriesFromFiles(providerId);
 
       // Update cache
       cacheService.setCategories(providerId, categoriesList);
@@ -115,44 +146,86 @@ class CategoriesService {
         };
       }
 
-      // Validate type value
-      if (!['movies', 'shows'].includes(categoryData.type)) {
+      // Validate type value (use engine format: tvshows)
+      if (!['movies', 'tvshows'].includes(categoryData.type)) {
         return {
           response: {
-            error: "Invalid type. Must be one of: movies, shows",
+            error: "Invalid type. Must be one of: movies, tvshows",
           },
           statusCode: 400,
         };
       }
 
-      // Get categories collection
-      const collectionName = toCollectionName(DatabaseCollections.CATEGORIES, providerId);
+      // Parse category key: format is "{type}-{category_id}"
+      const keyParts = categoryKey.split('-');
+      if (keyParts.length < 2) {
+        return {
+          response: { error: 'Invalid category key format' },
+          statusCode: 400,
+        };
+      }
 
-      // Find the category to update
-      const query = { key: categoryKey };
-      const existingCategory = await databaseService.getData(collectionName, query);
+      // Use type directly (no normalization)
+      const categoryId = keyParts.slice(1).join('-'); // Handle category_id that might contain dashes
+      const engineCategoryKey = `${categoryData.type}-${categoryId}`;
+      
+      const filePath = path.join(DATA_DIR, 'categories', `${providerId}.categories.json`);
 
-      if (!existingCategory) {
+      // Read the category file
+      if (!(await fs.pathExists(filePath))) {
+        return {
+          response: { error: 'Category file not found' },
+          statusCode: 404,
+        };
+      }
+
+      const categories = await fs.readJson(filePath);
+      
+      if (!Array.isArray(categories)) {
+        return {
+          response: { error: 'Invalid category file format' },
+          statusCode: 500,
+        };
+      }
+
+      // Find and update the category by category_key
+      const categoryIndex = categories.findIndex(
+        cat => {
+          const catKey = cat.category_key || `${cat.type}-${cat.category_id}`;
+          return catKey === engineCategoryKey;
+        }
+      );
+
+      if (categoryIndex === -1) {
         return {
           response: { error: 'Category not found' },
           statusCode: 404,
         };
       }
 
-      // Update category data
+      // Update the category
       const updatedCategory = {
-        ...existingCategory,
-        ...categoryData,
+        ...categories[categoryIndex],
+        enabled: categoryData.enabled,
+        lastUpdated: new Date().toISOString()
       };
+      
+      categories[categoryIndex] = updatedCategory;
 
-      // Save updated category
-      await databaseService.updateData(collectionName, updatedCategory, query);
-
-      // Remove any _id field if present (for compatibility)
-      const { _id, ...categoryResponse } = updatedCategory;
+      // Write back to file
+      await fs.writeJson(filePath, categories, { spaces: 2 });
 
       // Clear cache for this provider
       cacheService.clearCategories(providerId);
+
+      // Return in engine format (no normalization)
+      const categoryResponse = {
+        key: categoryKey,
+        type: categoryData.type, // Use engine type directly (tvshows or movies)
+        category_id: updatedCategory.category_id,
+        category_name: updatedCategory.category_name,
+        enabled: updatedCategory.enabled,
+      };
 
       // TODO: Broadcast WebSocket event for provider change
 

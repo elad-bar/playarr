@@ -20,7 +20,7 @@ const sanitizeImageUrl = (url) => {
 const MEDIA_TYPE_OPTIONS = [
     { value: '', label: 'All', icon: <FilterList /> },
     { value: 'movies', label: 'Movies', icon: <MovieIcon /> },
-    { value: 'shows', label: 'TV Shows', icon: <LiveTvIcon /> }
+    { value: 'tvshows', label: 'TV Shows', icon: <LiveTvIcon /> }
 ];
 
 const ALPHABET_FILTERS = [
@@ -298,7 +298,7 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                             height: '100%',
                             cursor: 'pointer',
                             position: 'relative',
-                            borderBottom: `2px solid ${item.type === 'shows' ? theme.palette.info.main : theme.palette.warning.main}`,
+                            borderBottom: `2px solid ${item.type === 'tvshows' ? theme.palette.info.main : theme.palette.warning.main}`,
                             '&:hover': {
                                 transform: 'scale(1.02)',
                                 transition: 'transform 0.2s'
@@ -322,7 +322,7 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                                     zIndex: 1
                                 }}
                             >
-                                {item.type === 'shows' ? (
+                                {item.type === 'tvshows' ? (
                                     <LiveTvIcon sx={{ color: 'white', fontSize: '1.2rem' }} />
                                 ) : (
                                     <MovieIcon sx={{ color: 'white', fontSize: '1.2rem' }} />
@@ -367,7 +367,7 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                             />
 
                             {/* Show Info for TV Shows */}
-                            {item.type === 'shows' && (
+                            {item.type === 'tvshows' && (
                                 <Chip
                                     label={`${item.number_of_seasons} Season${item.number_of_seasons !== 1 ? 's' : ''} • ${item.number_of_episodes} Episode${item.number_of_episodes !== 1 ? 's' : ''}`}
                                     size="small"

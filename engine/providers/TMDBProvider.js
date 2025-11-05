@@ -3,7 +3,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createLogger } from '../utils/logger.js';
-import { extractYearFromTitle, extractBaseTitle, extractYearFromReleaseDate } from '../utils/titleUtils.js';
+import { extractYearFromTitle, extractBaseTitle, extractYearFromReleaseDate, generateTitleKey } from '../utils/titleUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -385,6 +385,8 @@ export class TMDBProvider extends BaseProvider {
       // Build base main title structure
       const mainTitle = {
         title_id: tmdbId,
+        type: type,
+        title_key: generateTitleKey(type, tmdbId),
         title: type === 'movies' ? apiData.title : apiData.name,
         release_date: type === 'movies' ? apiData.release_date : apiData.first_air_date,
         vote_average: apiData.vote_average || null,

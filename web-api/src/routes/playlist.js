@@ -42,14 +42,14 @@ function getBaseUrl(req) {
 
 /**
  * GET /api/playlist/:title_type
- * Get M3U8 playlist for movies or shows (requires API key)
+ * Get M3U8 playlist for movies or tvshows (requires API key)
  */
 router.get('/:title_type', requireApiKey, async (req, res) => {
   try {
     const { title_type } = req.params;
 
-    if (!['movies', 'shows'].includes(title_type)) {
-      return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'shows'" });
+    if (!['movies', 'tvshows'].includes(title_type)) {
+      return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'tvshows'" });
     }
 
     const baseUrl = getBaseUrl(req);
@@ -67,14 +67,14 @@ router.get('/:title_type', requireApiKey, async (req, res) => {
 
 /**
  * GET /api/playlist/:title_type/data
- * Get media files mapping for movies or shows (requires API key)
+ * Get media files mapping for movies or tvshows (requires API key)
  */
 router.get('/:title_type/data', requireApiKey, async (req, res) => {
   try {
     const { title_type } = req.params;
 
-    if (!['movies', 'shows'].includes(title_type)) {
-      return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'shows'" });
+    if (!['movies', 'tvshows'].includes(title_type)) {
+      return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'tvshows'" });
     }
 
     const baseUrl = getBaseUrl(req);

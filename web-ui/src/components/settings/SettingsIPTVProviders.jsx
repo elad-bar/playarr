@@ -216,8 +216,8 @@ function SettingsIPTVProviders() {
           }}
         />,
         <Tab
-          key="shows"
-          value="shows"
+          key="tvshows"
+          value="tvshows"
           label="TV Shows"
           sx={{
             '&.Mui-selected': {
@@ -278,12 +278,12 @@ function SettingsIPTVProviders() {
           );
         }
         return null;
-      case 'shows':
+      case 'tvshows':
         if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
           return (
             <ExcludedCategoriesForm
               provider={selectedProvider}
-              categoryType="shows"
+              categoryType="tvshows"
               categories={categories}
               loading={loadingCategories}
               onCategoryUpdate={loadCategories}

@@ -25,15 +25,15 @@ router.get('/movies/:title_id', requireApiKey, async (req, res) => {
 });
 
 /**
- * GET /api/stream/shows/:title_id/:season/:episode
+ * GET /api/stream/tvshows/:title_id/:season/:episode
  * Get TV show stream redirect (requires API key)
  */
-router.get('/shows/:title_id/:season/:episode', requireApiKey, async (req, res) => {
+router.get('/tvshows/:title_id/:season/:episode', requireApiKey, async (req, res) => {
   try {
     const { title_id, season, episode } = req.params;
     const stream = await streamService.getBestSource(
       title_id,
-      'shows',
+      'tvshows',
       season,
       episode
     );
