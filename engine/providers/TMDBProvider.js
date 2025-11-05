@@ -242,18 +242,19 @@ export class TMDBProvider extends BaseProvider {
    * Get similar movies or TV shows by TMDB ID
    * @param {string} type - Media type: 'movie' or 'tv'
    * @param {number} tmdbId - TMDB ID
-   * @returns {Promise<Object>} Similar media results
+   * @param {number} [page=1] - Page number for pagination
+   * @returns {Promise<Object>} Similar media results with pagination info
    */
-  async getSimilar(type, tmdbId) {
+  async getSimilar(type, tmdbId, page = 1) {
     const endpoint = type === 'movie' 
       ? `/movie/${tmdbId}/similar` 
       : `/tv/${tmdbId}/similar`;
     
-    const url = this._buildApiUrl(endpoint);
+    const url = this._buildApiUrl(endpoint, { page });
     
     return await this.fetchWithCache(
       url,
-      ['tmdb', type, String(tmdbId), 'similar.json'],
+      ['tmdb', type, String(tmdbId), 'similar', `page_${page}.json`],
       null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }

@@ -1,15 +1,15 @@
 import { parentPort, workerData } from 'worker_threads';
 import { ProviderInitializer } from '../utils/ProviderInitializer.js';
-import { FetchIPTVMetadataJob } from '../jobs/FetchIPTVMetadataJob.js';
+import { ProcessProvidersTitlesJob } from '../jobs/ProcessProvidersTitlesJob.js';
 
 /**
- * Bree.js worker file for fetching IPTV metadata
+ * Bree.js worker file for processing provider titles
  * This file is executed by Bree.js as a separate worker thread
  * 
  * Uses ProviderInitializer singleton to prevent redundant initialization
  * within the same worker thread context
  */
-async function fetchIPTVMetadataWorker() {
+async function processProvidersTitlesWorker() {
   const cacheDir = workerData.cacheDir;
   const dataDir = workerData.dataDir;
 
@@ -22,14 +22,14 @@ async function fetchIPTVMetadataWorker() {
   const providers = ProviderInitializer.getProviders();
   const tmdbProvider = ProviderInitializer.getTMDBProvider();
 
-  const job = new FetchIPTVMetadataJob(cache, data, providers, tmdbProvider);
+  const job = new ProcessProvidersTitlesJob(cache, data, providers, tmdbProvider);
   const results = await job.execute();
 
   return results;
 }
 
 // Execute worker and send result back to parent
-fetchIPTVMetadataWorker()
+processProvidersTitlesWorker()
   .then(result => {
     if (parentPort) {
       parentPort.postMessage({ success: true, result });

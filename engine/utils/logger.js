@@ -12,7 +12,7 @@ fs.ensureDirSync(logsDir);
 
 /**
  * Create logger instance with formatted output to console and file
- * @param {string} context - Context/component name (e.g., providerId, 'FetchProvidersMetadataJob')
+ * @param {string} context - Context/component name (e.g., providerId, 'ProcessProvidersTitlesJob')
  * @returns {winston.Logger} Winston logger instance
  */
 export function createLogger(context) {

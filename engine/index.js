@@ -26,8 +26,8 @@ async function main() {
     defaultExtension: 'js',
     jobs: [
       {
-        name: 'fetchIPTVMetadata',
-        path: 'fetchIPTVMetadata.js',
+        name: 'processProvidersTitles',
+        path: 'processProvidersTitles.js',
         interval: '1h', // Every 1 hour
         timeout: 0, // Run immediately on startup
         closeWorkerAfterMs: 0, // Keep worker alive - prevents parallel execution
@@ -79,7 +79,7 @@ async function main() {
   bree.on('worker message', (name, message) => {
     if (message.success) {
       logger.info(`Job ${name} completed successfully`);
-      if (name === 'fetchIPTVMetadata' && Array.isArray(message.result)) {
+      if (name === 'processProvidersTitles' && Array.isArray(message.result)) {
         logger.info('=== Fetch Results ===');
         message.result.forEach(result => {
           if (result.error) {
@@ -102,7 +102,7 @@ async function main() {
     await bree.start();
 
     logger.info('Job scheduler started. Jobs will run according to schedule.');
-    logger.info('- fetchIPTVMetadata: On startup and every 1 hour');
+    logger.info('- processProvidersTitles: On startup and every 1 hour');
     logger.info('- processMainTitles: First run in 5 minutes, then every 30 minutes');
     logger.info('- cachePurge: On startup and every 15 minutes');
     

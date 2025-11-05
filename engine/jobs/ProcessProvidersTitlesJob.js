@@ -1,11 +1,11 @@
 import { BaseJob } from './BaseJob.js';
 
 /**
- * Job for fetching metadata from IPTV providers
+ * Job for processing provider titles (fetching metadata from IPTV providers)
  * Handles fetching categories and metadata from all configured IPTV providers
  * @extends {BaseJob}
  */
-export class FetchIPTVMetadataJob extends BaseJob {
+export class ProcessProvidersTitlesJob extends BaseJob {
   /**
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
@@ -13,7 +13,7 @@ export class FetchIPTVMetadataJob extends BaseJob {
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider singleton instance
    */
   constructor(cache, data, providers, tmdbProvider) {
-    super('FetchIPTVMetadataJob', cache, data, providers, tmdbProvider);
+    super('ProcessProvidersTitlesJob', cache, data, providers, tmdbProvider);
   }
 
   /**

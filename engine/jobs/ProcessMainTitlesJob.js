@@ -29,6 +29,9 @@ export class ProcessMainTitlesJob extends BaseJob {
     // Generate main titles from provider titles with TMDB IDs
     const result = await this.generateMainTitles();
 
+    // Enrich similar titles for all main titles
+    await this.enrichSimilarTitles();
+
     return result;
   }
 
@@ -379,6 +382,177 @@ export class ProcessMainTitlesJob extends BaseJob {
       this.logger.error(`Error saving main ${type} titles: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Enrich main titles with similar titles
+   * Fetches similar titles from TMDB API, filters to only include titles available in main titles,
+   * and stores the filtered title_ids under the 'similar' property as an array
+   * @returns {Promise<void>}
+   */
+  async enrichSimilarTitles() {
+    this.logger.info('Starting similar titles enrichment process...');
+    const batchSize = this.tmdbProvider.getRecommendedBatchSize();
+
+    // Process movies and TV shows separately
+    await Promise.all([
+      this._enrichSimilarTitlesForType('movies', batchSize),
+      this._enrichSimilarTitlesForType('tvshows', batchSize)
+    ]);
+
+    this.logger.info('Similar titles enrichment completed');
+  }
+
+  /**
+   * Enrich similar titles for a specific type (movies or tvshows)
+   * @private
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @param {number} batchSize - Batch size for processing
+   * @returns {Promise<void>}
+   */
+  async _enrichSimilarTitlesForType(type, batchSize) {
+    // Load all main titles for this type
+    const mainTitles = this.data.get('main', `${type}.json`) || [];
+    
+    if (mainTitles.length === 0) {
+      this.logger.info(`No ${type} main titles found for similar titles enrichment`);
+      return;
+    }
+
+    // Create a Set of available title_ids for fast lookup
+    const availableTitleIds = new Set(mainTitles.map(t => t.title_id));
+    
+    this.logger.info(`Enriching similar titles for ${mainTitles.length} main ${type} titles...`);
+
+    const tmdbType = type === 'movies' ? 'movie' : 'tv';
+    const updatedTitles = [];
+    let processedCount = 0;
+
+    // Load existing main titles to preserve other properties
+    const existingMainTitles = this.data.get('main', `${type}.json`) || [];
+    const existingMainTitleMap = new Map(
+      existingMainTitles.map(t => [t.title_id, t])
+    );
+
+    // Save callback for progress tracking
+    const saveCallback = async () => {
+      if (updatedTitles.length > 0) {
+        try {
+          await this._saveMainTitles(type, updatedTitles, existingMainTitleMap);
+          this.logger.debug(`Saved ${updatedTitles.length} accumulated ${type} titles with similar titles via progress callback`);
+          updatedTitles.length = 0; // Clear after saving
+        } catch (error) {
+          this.logger.error(`Error saving accumulated ${type} titles: ${error.message}`);
+        }
+      }
+    };
+
+    // Register for progress tracking
+    const progressKey = `similar_${type}`;
+    let totalRemaining = mainTitles.length;
+    this.tmdbProvider.registerProgress(progressKey, totalRemaining, saveCallback);
+
+    try {
+      // Process in batches
+      for (let i = 0; i < mainTitles.length; i += batchSize) {
+        const batch = mainTitles.slice(i, i + batchSize);
+
+        await Promise.all(batch.map(async (mainTitle) => {
+          try {
+            const similarTitleIds = await this._fetchSimilarTitleIds(
+              tmdbType,
+              mainTitle.title_id,
+              availableTitleIds
+            );
+
+            // Create updated title with similar titles
+            const updatedTitle = {
+              ...existingMainTitleMap.get(mainTitle.title_id) || mainTitle,
+              similar: similarTitleIds
+            };
+
+            updatedTitles.push(updatedTitle);
+            processedCount++;
+          } catch (error) {
+            this.logger.error(`Error enriching similar titles for ${type} ID ${mainTitle.title_id}: ${error.message}`);
+            // Still add the title without similar titles to preserve it
+            const existingTitle = existingMainTitleMap.get(mainTitle.title_id) || mainTitle;
+            if (!existingTitle.similar) {
+              existingTitle.similar = [];
+            }
+            updatedTitles.push(existingTitle);
+          }
+        }));
+
+        totalRemaining = mainTitles.length - processedCount;
+        this.tmdbProvider.updateProgress(progressKey, totalRemaining);
+
+        // Log progress
+        if ((i + batchSize) % 100 === 0 || i + batchSize >= mainTitles.length) {
+          this.logger.debug(
+            `Progress: ${Math.min(i + batchSize, mainTitles.length)}/${mainTitles.length} ` +
+            `${type} titles processed for similar titles enrichment`
+          );
+        }
+      }
+    } finally {
+      // Save any remaining accumulated titles
+      await saveCallback();
+      
+      // Unregister from progress tracking
+      this.tmdbProvider.unregisterProgress(progressKey);
+    }
+
+    // Final save to ensure all titles are saved
+    if (updatedTitles.length > 0) {
+      await this._saveMainTitles(type, updatedTitles, existingMainTitleMap);
+    }
+
+    this.logger.info(`Similar titles enrichment completed for ${processedCount} ${type} titles`);
+  }
+
+  /**
+   * Fetch all similar title IDs for a given TMDB ID, handling pagination
+   * Only returns title_ids that exist in the available titles set
+   * Limited to a maximum of 10 pages
+   * @private
+   * @param {string} tmdbType - TMDB type ('movie' or 'tv')
+   * @param {number} tmdbId - TMDB ID
+   * @param {Set<number>} availableTitleIds - Set of available title IDs from main titles
+   * @returns {Promise<Array<number>>} Array of similar title IDs that exist in main titles
+   */
+  async _fetchSimilarTitleIds(tmdbType, tmdbId, availableTitleIds) {
+    const similarTitleIds = [];
+    let page = 1;
+    const maxPages = 10; // Limit to 10 pages
+    let hasMorePages = true;
+
+    while (hasMorePages && page <= maxPages) {
+      try {
+        const response = await this.tmdbProvider.getSimilar(tmdbType, tmdbId, page);
+        
+        if (!response || !response.results) {
+          break;
+        }
+
+        // Filter results to only include titles that exist in main titles
+        const filteredIds = response.results
+          .map(result => result.id)
+          .filter(id => availableTitleIds.has(id));
+
+        similarTitleIds.push(...filteredIds);
+
+        // Check if there are more pages (but respect maxPages limit)
+        const totalPages = response.total_pages || 1;
+        hasMorePages = page < totalPages && page < maxPages;
+        page++;
+      } catch (error) {
+        this.logger.error(`Error fetching similar titles page ${page} for ${tmdbType} ID ${tmdbId}: ${error.message}`);
+        break;
+      }
+    }
+
+    return similarTitleIds;
   }
 }
 
