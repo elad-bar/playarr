@@ -50,6 +50,19 @@ async function main() {
             dataDir: DATA_DIR
           }
         }
+      },
+      {
+        name: 'cachePurge',
+        path: 'cachePurge.js',
+        interval: '15m', // Every 15 minutes
+        timeout: 0, // Run immediately on startup
+        closeWorkerAfterMs: 0, // Keep worker alive - prevents parallel execution
+        worker: {
+          workerData: {
+            cacheDir: CACHE_DIR,
+            dataDir: DATA_DIR
+          }
+        }
       }
     ]
   });
@@ -91,6 +104,7 @@ async function main() {
     logger.info('Job scheduler started. Jobs will run according to schedule.');
     logger.info('- fetchIPTVMetadata: On startup and every 1 hour');
     logger.info('- processMainTitles: First run in 5 minutes, then every 30 minutes');
+    logger.info('- cachePurge: On startup and every 15 minutes');
     
     // Keep the process running
     process.on('SIGINT', async () => {

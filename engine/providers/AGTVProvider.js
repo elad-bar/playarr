@@ -234,17 +234,15 @@ export class AGTVProvider extends BaseIPTVProvider {
    * @private
    * @param {string} url - URL to fetch
    * @param {string[]} cacheKeyParts - Cache key parts for storing/retrieving
-   * @param {number} [maxAgeHours=24] - Maximum cache age in hours
+   * @param {number|null} [maxAgeHours=6] - Maximum cache age in hours (default 6h for M3U8)
    * @returns {Promise<string>} M3U8 content as string
    */
-  async _fetchM3U8WithCache(url, cacheKeyParts, maxAgeHours = 24) {
-    // Check cache first
-    if (this.cache.isValid(maxAgeHours, ...cacheKeyParts)) {
-      const cached = this.cache.getText(...cacheKeyParts);
-      if (cached) {
-        this.logger.debug(`Loading M3U8 from cache: ${cacheKeyParts.join('/')}`);
-        return cached;
-      }
+  async _fetchM3U8WithCache(url, cacheKeyParts, maxAgeHours = 6) {
+    // Check cache first (if file exists, it's valid - purge job handles expiration)
+    const cached = this.cache.getText(...cacheKeyParts);
+    if (cached) {
+      this.logger.debug(`Loading M3U8 from cache: ${cacheKeyParts.join('/')}`);
+      return cached;
     }
 
     // Fetch from API with rate limiting
@@ -254,9 +252,11 @@ export class AGTVProvider extends BaseIPTVProvider {
       timeout: 30000,
     }));
 
-    // Cache the response
+    // Cache the response with TTL
     if (cacheKeyParts.length > 0) {
-      this.cache.setText(response.data, ...cacheKeyParts);
+      // Convert Infinity to null for JSON storage
+      const ttl = maxAgeHours === Infinity ? null : maxAgeHours;
+      this.cache.setText(response.data, ttl, ...cacheKeyParts);
     }
 
     return response.data;

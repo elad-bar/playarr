@@ -199,19 +199,24 @@ export class BaseProvider {
 
   /**
    * Fetch data from API with caching support
-   * Checks cache first, then fetches from API if cache is invalid or forceRefresh is true
+   * Checks cache first (file existence), then fetches from API if cache doesn't exist or forceRefresh is true
+   * Cache expiration is handled by CachePurgeJob based on cache-policy.json
    * @param {string} url - API URL to fetch from
    * @param {string[]} cacheKeyParts - Cache key parts array (e.g., [providerId, 'metadata', 'movies.json'])
-   * @param {number} [maxAgeHours=1] - Maximum age in hours before cache is considered invalid
-   * @param {boolean} [forceRefresh=false] - Force refresh even if cache is valid
+   * @param {number|null} [ttlHours=1] - TTL in hours (null for Infinity). Used to update cache policy.
+   * @param {boolean} [forceRefresh=false] - Force refresh even if cache exists
    * @param {Object} [options] - Additional axios options (headers, etc.)
    * @returns {Promise<Object>} API response data
    */
-  async fetchWithCache(url, cacheKeyParts, maxAgeHours = 1, forceRefresh = false, options = {}) {
-    if (!forceRefresh && cacheKeyParts.length > 0 && this.cache.isValid(maxAgeHours, ...cacheKeyParts)) {
-      this.logger.debug(`Loading from cache: ${cacheKeyParts.join('/')}`);
+  async fetchWithCache(url, cacheKeyParts, ttlHours = 1, forceRefresh = false, options = {}) {
+    // Convert Infinity to null for JSON storage
+    const ttl = ttlHours === Infinity ? null : ttlHours;
+
+    // Check cache first (if file exists, it's valid - purge job handles expiration)
+    if (!forceRefresh && cacheKeyParts.length > 0) {
       const cached = this.cache.get(...cacheKeyParts);
       if (cached) {
+        this.logger.debug(`Loading from cache: ${cacheKeyParts.join('/')}`);
         return cached;
       }
     }
@@ -221,7 +226,8 @@ export class BaseProvider {
     const response = await this.limiter.schedule(() => axios.get(url, options));
     
     if (cacheKeyParts.length > 0) {
-      this.cache.set(response.data, ...cacheKeyParts);
+      // Pass TTL to cache.set() to update policy file
+      this.cache.set(response.data, ttl, ...cacheKeyParts);
     }
 
     return response.data;

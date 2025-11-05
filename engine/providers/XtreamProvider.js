@@ -493,10 +493,13 @@ export class XtreamProvider extends BaseIPTVProvider {
 
       this.logger.debug(`${type}: Fetching extended info for title ${titleId}`);
 
+      // Use different TTL for movies (Infinity) vs tvshows (6h)
+      const ttlHours = type === 'movies' ? null : 6;
+      
       const fullResponseData = await this.fetchWithCache(
         extendedUrl,
         [this.providerId, 'extended', type, `${titleId}.json`],
-        24
+        ttlHours
       );
 
       if (config.parseExtendedInfo) {

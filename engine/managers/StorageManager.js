@@ -1,6 +1,10 @@
 import fs from 'fs-extra';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { createLogger } from '../utils/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Storage manager for storing and retrieving cached data
@@ -15,6 +19,7 @@ export class StorageManager {
     this.storageDir = storageDir;
     this.wrapData = wrapData;
     this.logger = createLogger('StorageManager');
+    this.cachePolicyPath = path.join(__dirname, '../../configurations/cache-policy.json');
   }
 
   /**
@@ -42,6 +47,72 @@ export class StorageManager {
     
     // Return full file path - lastPart is already filename with extension
     return path.join(dir, fileName);
+  }
+
+  /**
+   * Build cache policy key from keyParts (excluding filename)
+   * @private
+   * @param {...string} keyParts - Cache key parts
+   * @returns {string} Policy key (e.g., "tmdb/search/movie")
+   */
+  _buildPolicyKey(...keyParts) {
+    if (keyParts.length === 0) {
+      throw new Error('At least one key part is required');
+    }
+
+    // Exclude filename (last part) and join remaining parts with '/'
+    const directoryParts = keyParts.slice(0, -1);
+    return directoryParts.join('/');
+  }
+
+  /**
+   * Load cache policy file
+   * @private
+   * @returns {Object} Cache policy object
+   */
+  _loadCachePolicy() {
+    try {
+      if (fs.existsSync(this.cachePolicyPath)) {
+        return fs.readJsonSync(this.cachePolicyPath);
+      }
+      return {};
+    } catch (error) {
+      this.logger.error(`Error loading cache policy: ${error.message}`);
+      return {};
+    }
+  }
+
+  /**
+   * Update cache policy file with new TTL value
+   * @private
+   * @param {string} policyKey - Policy key (e.g., "tmdb/search/movie")
+   * @param {number|null} ttlHours - TTL in hours (null for Infinity)
+   */
+  _updateCachePolicy(policyKey, ttlHours) {
+    try {
+      const policy = this._loadCachePolicy();
+      
+      // Only update if key doesn't exist or value changed
+      if (!policy.hasOwnProperty(policyKey) || policy[policyKey] !== ttlHours) {
+        policy[policyKey] = ttlHours;
+        fs.writeJsonSync(this.cachePolicyPath, policy, { spaces: 2 });
+        this.logger.debug(`Updated cache policy: ${policyKey} = ${ttlHours === null ? 'Infinity' : `${ttlHours}h`}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error updating cache policy: ${error.message}`);
+      // Don't throw - policy update failure shouldn't break caching
+    }
+  }
+
+  /**
+   * Get TTL value for a cache key from policy
+   * @param {...string} keyParts - Cache key parts
+   * @returns {number|null} TTL in hours (null for Infinity), or null if not found
+   */
+  getCacheTTL(...keyParts) {
+    const policyKey = this._buildPolicyKey(...keyParts);
+    const policy = this._loadCachePolicy();
+    return policy[policyKey] ?? null;
   }
 
   /**
@@ -97,10 +168,18 @@ export class StorageManager {
   /**
    * Set data in cache
    * @param {*} data - Data to cache
+   * @param {number|null} [ttlHours] - TTL in hours (null for Infinity). If not provided, will use policy or default.
    * @param {...string} keyParts - Cache key parts (providerId is optional)
    * @throws {Error} If cache save fails
    */
-  set(data, ...keyParts) {
+  set(data, ttlHours, ...keyParts) {
+    // Handle case where ttlHours is not provided (backward compatibility)
+    if (typeof ttlHours !== 'number' && ttlHours !== null) {
+      // ttlHours is actually the first keyPart
+      keyParts = [ttlHours, ...keyParts];
+      ttlHours = undefined;
+    }
+
     if (keyParts.length === 0) {
       throw new Error('At least one key part is required');
     }
@@ -119,6 +198,12 @@ export class StorageManager {
           }
         };
         fs.writeJsonSync(cachePath, cacheData, { spaces: 2 });
+      }
+
+      // Update cache policy if TTL is provided
+      if (ttlHours !== undefined) {
+        const policyKey = this._buildPolicyKey(...keyParts);
+        this._updateCachePolicy(policyKey, ttlHours);
       }
     } catch (error) {
       this.logger.error(`Error saving cache: ${error.message}`);
@@ -148,13 +233,27 @@ export class StorageManager {
   /**
    * Save raw text data (like M3U8) to cache
    * @param {string} textData - Text data to cache
+   * @param {number|null} [ttlHours] - TTL in hours (null for Infinity). If not provided, will use policy or default.
    * @param {...string} keyParts - Cache key parts (last part should be 'filename.ext' format, e.g., 'movies.m3u8')
    * @throws {Error} If cache save fails
    */
-  setText(textData, ...keyParts) {
+  setText(textData, ttlHours, ...keyParts) {
+    // Handle case where ttlHours is not provided (backward compatibility)
+    if (typeof ttlHours !== 'number' && ttlHours !== null) {
+      // ttlHours is actually the first keyPart
+      keyParts = [ttlHours, ...keyParts];
+      ttlHours = undefined;
+    }
+
     try {
       const cachePath = this._buildPath(...keyParts);
       fs.writeFileSync(cachePath, textData, 'utf8');
+
+      // Update cache policy if TTL is provided
+      if (ttlHours !== undefined) {
+        const policyKey = this._buildPolicyKey(...keyParts);
+        this._updateCachePolicy(policyKey, ttlHours);
+      }
     } catch (error) {
       this.logger.error(`Error saving text cache: ${error.message}`);
       throw error;

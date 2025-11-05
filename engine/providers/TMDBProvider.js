@@ -111,7 +111,7 @@ export class TMDBProvider extends BaseProvider {
     return await this.fetchWithCache(
       url,
       ['tmdb', 'search', type, `${title}_${year || 'no-year'}.json`],
-      Infinity, // Cache forever
+      null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
     );
@@ -151,7 +151,7 @@ export class TMDBProvider extends BaseProvider {
     return await this.fetchWithCache(
       url,
       ['tmdb', 'find', 'imdb', `${imdbId}.json`],
-      Infinity, // Cache forever
+      null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
     );
@@ -196,7 +196,7 @@ export class TMDBProvider extends BaseProvider {
     return await this.fetchWithCache(
       url,
       ['tmdb', type, `${tmdbId}.json`],
-      Infinity, // Cache forever
+      null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
     );
@@ -232,7 +232,7 @@ export class TMDBProvider extends BaseProvider {
     return await this.fetchWithCache(
       url,
       ['tmdb', 'tv', `${tmdbId}`, 'season', `${seasonNumber}.json`],
-      24, // Cache for 24 hours
+      6, // Cache for 6 hours
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
     );
@@ -254,7 +254,7 @@ export class TMDBProvider extends BaseProvider {
     return await this.fetchWithCache(
       url,
       ['tmdb', type, String(tmdbId), 'similar.json'],
-      Infinity, // Cache forever
+      null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
     );
