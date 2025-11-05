@@ -1,5 +1,3 @@
-import { titlesService } from './titles.js';
-
 /**
  * M3U8 parameters that should be included in playlist entries
  * Matches Python's M3U8_PARAMETERS
@@ -12,12 +10,15 @@ const M3U8_PARAMETERS = [
 ];
 
 /**
- * Playlist service for handling M3U8 playlist generation
+ * Playlist manager for handling M3U8 playlist generation
  * Matches Python's PlaylistService
  */
-class PlaylistService {
-  constructor() {
-    // No initialization needed
+class PlaylistManager {
+  /**
+   * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
+   */
+  constructor(titlesManager) {
+    this._titlesManager = titlesManager;
   }
 
   /**
@@ -37,7 +38,7 @@ class PlaylistService {
       watchlistTitleKeys = await this._getTitlesInWatchlist(mediaType);
     }
 
-    const titlesData = await titlesService.getTitlesData();
+    const titlesData = await this._titlesManager.getTitlesData();
 
     for (const titleKey of watchlistTitleKeys) {
       const title = titlesData.get(titleKey);
@@ -94,7 +95,7 @@ class PlaylistService {
       watchlistTitleKeys = await this._getTitlesInWatchlist(mediaType);
     }
 
-    const titlesData = await titlesService.getTitlesData();
+    const titlesData = await this._titlesManager.getTitlesData();
 
     for (const titleKey of watchlistTitleKeys) {
       const title = titlesData.get(titleKey);
@@ -160,7 +161,7 @@ class PlaylistService {
    * Matches Python's TMDBProvider.get_titles_in_watchlist()
    */
   async _getTitlesInWatchlist(mediaType) {
-    const titlesData = await titlesService.getTitlesData();
+    const titlesData = await this._titlesManager.getTitlesData();
     const watchlistTitleKeys = [];
 
     for (const [titleKey, titleData] of titlesData.entries()) {
@@ -179,6 +180,6 @@ class PlaylistService {
   }
 }
 
-// Export singleton instance
-export const playlistService = new PlaylistService();
+// Export class
+export { PlaylistManager };
 

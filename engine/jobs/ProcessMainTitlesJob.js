@@ -450,11 +450,11 @@ export class ProcessMainTitlesJob extends BaseJob {
     // Combine all titles (other types + updated type)
     const allTitles = [...existingTitlesOtherTypes, ...updatedTitlesThisType];
 
-    // Sort by title_key for consistency
+    // Sort by title (alphabetically ascending) for consistency with web API
     allTitles.sort((a, b) => {
-      const keyA = a.title_key || generateTitleKey(a.type, a.title_id);
-      const keyB = b.title_key || generateTitleKey(b.type, b.title_id);
-      return keyA.localeCompare(keyB);
+      const titleA = (a.title || '').toLowerCase();
+      const titleB = (b.title || '').toLowerCase();
+      return titleA.localeCompare(titleB);
     });
 
     try {

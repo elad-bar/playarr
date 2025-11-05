@@ -2,6 +2,71 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axiosInstance from '../../config/axios';
 import { API_ENDPOINTS } from '../../config/api';
 
+// LocalStorage key for persisting filters and pagination
+const STORAGE_KEY = 'playarr_titles_preferences';
+
+// Load preferences from localStorage
+const loadPreferences = () => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (error) {
+    console.error('Error loading preferences from localStorage:', error);
+  }
+  return null;
+};
+
+// Save preferences to localStorage
+const savePreferences = (filters, pagination) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      filters,
+      pagination: {
+        per_page: pagination.per_page // Only save per_page, not page number
+      }
+    }));
+  } catch (error) {
+    console.error('Error saving preferences to localStorage:', error);
+  }
+};
+
+const defaultFilters = {
+  mediaType: '',
+  searchQuery: '',
+  yearFilter: '',
+  selectedLetter: '',
+  watchlistFilter: 'all',
+  sortBy: 'name',
+  sortOrder: 'asc'
+};
+
+const defaultPagination = {
+  page: 1,
+  per_page: 50,
+  total: 0,
+  total_pages: 0
+};
+
+// Load initial state from localStorage
+const preferences = loadPreferences();
+const initialState = {
+  titles: [],
+  selectedTitle: null,
+  watchlistStats: null,
+  loading: false,
+  error: null,
+  pagination: {
+    ...defaultPagination,
+    ...(preferences?.pagination || {})
+  },
+  filters: {
+    ...defaultFilters,
+    ...(preferences?.filters || {})
+  }
+};
+
 // Async thunks for titles operations
 export const fetchTitles = createAsyncThunk(
   'titles/fetchTitles',
@@ -61,29 +126,6 @@ export const updateWatchlistBulk = createAsyncThunk(
   }
 );
 
-const initialState = {
-  titles: [],
-  selectedTitle: null,
-  watchlistStats: null,
-  loading: false,
-  error: null,
-  pagination: {
-    page: 1,
-    per_page: 50,
-    total: 0,
-    total_pages: 0
-  },
-  filters: {
-    mediaType: '',
-    searchQuery: '',
-    yearFilter: '',
-    selectedLetter: '',
-    watchlistFilter: 'all',
-    sortBy: 'name',
-    sortOrder: 'asc'
-  }
-};
-
 const titlesSlice = createSlice({
   name: 'titles',
   initialState,
@@ -99,16 +141,25 @@ const titlesSlice = createSlice({
       // Reset pagination when filters change
       state.pagination.page = 1;
       state.titles = [];
+      // Save to localStorage
+      savePreferences(state.filters, state.pagination);
     },
     clearFilters: (state) => {
-      state.filters = initialState.filters;
+      state.filters = defaultFilters;
       state.pagination.page = 1;
       state.titles = [];
+      // Save to localStorage
+      savePreferences(state.filters, state.pagination);
     },
     incrementPage: (state) => {
       if (state.pagination.page < state.pagination.total_pages) {
         state.pagination.page += 1;
       }
+    },
+    updatePagination: (state, action) => {
+      state.pagination = { ...state.pagination, ...action.payload };
+      // Save pagination preferences to localStorage
+      savePreferences(state.filters, state.pagination);
     }
   },
   extraReducers: (builder) => {
@@ -222,7 +273,8 @@ export const {
   clearSelectedTitle,
   updateFilters,
   clearFilters,
-  incrementPage
+  incrementPage,
+  updatePagination
 } = titlesSlice.actions;
 
 export default titlesSlice.reducer;

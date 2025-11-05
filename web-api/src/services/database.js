@@ -1,19 +1,20 @@
-import { getDatabase } from '../config/database.js';
 import { fromCollectionName, getCollectionKey } from '../config/collections.js';
 import { createLogger } from '../utils/logger.js';
-import fs from 'fs-extra';
-import path from 'path';
 
 const logger = createLogger('DatabaseService');
 
 /**
  * Database service for file-based storage
  * Provides MongoDB-like interface but uses JSON files
+ * Uses FileStorageService for file access (caching handled internally by FileStorageService)
  */
 class DatabaseService {
-  constructor() {
+  /**
+   * @param {FileStorageService} fileStorage - File storage service instance
+   */
+  constructor(fileStorage) {
     this._isStopping = false;
-    this._fileStorage = getDatabase();
+    this._fileStorage = fileStorage;
   }
 
   setStopping(value) {
@@ -25,7 +26,7 @@ class DatabaseService {
    * @private
    */
   _getCollectionPath(collectionName) {
-    return this._fileStorage._getCollectionPath(collectionName);
+    return this._fileStorage.getCollectionPath(collectionName);
   }
 
   /**
@@ -73,9 +74,20 @@ class DatabaseService {
       }
 
       const filePath = this._getCollectionPath(collectionName);
-      const items = await this._fileStorage._readJsonFile(filePath);
+      const items = await this._fileStorage.readJsonFile(filePath, collectionName);
 
-      // Find first matching item
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        // Find first matching item in Map
+        for (const item of items.values()) {
+          if (this._matchesQuery(item, query)) {
+            return item;
+          }
+        }
+        return null;
+      }
+
+      // Handle array return type (backward compatibility)
       for (const item of items) {
         if (this._matchesQuery(item, query)) {
           return item;
@@ -98,7 +110,21 @@ class DatabaseService {
       }
 
       const filePath = this._getCollectionPath(collectionName);
-      let items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      const isMap = items instanceof Map;
+      const hasOperations = (query && Object.keys(query).length > 0) || projection || sort;
+      
+      // If Map and no operations needed, return Map directly
+      if (isMap && !hasOperations) {
+        return items;
+      }
+
+      // Convert Map to array for query/projection/sort operations
+      if (isMap) {
+        items = Array.from(items.values());
+      }
 
       // Filter by query
       if (query && Object.keys(query).length > 0) {
@@ -159,7 +185,12 @@ class DatabaseService {
       const itemId = data[key];
 
       const filePath = this._getCollectionPath(collectionName);
-      const items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        items = Array.from(items.values());
+      }
 
       // Check if item already exists
       const exists = items.some(item => item[key] === itemId);
@@ -170,7 +201,7 @@ class DatabaseService {
 
       // Add new item
       items.push(data);
-      await this._fileStorage._writeJsonFile(filePath, items);
+      await this._fileStorage.writeJsonFile(filePath, items);
     } catch (error) {
       logger.error(`Error inserting data into collection ${collectionName}:`, error);
       throw error;
@@ -190,7 +221,12 @@ class DatabaseService {
       const key = getCollectionKey(collection);
 
       const filePath = this._getCollectionPath(collectionName);
-      const items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        items = Array.from(items.values());
+      }
 
       // Filter out duplicates
       const existingIds = new Set(items.map(item => item[key]));
@@ -198,7 +234,7 @@ class DatabaseService {
 
       if (newItems.length > 0) {
         items.push(...newItems);
-        await this._fileStorage._writeJsonFile(filePath, items);
+        await this._fileStorage.writeJsonFile(filePath, items);
       }
     } catch (error) {
       logger.error(`Error inserting data list into collection ${collectionName}:`, error);
@@ -219,7 +255,12 @@ class DatabaseService {
       const key = getCollectionKey(collection);
 
       const filePath = this._getCollectionPath(collectionName);
-      const items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        items = Array.from(items.values());
+      }
 
       // Find and update matching item
       let modified = 0;
@@ -238,7 +279,7 @@ class DatabaseService {
       }
 
       if (modified > 0) {
-        await this._fileStorage._writeJsonFile(filePath, items);
+        await this._fileStorage.writeJsonFile(filePath, items);
       }
 
       return modified;
@@ -258,7 +299,12 @@ class DatabaseService {
       }
 
       const filePath = this._getCollectionPath(collectionName);
-      const items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        items = Array.from(items.values());
+      }
 
       // Update all matching items
       let modified = false;
@@ -270,7 +316,7 @@ class DatabaseService {
       }
 
       if (modified) {
-        await this._fileStorage._writeJsonFile(filePath, items);
+        await this._fileStorage.writeJsonFile(filePath, items);
       }
     } catch (error) {
       logger.error(`Error updating data list in collection ${collectionName}:`, error);
@@ -288,13 +334,18 @@ class DatabaseService {
       }
 
       const filePath = this._getCollectionPath(collectionName);
-      const items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        items = Array.from(items.values());
+      }
 
       // Remove first matching item
       const index = items.findIndex(item => this._matchesQuery(item, query));
       if (index !== -1) {
         items.splice(index, 1);
-        await this._fileStorage._writeJsonFile(filePath, items);
+        await this._fileStorage.writeJsonFile(filePath, items);
       }
     } catch (error) {
       logger.error(`Error deleting data from collection ${collectionName}:`, error);
@@ -312,13 +363,18 @@ class DatabaseService {
       }
 
       const filePath = this._getCollectionPath(collectionName);
-      const items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        items = Array.from(items.values());
+      }
 
       // Remove all matching items
       const filtered = items.filter(item => !this._matchesQuery(item, query));
 
       if (filtered.length !== items.length) {
-        await this._fileStorage._writeJsonFile(filePath, filtered);
+        await this._fileStorage.writeJsonFile(filePath, filtered);
       }
     } catch (error) {
       logger.error(`Error deleting data list from collection ${collectionName}:`, error);
@@ -336,7 +392,12 @@ class DatabaseService {
       }
 
       const filePath = this._getCollectionPath(collectionName);
-      let items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        items = Array.from(items.values());
+      }
 
       // Filter by query
       if (query && Object.keys(query).length > 0) {
@@ -368,7 +429,12 @@ class DatabaseService {
       const key = getCollectionKey(collection);
 
       const filePath = this._getCollectionPath(collectionName);
-      let items = await this._fileStorage._readJsonFile(filePath);
+      let items = await this._fileStorage.readJsonFile(filePath, collectionName);
+
+      // Handle Map return type (when mapping is enabled)
+      if (items instanceof Map) {
+        items = Array.from(items.values());
+      }
 
       // Filter by query
       if (query && Object.keys(query).length > 0) {
@@ -384,6 +450,87 @@ class DatabaseService {
   }
 
   /**
+   * Read JSON file as array (for arbitrary file paths, not just collections)
+   * Uses FileStorageService for file access (caching handled internally)
+   * @param {string} filePath - Full file path
+   * @returns {Promise<Array>} Array of data
+   */
+  async readFile(filePath) {
+    try {
+      if (this._isStopping) {
+        return [];
+      }
+      return await this._fileStorage.readJsonFile(filePath);
+    } catch (error) {
+      logger.error(`Error reading file ${filePath}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Read JSON file as object (for arbitrary file paths, not just collections)
+   * Uses FileStorageService for file access (caching handled internally)
+   * @param {string} filePath - Full file path
+   * @returns {Promise<Object>} Object data
+   */
+  async readObject(filePath) {
+    try {
+      if (this._isStopping) {
+        return {};
+      }
+      return await this._fileStorage.readJsonObject(filePath);
+    } catch (error) {
+      logger.error(`Error reading file ${filePath}:`, error);
+      return {};
+    }
+  }
+
+  /**
+   * Write JSON file as array (for arbitrary file paths, not just collections)
+   * Uses FileStorageService for file access (caching handled internally)
+   * @param {string} filePath - Full file path
+   * @param {Array} data - Data to write
+   */
+  async writeFile(filePath, data) {
+    try {
+      if (this._isStopping) {
+        return;
+      }
+      await this._fileStorage.writeJsonFile(filePath, data);
+    } catch (error) {
+      logger.error(`Error writing file ${filePath}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Write JSON file as object (for arbitrary file paths, not just collections)
+   * Uses FileStorageService for file access (caching handled internally)
+   * @param {string} filePath - Full file path
+   * @param {Object} data - Data to write
+   */
+  async writeObject(filePath, data) {
+    try {
+      if (this._isStopping) {
+        return;
+      }
+      await this._fileStorage.writeJsonObject(filePath, data);
+    } catch (error) {
+      logger.error(`Error writing file ${filePath}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get file path helper (for building paths)
+   * @param {string} relativePath - Relative path from dataDir
+   * @returns {string} Full file path
+   */
+  getFilePath(relativePath) {
+    return this._fileStorage.getFilePath(relativePath);
+  }
+
+  /**
    * Create indices for users collection (no-op for file storage)
    * Indices are handled by application logic
    */
@@ -392,7 +539,16 @@ class DatabaseService {
     // Uniqueness is enforced by application logic
     return;
   }
+
+  /**
+   * Initialize database (ensure file storage is initialized)
+   */
+  async initialize() {
+    await this._fileStorage.initialize();
+    logger.info('Database service initialized');
+  }
 }
 
-// Export singleton instance
-export const databaseService = new DatabaseService();
+// Export class
+export { DatabaseService };
+

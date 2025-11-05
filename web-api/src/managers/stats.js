@@ -1,16 +1,18 @@
-import { databaseService } from './database.js';
-import { cacheService } from './cache.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
 import { createLogger } from '../utils/logger.js';
 
-const logger = createLogger('StatsService');
+const logger = createLogger('StatsManager');
 
 /**
- * Stats service for handling statistics data operations
+ * Stats manager for handling statistics data operations
  * Matches Python's StatsService format
  */
-class StatsService {
-  constructor() {
+class StatsManager {
+  /**
+   * @param {import('../services/database.js').DatabaseService} database - Database service instance
+   */
+  constructor(database) {
+    this._database = database;
     this._statsCollection = toCollectionName(DatabaseCollections.STATS);
   }
 
@@ -21,16 +23,7 @@ class StatsService {
    */
   async getStats() {
     try {
-      // Check cache first
-      const cachedStats = cacheService.getStats();
-      if (cachedStats) {
-        return {
-          response: cachedStats,
-          statusCode: 200,
-        };
-      }
-
-      // Load from database
+      // Load from database (database service handles caching internally)
       const stats = await this._getStats();
       
       if (stats === null) {
@@ -39,9 +32,6 @@ class StatsService {
           statusCode: 500,
         };
       }
-
-      // Cache the results
-      cacheService.setStats(stats);
 
       return {
         response: stats,
@@ -63,7 +53,7 @@ class StatsService {
    */
   async _getStats() {
     try {
-      const statsData = await databaseService.getDataList(this._statsCollection);
+      const statsData = await this._database.getDataList(this._statsCollection);
 
       if (!statsData || statsData.length === 0) {
         return { providers: [] };
@@ -115,6 +105,6 @@ class StatsService {
   }
 }
 
-// Export singleton instance
-export const statsService = new StatsService();
+// Export class
+export { StatsManager };
 

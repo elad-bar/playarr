@@ -6,11 +6,9 @@ import slugify from 'slugify';
 export const DatabaseCollections = {
   TITLES: 'titles',
   CATEGORIES: 'categories',
-  CACHE: 'cache',
   IPTV_PROVIDERS: 'iptv-providers',
   SETTINGS: 'settings',
   STATS: 'stats',
-  MEDIA_FILES: 'media-files',
   USERS: 'users',
 };
 
@@ -25,37 +23,15 @@ export const DataProvider = {
 };
 
 /**
- * Check if collection is watched (for change monitoring)
- */
-export function isWatchedCollection(collection) {
-  return [
-    DatabaseCollections.IPTV_PROVIDERS,
-    DatabaseCollections.SETTINGS,
-  ].includes(collection);
-}
-
-/**
- * Check if collection is provider-specific
- */
-export function isProviderCollection(collection) {
-  return [
-    DatabaseCollections.CATEGORIES,
-    DatabaseCollections.TITLES,
-  ].includes(collection);
-}
-
-/**
  * Get collection key field name
  */
 export function getCollectionKey(collection) {
   const keys = {
     [DatabaseCollections.CATEGORIES]: 'key',
-    [DatabaseCollections.CACHE]: 'key',
     [DatabaseCollections.TITLES]: 'key',
     [DatabaseCollections.IPTV_PROVIDERS]: 'id',
     [DatabaseCollections.SETTINGS]: 'key',
     [DatabaseCollections.STATS]: 'key',
-    [DatabaseCollections.MEDIA_FILES]: 'key',
     [DatabaseCollections.USERS]: 'username',
   };
   return keys[collection] || 'key';
@@ -85,8 +61,8 @@ export function toCollectionName(collection, providerName = null) {
     collectionName = `${providerName}.${collection}`;
   }
 
-  // Slugify the collection name
-  return slugify(collectionName, { lower: true, strict: true });
+  // Return collection name as-is - provider IDs are already slugified at creation
+  return collectionName;
 }
 
 /**

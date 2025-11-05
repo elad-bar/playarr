@@ -390,6 +390,7 @@ export class TMDBProvider extends BaseProvider {
         title: type === 'movies' ? apiData.title : apiData.name,
         release_date: type === 'movies' ? apiData.release_date : apiData.first_air_date,
         vote_average: apiData.vote_average || null,
+        vote_count: apiData.vote_count || null,
         overview: apiData.overview || null,
         poster_path: apiData.poster_path || null,
         genres: apiData.genres || [],

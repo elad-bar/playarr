@@ -1,42 +1,26 @@
 import { DatabaseCollections, DataProvider } from '../config/collections.js';
-import { webSocketService } from './websocket.js';
+import { toCollectionName } from '../config/collections.js';
 import { createLogger } from '../utils/logger.js';
-import fs from 'fs-extra';
-import path from 'path';
+import slugify from 'slugify';
 import dotenv from 'dotenv';
-import { DATA_DIR } from '../config/database.js';
 
 dotenv.config();
 
-const PROVIDERS_FILE = path.join(DATA_DIR, 'settings', 'iptv-providers.json');
-
-const logger = createLogger('ProvidersService');
+const logger = createLogger('ProvidersManager');
 
 /**
- * Providers service for handling IPTV provider operations
- * Reads/writes from data/settings/iptv-providers.json (single file with array of providers)
+ * Providers manager for handling IPTV provider operations
+ * Uses DatabaseService collection-based methods for all data access
  */
-class ProvidersService {
-  constructor() {
-    this._providersFile = PROVIDERS_FILE;
-    this._ensureProvidersFile();
-  }
-
+class ProvidersManager {
   /**
-   * Ensure providers file and directory exist
-   * @private
+   * @param {import('../services/database.js').DatabaseService} database - Database service instance
+   * @param {import('../services/websocket.js').WebSocketService} webSocketService - WebSocket service instance
    */
-  _ensureProvidersFile() {
-    try {
-      fs.ensureDirSync(path.dirname(this._providersFile));
-      // Create empty array file if it doesn't exist
-      if (!fs.pathExistsSync(this._providersFile)) {
-        fs.writeJsonSync(this._providersFile, [], { spaces: 2 });
-      }
-    } catch (error) {
-      logger.error('Error ensuring providers file:', error);
-      throw error;
-    }
+  constructor(database, webSocketService) {
+    this._database = database;
+    this._webSocketService = webSocketService;
+    this._providersCollection = toCollectionName(DatabaseCollections.IPTV_PROVIDERS);
   }
 
   /**
@@ -66,17 +50,14 @@ class ProvidersService {
   }
 
   /**
-   * Read all providers from file
+   * Read all providers from collection
+   * Uses DatabaseService collection-based methods
    * @private
    */
   async _readAllProviders() {
     try {
-      await this._ensureProvidersFile();
-      if (await fs.pathExists(this._providersFile)) {
-        const providers = await fs.readJson(this._providersFile);
-        return Array.isArray(providers) ? providers : [];
-      }
-      return [];
+      const providers = await this._database.getDataList(this._providersCollection);
+      return Array.isArray(providers) ? providers : [];
     } catch (error) {
       logger.error('Error reading providers:', error);
       return [];
@@ -84,15 +65,24 @@ class ProvidersService {
   }
 
   /**
-   * Write all providers to file
+   * Write all providers to collection
+   * Uses DatabaseService collection-based methods
    * @private
    */
   async _writeAllProviders(providers) {
-    await this._ensureProvidersFile();
-    // Write to temp file first, then rename (atomic operation)
-    const tempPath = `${this._providersFile}.tmp`;
-    await fs.writeJson(tempPath, providers, { spaces: 2 });
-    await fs.move(tempPath, this._providersFile, { overwrite: true });
+    // Delete all existing providers and insert new ones
+    // This is a simple approach - in production, you might want to update individual items
+    const existingProviders = await this._database.getDataList(this._providersCollection);
+    
+    // Delete all existing
+    for (const provider of existingProviders) {
+      await this._database.deleteData(this._providersCollection, { id: provider.id });
+    }
+    
+    // Insert all new
+    if (providers.length > 0) {
+      await this._database.insertDataList(this._providersCollection, providers);
+    }
   }
 
   /**
@@ -168,11 +158,12 @@ class ProvidersService {
           statusCode: 400,
         };
       }
-      providerData.id = providedId;
+      // Slugify provider ID once at creation - use consistently everywhere after
+      providerData.id = slugify(providedId, { lower: true, strict: true });
 
       // Check if provider already exists
       const providers = await this._readAllProviders();
-      if (providers.some(p => p.id === providedId)) {
+      if (providers.some(p => p.id === providerData.id)) {
         return {
           response: { error: 'Provider with this id already exists' },
           statusCode: 409,
@@ -200,7 +191,7 @@ class ProvidersService {
       await this._writeAllProviders(providers);
 
       // Broadcast WebSocket event
-      webSocketService.broadcastEvent('provider_changed', {
+      this._webSocketService.broadcastEvent('provider_changed', {
         provider_id: providerData.id,
         action: 'created'
       });
@@ -251,7 +242,7 @@ class ProvidersService {
       await this._writeAllProviders(providers);
 
       // Broadcast WebSocket event
-      webSocketService.broadcastEvent('provider_changed', {
+      this._webSocketService.broadcastEvent('provider_changed', {
         provider_id: providerId,
         action: 'updated'
       });
@@ -290,7 +281,7 @@ class ProvidersService {
       await this._writeAllProviders(providers);
 
       // Broadcast WebSocket event
-      webSocketService.broadcastEvent('provider_changed', {
+      this._webSocketService.broadcastEvent('provider_changed', {
         provider_id: providerId,
         action: 'deleted'
       });
@@ -348,7 +339,7 @@ class ProvidersService {
       await this._writeAllProviders(allProviders);
 
       // Broadcast WebSocket event
-      webSocketService.broadcastEvent('provider_changed', {
+      this._webSocketService.broadcastEvent('provider_changed', {
         provider_id: 'all',
         action: 'updated'
       });
@@ -367,5 +358,5 @@ class ProvidersService {
   }
 }
 
-// Export singleton instance
-export const providersService = new ProvidersService();
+// Export class
+export { ProvidersManager };

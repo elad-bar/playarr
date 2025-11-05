@@ -1,114 +1,55 @@
 /**
- * Cache service for in-memory caching of frequently accessed data
- * Used for titles, categories, and stats
+ * Generic in-memory cache service
+ * Provides key-value caching for any data type
  */
 class CacheService {
   constructor() {
-    this._titlesCache = null;
-    this._categoriesCache = {}; // provider -> categories
-    this._statsCache = null;
-    this._cacheTimestamps = {
-      titles: null,
-      categories: {},
-      stats: null,
-    };
+    this._cache = new Map(); // key -> value
   }
 
   /**
-   * Get cached titles
+   * Get cached value by key
+   * @param {string} key - Cache key
+   * @returns {*} Cached value or undefined if not found
    */
-  getTitles() {
-    return this._titlesCache;
+  get(key) {
+    return this._cache.get(key);
   }
 
   /**
-   * Set titles cache
+   * Set cached value by key
+   * @param {string} key - Cache key
+   * @param {*} value - Value to cache
    */
-  setTitles(titles) {
-    this._titlesCache = titles;
-    this._cacheTimestamps.titles = Date.now();
+  set(key, value) {
+    this._cache.set(key, value);
   }
 
   /**
-   * Clear titles cache
+   * Delete cached value by key
+   * @param {string} key - Cache key
+   * @returns {boolean} True if key existed and was deleted, false otherwise
    */
-  clearTitles() {
-    this._titlesCache = null;
-    this._cacheTimestamps.titles = null;
+  delete(key) {
+    return this._cache.delete(key);
   }
 
   /**
-   * Get cached categories for provider
+   * Check if key exists in cache
+   * @param {string} key - Cache key
+   * @returns {boolean} True if key exists, false otherwise
    */
-  getCategories(providerId) {
-    return this._categoriesCache[providerId] || null;
+  has(key) {
+    return this._cache.has(key);
   }
 
   /**
-   * Set categories cache for provider
+   * Clear all cache entries
    */
-  setCategories(providerId, categories) {
-    this._categoriesCache[providerId] = categories;
-    this._cacheTimestamps.categories[providerId] = Date.now();
-  }
-
-  /**
-   * Clear categories cache for provider
-   */
-  clearCategories(providerId) {
-    if (providerId) {
-      delete this._categoriesCache[providerId];
-      delete this._cacheTimestamps.categories[providerId];
-    } else {
-      // Clear all categories
-      this._categoriesCache = {};
-      this._cacheTimestamps.categories = {};
-    }
-  }
-
-  /**
-   * Get cached stats
-   */
-  getStats() {
-    return this._statsCache;
-  }
-
-  /**
-   * Set stats cache
-   */
-  setStats(stats) {
-    this._statsCache = stats;
-    this._cacheTimestamps.stats = Date.now();
-  }
-
-  /**
-   * Clear stats cache
-   */
-  clearStats() {
-    this._statsCache = null;
-    this._cacheTimestamps.stats = null;
-  }
-
-  /**
-   * Clear all caches
-   */
-  clearAll() {
-    this.clearTitles();
-    this.clearCategories();
-    this.clearStats();
-  }
-
-  /**
-   * Get cache timestamp for entity
-   */
-  getCacheTimestamp(entity, providerId = null) {
-    if (entity === 'categories' && providerId) {
-      return this._cacheTimestamps.categories[providerId] || null;
-    }
-    return this._cacheTimestamps[entity] || null;
+  clear() {
+    this._cache.clear();
   }
 }
 
-// Export singleton instance
-export const cacheService = new CacheService();
-
+// Export class only
+export { CacheService };

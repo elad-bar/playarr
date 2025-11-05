@@ -1,8 +1,6 @@
-import { settingsService } from './settings.js';
-import { DatabaseCollections } from '../config/collections.js';
 import { createLogger } from '../utils/logger.js';
 
-const logger = createLogger('TMDBService');
+const logger = createLogger('TMDBManager');
 
 const TMDB_API_URL = 'https://api.themoviedb.org/3';
 const TMDB_AUTH_URL = `${TMDB_API_URL}/authentication`;
@@ -10,11 +8,15 @@ const TMDB_TOKEN_KEY = 'tmdb_token';
 const API_REQUEST_TIMEOUT = 5000; // 5 seconds
 
 /**
- * TMDB service for handling TMDB API operations
+ * TMDB manager for handling TMDB API operations
  * Matches Python's TMDB services
  */
-class TMDBService {
-  constructor() {
+class TMDBManager {
+  /**
+   * @param {import('./settings.js').SettingsManager} settingsManager - Settings manager instance
+   */
+  constructor(settingsManager) {
+    this._settingsManager = settingsManager;
     this._tmdbTokenKey = TMDB_TOKEN_KEY;
   }
 
@@ -24,7 +26,7 @@ class TMDBService {
    */
   async getApiKey() {
     try {
-      const result = await settingsService.getSetting(this._tmdbTokenKey);
+      const result = await this._settingsManager.getSetting(this._tmdbTokenKey);
       
       if (result.statusCode !== 200) {
         return {
@@ -52,7 +54,7 @@ class TMDBService {
    */
   async setApiKey(apiKey) {
     try {
-      const result = await settingsService.setSetting(this._tmdbTokenKey, apiKey);
+      const result = await this._settingsManager.setSetting(this._tmdbTokenKey, apiKey);
       
       if (result.statusCode !== 200) {
         return result;
@@ -77,7 +79,7 @@ class TMDBService {
    */
   async deleteApiKey() {
     try {
-      const result = await settingsService.deleteSetting(this._tmdbTokenKey);
+      const result = await this._settingsManager.deleteSetting(this._tmdbTokenKey);
       
       if (result.statusCode !== 200) {
         return result;
@@ -397,6 +399,6 @@ class TMDBService {
   }
 }
 
-// Export singleton instance
-export const tmdbService = new TMDBService();
+// Export class
+export { TMDBManager };
 

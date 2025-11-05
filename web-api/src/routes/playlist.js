@@ -1,8 +1,5 @@
 import express from 'express';
-import { playlistService } from '../services/playlist.js';
 import { requireApiKey } from '../middleware/apiKey.js';
-
-const router = express.Router();
 
 /**
  * Get the base URL from the request, respecting X-Forwarded-* headers
@@ -41,53 +38,72 @@ function getBaseUrl(req) {
 }
 
 /**
- * GET /api/playlist/:title_type
- * Get M3U8 playlist for movies or tvshows (requires API key)
+ * Playlist router for handling playlist endpoints
  */
-router.get('/:title_type', requireApiKey, async (req, res) => {
-  try {
-    const { title_type } = req.params;
-
-    if (!['movies', 'tvshows'].includes(title_type)) {
-      return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'tvshows'" });
-    }
-
-    const baseUrl = getBaseUrl(req);
-    const user = req.user; // Set by requireApiKey middleware
-
-    const m3uContent = await playlistService.getM3u8Streams(baseUrl, title_type, user);
-
-    res.setHeader('Content-Type', 'text/plain');
-    return res.send(m3uContent);
-  } catch (error) {
-    console.error('Get M3U8 playlist error:', error);
-    return res.status(500).json({ error: 'Failed to get playlist' });
+class PlaylistRouter {
+  /**
+   * @param {PlaylistManager} playlistManager - Playlist manager instance
+   */
+  constructor(playlistManager) {
+    this._playlistManager = playlistManager;
+    this.router = express.Router();
+    this._setupRoutes();
   }
-});
 
-/**
- * GET /api/playlist/:title_type/data
- * Get media files mapping for movies or tvshows (requires API key)
- */
-router.get('/:title_type/data', requireApiKey, async (req, res) => {
-  try {
-    const { title_type } = req.params;
+  /**
+   * Setup all routes for this router
+   * @private
+   */
+  _setupRoutes() {
+    /**
+     * GET /api/playlist/:title_type
+     * Get M3U8 playlist for movies or tvshows (requires API key)
+     */
+    this.router.get('/:title_type', requireApiKey, async (req, res) => {
+      try {
+        const { title_type } = req.params;
 
-    if (!['movies', 'tvshows'].includes(title_type)) {
-      return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'tvshows'" });
-    }
+        if (!['movies', 'tvshows'].includes(title_type)) {
+          return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'tvshows'" });
+        }
 
-    const baseUrl = getBaseUrl(req);
-    const user = req.user; // Set by requireApiKey middleware
+        const baseUrl = getBaseUrl(req);
+        const user = req.user; // Set by requireApiKey middleware
 
-    const mediaFiles = await playlistService.getMediaFilesMapping(baseUrl, title_type, user);
+        const m3uContent = await this._playlistManager.getM3u8Streams(baseUrl, title_type, user);
 
-    return res.status(200).json(mediaFiles);
-  } catch (error) {
-    console.error('Get media files mapping error:', error);
-    return res.status(500).json({ error: 'Failed to get media files mapping' });
+        res.setHeader('Content-Type', 'text/plain');
+        return res.send(m3uContent);
+      } catch (error) {
+        console.error('Get M3U8 playlist error:', error);
+        return res.status(500).json({ error: 'Failed to get playlist' });
+      }
+    });
+
+    /**
+     * GET /api/playlist/:title_type/data
+     * Get media files mapping for movies or tvshows (requires API key)
+     */
+    this.router.get('/:title_type/data', requireApiKey, async (req, res) => {
+      try {
+        const { title_type } = req.params;
+
+        if (!['movies', 'tvshows'].includes(title_type)) {
+          return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'tvshows'" });
+        }
+
+        const baseUrl = getBaseUrl(req);
+        const user = req.user; // Set by requireApiKey middleware
+
+        const mediaFiles = await this._playlistManager.getMediaFilesMapping(baseUrl, title_type, user);
+
+        return res.status(200).json(mediaFiles);
+      } catch (error) {
+        console.error('Get media files mapping error:', error);
+        return res.status(500).json({ error: 'Failed to get media files mapping' });
+      }
+    });
   }
-});
+}
 
-export default router;
-
+export default PlaylistRouter;

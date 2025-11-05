@@ -1,81 +1,41 @@
-import { databaseService } from './database.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { createJWTToken } from '../utils/jwt.js';
 import { createLogger } from '../utils/logger.js';
 import crypto from 'crypto';
 
-const logger = createLogger('UserService');
+const logger = createLogger('UserManager');
 
 /**
- * User service for handling user operations
+ * User manager for handling user operations
  * Matches Python's UserService and AuthenticationManager functionality
  */
-class UserService {
-  constructor() {
+class UserManager {
+  /**
+   * @param {import('../services/database.js').DatabaseService} database - Database service instance
+   */
+  constructor(database) {
+    this._database = database;
     this._usersCollection = toCollectionName(DatabaseCollections.USERS);
-    this._usersCache = new Map(); // username -> user
-    this._apiKeysCache = new Map(); // api_key -> user
   }
 
   /**
-   * Initialize user service (creates indices, warms cache, ensures default admin user)
+   * Initialize user manager (creates indices, ensures default admin user)
    * Matches Python's AuthenticationManager.initialize()
    */
   async initialize() {
     try {
-      logger.info('Initializing user service...');
+      logger.info('Initializing user manager...');
 
       // Create database indices
-      await databaseService.createIndices();
-
-      // Warm up cache by loading all users
-      await this._warmUpCache();
+      await this._database.createIndices();
 
       // Ensure default admin user exists
       await this._ensureDefaultAdminUser();
 
-      logger.info(`User service initialized with ${this._usersCache.size} users`);
+      logger.info('User manager initialized');
     } catch (error) {
-      logger.error('Failed initializing user service:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Warm up cache by loading all users from database
-   * Matches Python's AuthenticationManager._warm_up_cache()
-   */
-  async _warmUpCache() {
-    try {
-      const usersData = await databaseService.getDataList(this._usersCollection);
-
-      if (usersData) {
-        for (const userData of usersData) {
-          // Remove any MongoDB _id field if present
-          const { _id, ...user } = userData;
-
-          try {
-            // Mark default admin user
-            const defaultAdminUsername = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
-            if (user.username === defaultAdminUsername) {
-              user.isDefaultAdmin = true;
-            }
-
-            // Update cache
-            this._usersCache.set(user.username, user);
-            if (user.api_key) {
-              this._apiKeysCache.set(user.api_key, user);
-            }
-          } catch (error) {
-            logger.warn(`Failed to load user ${user.username}:`, error);
-          }
-        }
-      }
-
-      logger.info(`Cache warmed up with ${this._usersCache.size} users`);
-    } catch (error) {
-      logger.error('Failed warming up cache:', error);
+      logger.error('Failed initializing user manager:', error);
       throw error;
     }
   }
@@ -113,13 +73,11 @@ class UserService {
       // Mark as default admin
       user.isDefaultAdmin = true;
       // Update in storage
-      await databaseService.updateData(
+      await this._database.updateData(
         this._usersCollection,
         { isDefaultAdmin: true },
         { username: defaultUsername }
       );
-      // Update cache
-      this._usersCache.set(defaultUsername, user);
       logger.info(`Default admin user '${defaultUsername}' created successfully`);
     } catch (error) {
       logger.error('Failed ensuring default admin user:', error);
@@ -227,18 +185,13 @@ class UserService {
   }
 
   /**
-   * Get user by username (from cache or database)
+   * Get user by username (from database)
    * Matches Python's get_user_by_username()
    */
   async getUserByUsername(username) {
-    // Check cache first
-    if (this._usersCache.has(username)) {
-      return this._usersCache.get(username);
-    }
-
-    // If not in cache, check database
+    // Query database (database service handles caching internally)
     try {
-      const userData = await databaseService.getData(this._usersCollection, { username });
+      const userData = await this._database.getData(this._usersCollection, { username });
       
       if (userData) {
         // Remove any MongoDB _id if present
@@ -248,12 +201,6 @@ class UserService {
         const defaultAdminUsername = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
         if (user.username === defaultAdminUsername) {
           user.isDefaultAdmin = true;
-        }
-        
-        // Update cache
-        this._usersCache.set(username, user);
-        if (user.api_key) {
-          this._apiKeysCache.set(user.api_key, user);
         }
         
         return user;
@@ -266,22 +213,13 @@ class UserService {
   }
 
   /**
-   * Get user by API key (from cache or database)
+   * Get user by API key (from database)
    * Matches Python's get_user_by_api_key()
    */
   async getUserByApiKey(apiKey) {
-    // Check cache first
-    if (this._apiKeysCache.has(apiKey)) {
-      const user = this._apiKeysCache.get(apiKey);
-      if (user.status === 'active') {
-        return user;
-      }
-      return null;
-    }
-
-    // If not in cache, check database
+    // Query database (database service handles caching internally)
     try {
-      const userData = await databaseService.getData(this._usersCollection, { api_key: apiKey });
+      const userData = await this._database.getData(this._usersCollection, { api_key: apiKey });
       
       if (userData) {
         const { _id, ...user } = userData;
@@ -291,10 +229,6 @@ class UserService {
         if (user.username === defaultAdminUsername) {
           user.isDefaultAdmin = true;
         }
-        
-        // Update cache
-        this._usersCache.set(user.username, user);
-        this._apiKeysCache.set(apiKey, user);
         
         if (user.status === 'active') {
           return user;
@@ -313,13 +247,13 @@ class UserService {
    */
   async getAllUsers() {
     try {
-      const usersData = await databaseService.getDataList(this._usersCollection);
+      const usersData = await this._database.getDataList(this._usersCollection);
       
       if (!usersData) {
         return { response: { users: [] }, statusCode: 200 };
       }
 
-      // Update cache and convert to public format
+      // Convert to public format
       const usersPublic = [];
       const defaultAdminUsername = process.env.DEFAULT_ADMIN_USERNAME || 'admin';
       for (const userData of usersData) {
@@ -327,10 +261,6 @@ class UserService {
         // Mark default admin user
         if (user.username === defaultAdminUsername) {
           user.isDefaultAdmin = true;
-        }
-        this._usersCache.set(user.username, user);
-        if (user.api_key) {
-          this._apiKeysCache.set(user.api_key, user);
         }
         usersPublic.push(this._userToPublic(user));
       }
@@ -440,11 +370,7 @@ class UserService {
       };
 
       // Save to database
-      await databaseService.insertData(this._usersCollection, user);
-
-      // Update cache
-      this._usersCache.set(username, user);
-      this._apiKeysCache.set(apiKey, user);
+      await this._database.insertData(this._usersCollection, user);
 
       return user;
     } catch (error) {
@@ -501,23 +427,11 @@ class UserService {
       updateData.updated_at = user.updated_at;
 
       // Update database
-      await databaseService.updateData(
+      await this._database.updateData(
         this._usersCollection,
         updateData,
         { username }
       );
-
-      // Update cache
-      this._usersCache.set(username, user);
-
-      // If user was deactivated, remove from api_keys_cache
-      if (user.status === 'inactive') {
-        for (const [key, cachedUser] of this._apiKeysCache.entries()) {
-          if (cachedUser.username === username) {
-            this._apiKeysCache.delete(key);
-          }
-        }
-      }
 
       const userPublic = this._userToPublic(user);
       return { response: userPublic, statusCode: 200 };
@@ -566,16 +480,11 @@ class UserService {
         updated_at: new Date(),
       };
 
-      await databaseService.updateData(
+      await this._database.updateData(
         this._usersCollection,
         updateData,
         { username }
       );
-
-      // Update cache
-      user.password_hash = passwordHash;
-      user.updated_at = updateData.updated_at;
-      this._usersCache.set(username, user);
 
       return { response: { success: true }, statusCode: 200 };
     } catch (error) {
@@ -595,10 +504,6 @@ class UserService {
         return { response: { error: `User '${username}' not found` }, statusCode: 404 };
       }
 
-      // Remove old API key from cache
-      const oldApiKey = user.api_key;
-      this._apiKeysCache.delete(oldApiKey);
-
       // Generate new API key
       const newApiKey = this._generateApiKey();
       user.api_key = newApiKey;
@@ -610,15 +515,11 @@ class UserService {
         updated_at: user.updated_at,
       };
 
-      await databaseService.updateData(
+      await this._database.updateData(
         this._usersCollection,
         updateData,
         { username }
       );
-
-      // Update cache
-      this._usersCache.set(username, user);
-      this._apiKeysCache.set(newApiKey, user);
 
       return { response: { api_key: newApiKey }, statusCode: 200 };
     } catch (error) {
@@ -765,7 +666,7 @@ class UserService {
         updated_at: new Date(),
       };
 
-      await databaseService.updateData(
+      await this._database.updateData(
         this._usersCollection,
         updateData,
         { username }
@@ -773,7 +674,6 @@ class UserService {
 
       user.watchlist = updatedWatchlist;
       user.updated_at = updateData.updated_at;
-      this._usersCache.set(username, user);
 
       return true;
     } catch (error) {
@@ -783,6 +683,6 @@ class UserService {
   }
 }
 
-// Export singleton instance
-export const userService = new UserService();
+// Export class
+export { UserManager };
 

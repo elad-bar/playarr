@@ -76,14 +76,33 @@ const groupStreamsBySeasonEpisode = (streams) => {
   streams.forEach(stream => {
     let season = stream.season;
     let episode = stream.episode;
+    
+    // Parse from stream ID if season/episode not provided
     if (!season || !episode) {
       const info = parseSeasonEpisodeFromId(stream.id);
       if (info) {
         season = `S${String(info.season).padStart(2, '0')}`;
         episode = `E${String(info.episode).padStart(2, '0')}`;
       }
+    } else {
+      // Convert numeric season/episode to string format (S01, E01)
+      if (typeof season === 'number') {
+        season = `S${String(season).padStart(2, '0')}`;
+      } else if (typeof season === 'string' && !season.startsWith('S')) {
+        // If it's already a string but not in S01 format, convert it
+        season = `S${season.padStart(2, '0')}`;
+      }
+      
+      if (typeof episode === 'number') {
+        episode = `E${String(episode).padStart(2, '0')}`;
+      } else if (typeof episode === 'string' && !episode.startsWith('E')) {
+        // If it's already a string but not in E01 format, convert it
+        episode = `E${episode.padStart(2, '0')}`;
+      }
     }
-    if (season && episode) {
+    
+    // Ensure season and episode are strings before using replace
+    if (season && episode && typeof season === 'string' && typeof episode === 'string') {
       const seasonNum = season.replace(/[^\d]/g, '');
       const episodeNum = episode.replace(/[^\d]/g, '');
       if (!result[seasonNum]) result[seasonNum] = {};
@@ -183,8 +202,11 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
     // Helper to extract season/episode numbers from stream
     const extractSeasonEpisode = (stream) => {
         if (stream.season && stream.episode) {
-            const seasonNum = parseInt(stream.season.replace(/[^\d]/g, ''));
-            const episodeNum = parseInt(stream.episode.replace(/[^\d]/g, ''));
+            // Handle numeric season/episode from API
+            const seasonStr = typeof stream.season === 'number' ? stream.season.toString() : stream.season;
+            const episodeStr = typeof stream.episode === 'number' ? stream.episode.toString() : stream.episode;
+            const seasonNum = parseInt(seasonStr.replace(/[^\d]/g, ''));
+            const episodeNum = parseInt(episodeStr.replace(/[^\d]/g, ''));
             return { seasonNum, episodeNum };
         }
         const info = parseSeasonEpisodeFromId(stream.id);

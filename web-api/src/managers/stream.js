@@ -1,7 +1,6 @@
-import { titlesService } from './titles.js';
 import { createLogger } from '../utils/logger.js';
 
-const logger = createLogger('StreamService');
+const logger = createLogger('StreamManager');
 
 /**
  * Constants for stream endpoint
@@ -14,11 +13,15 @@ const STREAM_HEADERS = {
 };
 
 /**
- * Stream service for handling stream data operations
+ * Stream manager for handling stream data operations
  * Matches Python's StreamService
  */
-class StreamService {
-  constructor() {
+class StreamManager {
+  /**
+   * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
+   */
+  constructor(titlesManager) {
+    this._titlesManager = titlesManager;
     this._timeout = 3000; // 3 seconds timeout for URL checks
   }
 
@@ -78,7 +81,7 @@ class StreamService {
    */
   async _getSources(titleId, mediaType, seasonNumber = null, episodeNumber = null) {
     const titleKey = `${mediaType}-${titleId}`;
-    const titlesData = await titlesService.getTitlesData();
+    const titlesData = await this._titlesManager.getTitlesData();
     const titleData = titlesData.get(titleKey);
 
     if (!titleData) {
@@ -157,6 +160,6 @@ class StreamService {
   }
 }
 
-// Export singleton instance
-export const streamService = new StreamService();
+// Export class
+export { StreamManager };
 

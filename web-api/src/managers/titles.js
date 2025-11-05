@@ -1,149 +1,87 @@
-import { databaseService } from './database.js';
-import { cacheService } from './cache.js';
-import { userService } from './users.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
 import { createLogger } from '../utils/logger.js';
-import fs from 'fs-extra';
-import path from 'path';
-import { DATA_DIR } from '../config/database.js';
 
-const logger = createLogger('TitlesService');
+const logger = createLogger('TitlesManager');
 
 /**
- * Titles service for handling titles data operations
+ * @typedef {Object} MainTitle
+ * @property {string} title_key - Unique key combining type and title_id: {type}-{title_id}
+ * @property {number|string} title_id - TMDB ID for the title
+ * @property {'movies'|'tvshows'} type - Media type
+ * @property {string} title - Title name
+ * @property {string} [release_date] - Release date in YYYY-MM-DD format
+ * @property {number} [vote_average] - TMDB vote average
+ * @property {number} [vote_count] - TMDB vote count
+ * @property {string} [overview] - Plot overview
+ * @property {string} [poster_path] - TMDB poster path (relative path, e.g., "/abc123.jpg")
+ * @property {string} [backdrop_path] - TMDB backdrop path (relative path)
+ * @property {Array<{name: string}|string>} [genres] - Array of genre objects or strings
+ * @property {number} [runtime] - Runtime in minutes (movies only)
+ * @property {Object<string, StreamData>} streams - Stream data object
+ * @property {string[]} [similar_titles] - Array of title_key strings for similar titles
+ * @property {string} [createdAt] - ISO timestamp when title was first created
+ * @property {string} [lastUpdated] - ISO timestamp when title was last updated
+ */
+
+/**
+ * @typedef {Object} StreamData
+ * @property {string[]} [sources] - Array of provider IDs that have this stream
+ * @property {string[]} [main] - Array of provider IDs (legacy format, used directly as value for movies)
+ * 
+ * Stream data structure:
+ * - For movies: streams.main can be either string[] OR { sources: string[] }
+ * - For TV shows: streams["S01-E01"] contains stream data objects
+ */
+
+/**
+ * Titles manager for handling titles data operations
  * Matches Python's TitlesService
  */
-class TitlesService {
-  constructor() {
+class TitlesManager {
+  /**
+   * @param {import('../services/database.js').DatabaseService} database - Database service instance
+   * @param {import('./users.js').UserManager} userManager - User manager instance (for watchlist operations)
+   */
+  constructor(database, userManager) {
+    this._database = database;
+    this._userManager = userManager;
     this._titlesCollection = toCollectionName(DatabaseCollections.TITLES);
     this._settingsCollection = toCollectionName(DatabaseCollections.SETTINGS);
-    this._titlesCache = null; // Map<titleKey, titleData>
-    this._lockPromise = null;
-    this._tmdbPosterPath = null; // Loaded from settings collection
-    this._tmdbBackdropPath = null; // Loaded from settings collection
-    this._tmdbConfigLoaded = false;
+    this._providersCollection = toCollectionName(DatabaseCollections.IPTV_PROVIDERS);
+    this._tmdbPosterPath = 'https://image.tmdb.org/t/p/w300';
+    this._tmdbBackdropPath = 'https://image.tmdb.org/t/p/w300';
   }
 
   /**
-   * Load TMDB configuration from settings collection
-   * Matches Python's TMDBProvider._load_configuration()
-   */
-  async _loadTmdbConfiguration() {
-    if (this._tmdbConfigLoaded) {
-      return;
-    }
-
-    try {
-      const configurationKey = 'tmdb_configuration';
-      const config = await databaseService.getData(this._settingsCollection, { key: configurationKey });
-
-      if (config && config.images) {
-        const secureBaseUrl = config.images.secure_base_url || '';
-        const posterWidth = 'w300'; // TMDB_POSTER_WIDTH constant
-
-        // Both poster and backdrop use the same width (matching Python)
-        this._tmdbPosterPath = `${secureBaseUrl}${posterWidth}`;
-        this._tmdbBackdropPath = `${secureBaseUrl}${posterWidth}`;
-      } else {
-        // Fallback to default if configuration not found
-        this._tmdbPosterPath = 'https://image.tmdb.org/t/p/w300';
-        this._tmdbBackdropPath = 'https://image.tmdb.org/t/p/w300';
-      }
-
-      this._tmdbConfigLoaded = true;
-    } catch (error) {
-      logger.error('Error loading TMDB configuration:', error);
-      // Fallback to default
-      this._tmdbPosterPath = 'https://image.tmdb.org/t/p/w300';
-      this._tmdbBackdropPath = 'https://image.tmdb.org/t/p/w300';
-      this._tmdbConfigLoaded = true;
-    }
-  }
-
-  /**
-   * Get titles from cache or database
-   * Returns Map<titleKey, titleData>
-   * Public method for other services to access titles data
+   * Get titles from database
+   * Returns Map<titleKey, MainTitle>
+   * FileStorageService (via databaseService) handles file-level caching
+   * Data is automatically mapped to Map format via storage mapping
+   * @returns {Promise<Map<string, MainTitle>>} Map of title_key to MainTitle object
    */
   async getTitlesData() {
-    // Check cache first
-    if (this._titlesCache) {
-      return this._titlesCache;
-    }
-
-    // Load from cache service
-    const cachedTitles = cacheService.getTitles();
-    if (cachedTitles && Array.isArray(cachedTitles)) {
-      // Convert array to Map for faster lookups
-      this._titlesCache = new Map();
-      for (const title of cachedTitles) {
-        this._titlesCache.set(title.key, title);
-      }
-      return this._titlesCache;
-    }
-
-    // Load from database
-    await this._loadTitles();
-    return this._titlesCache;
-  }
-
-  /**
-   * Load titles from main.json file into cache
-   * Reads from data/titles/main.json (consolidated format with type and title_key)
-   * Sorts by name (alphabetically ascending) to match Python's behavior
-   */
-  async _loadTitles() {
     try {
-      const filePath = path.join(DATA_DIR, 'titles', 'main.json');
+      // Get main titles from database service
+      // With mapping configured, this returns a Map directly
+      const titlesData = await this._database.getDataList(this._titlesCollection);
       
-      let titlesList = [];
-      
-      if (await fs.pathExists(filePath)) {
-        const titlesData = await fs.readJson(filePath);
-        
-        // Handle both array and object formats (should be array after migration)
-        if (Array.isArray(titlesData)) {
-          titlesList = titlesData;
-        } else if (titlesData && typeof titlesData === 'object') {
-          // Legacy format: might have wrapper object
-          titlesList = titlesData.titles || titlesData.items || [];
-        }
-      } else {
-        logger.warn(`Main titles file not found at ${filePath}`);
-        this._titlesCache = new Map();
-        return;
-      }
-      
-      if (!titlesList || titlesList.length === 0) {
+      if (!titlesData) {
         logger.info('No titles found in main.json');
-        this._titlesCache = new Map();
-        return;
+        return new Map();
       }
 
-      // Sort by name (alphabetically ascending) to match Python's behavior
-      titlesList.sort((a, b) => {
-        const nameA = (a.name || '').toLowerCase();
-        const nameB = (b.name || '').toLowerCase();
-        return nameA.localeCompare(nameB);
-      });
-
-      // Convert array to Map (preserving sorted order)
-      this._titlesCache = new Map();
-      for (const title of titlesList) {
-        // Use title_key if available, otherwise generate from type and title_id
-        const titleKey = title.title_key || (title.type && title.title_id ? `${title.type}-${title.title_id}` : title.key);
-        if (titleKey) {
-          this._titlesCache.set(titleKey, title);
-        }
+      // Should always be a Map when mapping is configured
+      if (titlesData instanceof Map) {
+        logger.info(`Loaded ${titlesData.size} titles from main.json`);
+        return titlesData;
       }
 
-      // Update cache service
-      cacheService.setTitles(Array.from(this._titlesCache.values()));
-      
-      logger.info(`Loaded ${this._titlesCache.size} titles from main.json`);
+      // This should never happen if mapping is configured correctly
+      logger.warn('Titles data is not a Map - mapping may not be configured correctly');
+      return new Map();
     } catch (error) {
       logger.error('Error loading titles:', error);
-      this._titlesCache = new Map();
+      return new Map();
     }
   }
 
@@ -172,19 +110,73 @@ class TitlesService {
   }
 
   /**
-   * Calculate number of seasons and episodes from streams data
+   * Get enabled provider IDs from database
+   * Uses database service which caches data in memory
+   * @private
+   * @returns {Promise<Set<string>>} Set of enabled provider IDs
    */
-  _getShowInfo(streams) {
+  async _getEnabledProviders() {
+    try {
+      // Get all providers from database (cached by database service)
+      const providers = await this._database.getDataList(this._providersCollection);
+      
+      if (!providers || providers.length === 0) {
+        return new Set();
+      }
+      
+      // Filter enabled providers and return as Set
+      return new Set(
+        providers
+          .filter(p => p.enabled !== false)
+          .map(p => p.id)
+      );
+    } catch (error) {
+      logger.error('Error loading enabled providers:', error);
+      return new Set();
+    }
+  }
+
+  /**
+   * Check if a stream has active sources (enabled providers)
+   * @private
+   * @param {Array|Object} streamData - Stream data (can be array of provider IDs or object with sources)
+   * @param {Set<string>} enabledProviders - Set of enabled provider IDs
+   * @returns {boolean} True if stream has at least one enabled source
+   */
+  _hasActiveSource(streamData, enabledProviders) {
+    if (Array.isArray(streamData)) {
+      // Handle: { "main": [array of provider IDs] }
+      return streamData.some(providerId => enabledProviders.has(providerId));
+    } else if (streamData && typeof streamData === 'object') {
+      // Handle: { "main": { "sources": [array] } } or { "S01-E01": { "sources": [...] } }
+      if (streamData.sources && Array.isArray(streamData.sources)) {
+        return streamData.sources.some(providerId => enabledProviders.has(providerId));
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Calculate number of seasons and episodes from streams data
+   * Only counts streams that have active sources (enabled providers)
+   */
+  async _getShowInfo(streams) {
     if (!streams || typeof streams !== 'object') {
       return { seasons: 0, episodes: 0 };
     }
 
+    const enabledProviders = await this._getEnabledProviders();
     const uniqueSeasons = new Set();
     let totalEpisodes = 0;
 
-    for (const key of Object.keys(streams)) {
+    for (const [key, streamData] of Object.entries(streams)) {
+      // Skip if no active sources
+      if (!this._hasActiveSource(streamData, enabledProviders)) {
+        continue;
+      }
+
       // For shows, key is like S01-E01
-      const match = key.match(/^S(\d+)-E\d+$/i);
+      const match = key.match(/^S(\d+)-E(\d+)$/i);
       if (match) {
         uniqueSeasons.add(parseInt(match[1], 10));
         totalEpisodes += 1;
@@ -192,7 +184,7 @@ class TitlesService {
         // For movies, just one 'main' key
         continue;
       } else {
-        // Unknown format, count as episode
+        // Unknown format, count as episode if has active source
         totalEpisodes += 1;
       }
     }
@@ -281,9 +273,6 @@ class TitlesService {
         };
       }
 
-      // Preload TMDB configuration
-      await this._loadTmdbConfiguration();
-
       // Parse year filter
       const yearConfig = this._parseYearFilter(yearFilter);
 
@@ -309,7 +298,7 @@ class TitlesService {
       let userWatchlist = new Set();
       if (user || watchlist !== null) {
         if (user) {
-          const userData = await userService.getUserByUsername(user.username);
+          const userData = await this._userManager.getUserByUsername(user.username);
           if (userData && userData.watchlist) {
             userWatchlist = new Set(userData.watchlist);
           }
@@ -319,10 +308,13 @@ class TitlesService {
       // Filter titles
       const filteredTitles = [];
 
+      // Get enabled providers once for all titles
+      const enabledProviders = await this._getEnabledProviders();
+
       for (const [titleKey, titleData] of titlesData.entries()) {
-        const titleName = titleData.name || '';
+        const titleName = titleData.title || '';
         const titleType = titleData.type || '';
-        const titleId = titleData.id || '';
+        const titleId = titleData.title_id || '';
         const releaseDate = titleData.release_date || '';
 
         // Apply media type filter
@@ -362,18 +354,29 @@ class TitlesService {
           }
         }
 
-        // Count streams
+        // Count streams - handle both array and object formats
         const streams = titleData.streams || {};
         let streamsCount = 0;
-        for (const streamGroup of Object.values(streams)) {
-          if (typeof streamGroup === 'object' && streamGroup !== null) {
-            streamsCount += Object.keys(streamGroup).length;
+        
+        for (const [streamKey, streamGroup] of Object.entries(streams)) {
+          if (Array.isArray(streamGroup)) {
+            // Handle: { "main": [array] }
+            streamsCount += streamGroup.filter(id => enabledProviders.has(id)).length;
+          } else if (typeof streamGroup === 'object' && streamGroup !== null) {
+            // Handle: { "main": { "sources": [array] } } or { "S01-E01": {...} }
+            if (streamGroup.sources && Array.isArray(streamGroup.sources)) {
+              streamsCount += streamGroup.sources.filter(id => enabledProviders.has(id)).length;
+            } else {
+              // For TV shows, count each episode as 1 stream if has active source
+              if (this._hasActiveSource(streamGroup, enabledProviders)) {
+                streamsCount += 1;
+              }
+            }
           }
         }
 
-        // Get TMDB data
-        const tmdbData = titleData.data || {};
-        const posterPath = tmdbData.poster_path;
+        // Get TMDB data - fields are at root level
+        const posterPath = titleData.poster_path;
 
         // Build title response
         const titleResponse = {
@@ -385,13 +388,13 @@ class TitlesService {
           release_date: releaseDate,
           streams_count: streamsCount,
           watchlist: userWatchlist.has(titleKey),
-          vote_average: parseFloat(tmdbData.vote_average || 0),
-          vote_count: parseInt(tmdbData.vote_count || 0, 10),
+          vote_average: parseFloat(titleData.vote_average || 0),
+          vote_count: parseInt(titleData.vote_count || 0, 10),
         };
 
         // Add show-specific fields
         if (titleType === 'tvshows') {
-          const { seasons, episodes } = this._getShowInfo(streams);
+          const { seasons, episodes } = await this._getShowInfo(streams);
           titleResponse.number_of_seasons = seasons;
           titleResponse.number_of_episodes = episodes;
         }
@@ -441,9 +444,6 @@ class TitlesService {
    */
   async getTitleDetails(titleKey, user = null) {
     try {
-      // Preload TMDB configuration
-      await this._loadTmdbConfiguration();
-
       const titlesData = await this.getTitlesData();
       const titleData = titlesData.get(titleKey);
 
@@ -457,35 +457,52 @@ class TitlesService {
       // Get user watchlist if needed
       let userWatchlist = new Set();
       if (user) {
-        const userData = await userService.getUserByUsername(user.username);
+        const userData = await this._userManager.getUserByUsername(user.username);
         if (userData && userData.watchlist) {
           userWatchlist = new Set(userData.watchlist);
         }
       }
 
-      const tmdbData = titleData.data || {};
+      // TMDB fields are at root level
       const mediaType = titleData.type || '';
       const streams = titleData.streams || {};
+      const enabledProviders = await this._getEnabledProviders();
 
-      // Get seasons and episodes count for tvshows
+      // Get seasons and episodes count for tvshows (from streams with active sources)
       let numSeasons = null;
       let numEpisodes = null;
       if (mediaType === 'tvshows') {
-        const showInfo = this._getShowInfo(streams);
+        const showInfo = await this._getShowInfo(streams);
         numSeasons = showInfo.seasons;
         numEpisodes = showInfo.episodes;
       }
 
-      const posterPath = tmdbData.poster_path;
-      const backdropPath = tmdbData.backdrop_path;
+      const posterPath = titleData.poster_path;
+      const backdropPath = titleData.backdrop_path;
 
-      // Build streams list
+      // Build streams list - parse season/episode from key
       const flatStreams = [];
       for (const [streamId, streamData] of Object.entries(streams)) {
+        let season = null;
+        let episode = null;
+        
+        // Parse season/episode from key (e.g., "S01-E01")
+        if (streamId !== 'main') {
+          const match = streamId.match(/^S(\d+)-E(\d+)$/i);
+          if (match) {
+            season = parseInt(match[1], 10);
+            episode = parseInt(match[2], 10);
+          }
+        }
+        
+        // Check if stream has active sources
+        const hasActiveSource = this._hasActiveSource(streamData, enabledProviders);
+        
         flatStreams.push({
           id: streamId,
-          season: streamData.season || null,
-          episode: streamData.episode || null,
+          season: season,
+          episode: episode,
+          has_active_source: hasActiveSource, // Add flag for download icon
         });
       }
 
@@ -505,12 +522,12 @@ class TitlesService {
         }
 
         seenKeys.add(key);
-        const similarTmdbData = similarTitle.data || {};
+        const similarPosterPath = similarTitle.poster_path || null;
 
         expandedSimilarTitles.push({
           key,
-          name: similarTitle.name,
-          poster_path: this._getPosterPath(similarTmdbData.poster_path),
+          name: similarTitle.title || '',
+          poster_path: this._getPosterPath(similarPosterPath),
           release_date: similarTitle.release_date,
           type: similarTitle.type,
         });
@@ -518,17 +535,17 @@ class TitlesService {
 
       const details = {
         key: titleKey,
-        id: titleData.id,
-        name: titleData.name,
+        id: titleData.title_id,
+        name: titleData.title,
         type: mediaType,
         release_date: titleData.release_date,
-        overview: tmdbData.overview || '',
+        overview: titleData.overview || '',
         poster_path: this._getPosterPath(posterPath),
         backdrop_path: this._getBackdropPath(backdropPath),
-        vote_average: tmdbData.vote_average || 0.0,
-        vote_count: tmdbData.vote_count || 0,
-        genres: (tmdbData.genres || []).map(g => g.name || g),
-        runtime: mediaType === 'movies' ? tmdbData.runtime : null,
+        vote_average: titleData.vote_average || 0.0,
+        vote_count: titleData.vote_count || 0,
+        genres: (titleData.genres || []).map(g => g.name || g),
+        runtime: mediaType === 'movies' ? titleData.runtime : null,
         number_of_seasons: numSeasons,
         number_of_episodes: numEpisodes,
         watchlist: userWatchlist.has(titleKey),
@@ -596,14 +613,14 @@ class TitlesService {
       // Update user's watchlist
       let totalUpdated = 0;
       if (titlesToWatchlist.length > 0) {
-        const success = await userService.updateUserWatchlist(user.username, titlesToWatchlist, true);
+        const success = await this._userManager.updateUserWatchlist(user.username, titlesToWatchlist, true);
         if (success) {
           totalUpdated += titlesToWatchlist.length;
         }
       }
 
       if (titlesToUnwatchlist.length > 0) {
-        const success = await userService.updateUserWatchlist(user.username, titlesToUnwatchlist, false);
+        const success = await this._userManager.updateUserWatchlist(user.username, titlesToUnwatchlist, false);
         if (success) {
           totalUpdated += titlesToUnwatchlist.length;
         }
@@ -632,14 +649,14 @@ class TitlesService {
   }
 
   /**
-   * Refresh titles cache (called by Python engine via cache refresh endpoint)
+   * Refresh titles (called by Python engine via cache refresh endpoint)
+   * Database service handles cache invalidation automatically
    */
   async refreshCache() {
-    this._titlesCache = null;
-    await this._loadTitles();
+    // No-op - database service handles caching internally
   }
 }
 
-// Export singleton instance
-export const titlesService = new TitlesService();
+// Export class
+export { TitlesManager };
 
