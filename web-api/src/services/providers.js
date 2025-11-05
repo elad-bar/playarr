@@ -12,7 +12,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Get config directory from environment or use default
-const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, '../../configurations');
+// Path: from web-api/src/services/ to root: ../../../configurations
+const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, '../../../configurations');
 const PROVIDERS_DIR = path.join(CONFIG_DIR, 'providers');
 
 const logger = createLogger('ProvidersService');

@@ -10,8 +10,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Get data directory from environment or use default
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../data');
-const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, '../../configurations');
+// Path: from web-api/src/config/ to root: ../../../data
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../../data');
+const CONFIG_DIR = process.env.CONFIG_DIR || path.join(__dirname, '../../../configurations');
 
 const logger = createLogger('FileStorage');
 
