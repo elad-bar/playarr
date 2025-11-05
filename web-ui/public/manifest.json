@@ -1,0 +1,9 @@
+{
+  "short_name": "IPTV Stream Manager",
+  "name": "IPTV Stream Manager",
+  "icons": [],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1976d2",
+  "background_color": "#ffffff"
+}

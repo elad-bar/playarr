@@ -4,9 +4,14 @@
   "description": "IPTV Playlist Manager - Monorepo",
   "private": true,
   "scripts": {
-    "start": "npm --prefix engine start",
+    "start": "npm run start:engine & npm run start:api",
+    "start:engine": "npm --prefix engine start",
+    "start:api": "npm --prefix web-api start",
     "dev": "npm --prefix engine run dev",
     "install:engine": "npm --prefix engine install",
-    "install:all": "npm run install:engine"
+    "install:api": "npm --prefix web-api install",
+    "install:ui": "npm --prefix web-ui install",
+    "build:ui": "npm --prefix web-ui run build",
+    "install:all": "npm run install:engine && npm run install:api && npm run install:ui"
   }
 }

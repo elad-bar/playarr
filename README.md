@@ -1,6 +1,6 @@
 # Playarr - IPTV Playlist Manager
 
-IPTV Playlist Manager ecosystem for fetching and managing IPTV content. Currently includes the data fetching engine component. Future releases will include web UI and API components.
+IPTV Playlist Manager ecosystem for fetching and managing IPTV content. Includes the data fetching engine, web API, and web UI components.
 
 ## About the Engine
 
@@ -80,34 +80,41 @@ The engine is designed for:
 
 1. Install dependencies:
 ```bash
-# Install engine dependencies
-npm run install:engine
+# Install all dependencies (engine, API, UI)
+npm run install:all
 
-# Or install from root (same as above)
-npm install
+# Or install individually
+npm run install:engine
+npm run install:api
+npm run install:ui
 ```
 
-2. Configure environment variables (optional):
+2. Build the web UI (required for production):
+```bash
+npm run build:ui
+```
+
+3. Configure environment variables (optional):
 ```bash
 cp .env.example .env
-# Edit .env if you want to customize cache directory
+# Edit .env if you want to customize cache directory, ports, etc.
 ```
 
-3. Ensure provider configuration files exist in `configurations/providers/`:
+4. Ensure provider configuration files exist in `configurations/providers/`:
    - Each provider should have a JSON file (e.g., `provider-1.json`, `provider-2.json`)
    - See the [Configurations](#configurations) section below for details
 
-4. Run the engine:
+5. Run the full stack (engine + API):
 ```bash
-# Fetch all enabled providers (from root)
+# Run both engine and API (from root)
 npm start
+
+# Or run individually
+npm run start:engine  # Run engine only
+npm run start:api     # Run API only (serves UI on port 3000)
 
 # Run in development mode with watch
 npm run dev
-
-# Or run directly from engine directory
-cd engine
-npm start
 ```
 
 ## Docker
@@ -139,10 +146,13 @@ The workflow uses Docker Buildx for multi-platform builds and includes automated
 # Run the container
 docker run -d \
   --name playarr \
+  -p 3000:3000 \
   -v $(pwd)/configurations:/app/configurations \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/cache:/app/cache \
   -v $(pwd)/logs:/app/logs \
+  -e DEFAULT_ADMIN_USERNAME=admin \
+  -e DEFAULT_ADMIN_PASSWORD=your-secure-password \
   playarr
 
 # Or using docker-compose (recommended)
@@ -159,6 +169,7 @@ docker-compose down
 
 The `docker-compose.yml` file includes:
 - Volume mounts for configurations (read-write for UI configuration), data, cache, and logs
+- Port mapping for API (port 3000)
 - Health checks
 - Automatic restart policy
 - Environment variable configuration
@@ -169,10 +180,15 @@ The `docker-compose.yml` file includes:
 
 The Dockerfile uses:
 - **Multi-stage build**: Optimized for size and build speed
+  - Stage 1: Builds React UI
+  - Stage 2: Installs API dependencies
+  - Stage 3: Installs engine dependencies
+  - Stage 4: Runtime with all components
 - **Node.js 20 Alpine**: Lightweight base image
 - **dumb-init**: Proper signal handling for graceful shutdowns in containers
 - **Health check**: Verifies data and cache directories are accessible
 - **`.dockerignore`**: Excludes unnecessary files (configurations, data, cache, logs, node_modules, etc.) from the build context
+- **Single container**: Runs both engine and API together
 
 ### Environment Variables
 
@@ -181,14 +197,14 @@ You can customize the Docker container using environment variables:
 - `CACHE_DIR`: Cache directory path (default: `/app/cache`)
 - `DATA_DIR`: Data directory path (default: `/app/data`)
 - `LOGS_DIR`: Logs directory path (default: `/app/logs`)
+- `CONFIG_DIR`: Configuration directory path (default: `/app/configurations`)
+- `PORT`: API server port (default: `3000`)
 - `NODE_ENV`: Node environment (default: `production`)
+- `DEFAULT_ADMIN_USERNAME`: Default admin username (default: `admin`)
+- `DEFAULT_ADMIN_PASSWORD`: Default admin password (required - must be set)
 
-### Future Extensions
+**Important**: Always set `DEFAULT_ADMIN_PASSWORD` when deploying to production!
 
-The Dockerfile is designed to be extended for future services:
-- **Web API**: Uncomment and modify port mappings in `docker-compose.yml`
-- **UI**: Add additional service definitions to docker-compose
-- **Multi-stage builds**: Already set up for optimized builds
 
 ## Configurations
 
@@ -371,6 +387,42 @@ The engine automatically loads all enabled providers from the `configurations/pr
   - Main title aggregation: Every 30 minutes
   - Cache purging: Every 15 minutes
 
+## Web UI and API
+
+The Playarr ecosystem includes a web UI and REST API for managing IPTV providers, viewing content, and configuring settings.
+
+### Web UI
+
+The web UI is a React application that provides:
+- Provider management (add, edit, delete, prioritize)
+- Content browsing and search
+- Settings configuration
+- User management
+- System health monitoring
+
+The UI is built and served statically by the API server.
+
+### Web API
+
+The web API provides REST endpoints for:
+- Authentication and user management
+- Provider CRUD operations
+- Content browsing and search
+- Settings management
+- Health checks
+- Playlist generation
+- Stream URLs
+
+### Accessing the Web Interface
+
+Once running, access the web UI at:
+- **Local**: `http://localhost:3000`
+- **Docker**: `http://localhost:3000` (or your configured port)
+
+The default admin user credentials are set via environment variables:
+- Username: `DEFAULT_ADMIN_USERNAME` (default: `admin`)
+- Password: `DEFAULT_ADMIN_PASSWORD` (must be set)
+
 ## Project Structure
 
 ```
@@ -382,7 +434,10 @@ playarr/
 ├── data/
 │   ├── categories/         # Provider categories (generated)
 │   ├── main/               # Main titles (generated)
-│   └── titles/             # Processed titles (generated)
+│   ├── titles/             # Processed titles (generated)
+│   ├── users.json          # User accounts (API)
+│   ├── settings.json       # API settings
+│   └── stats.json          # API statistics
 ├── cache/                  # Raw API response cache
 ├── engine/
 │   ├── jobs/               # Job implementations
@@ -392,6 +447,20 @@ playarr/
 │   ├── workers/            # Worker scripts for Bree.js scheduler
 │   ├── package.json        # Engine dependencies
 │   └── index.js            # Main entry point
+├── web-api/
+│   ├── src/
+│   │   ├── config/         # Configuration (database, collections)
+│   │   ├── middleware/     # Auth middleware
+│   │   ├── routes/         # API routes
+│   │   ├── services/       # Business logic services
+│   │   └── utils/          # Utility functions
+│   ├── package.json        # API dependencies
+│   └── src/index.js        # API server entry point
+├── web-ui/
+│   ├── src/                # React source code
+│   ├── build/              # Built UI (generated)
+│   ├── package.json        # UI dependencies
+│   └── public/             # Static assets
 ├── .github/
 │   └── workflows/
 │       └── docker-build.yml # CI/CD workflow for Docker builds

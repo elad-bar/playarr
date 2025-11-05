@@ -20,9 +20,12 @@ services:
       - CACHE_DIR=/app/cache
       - DATA_DIR=/app/data
       - LOGS_DIR=/app/logs
-    # Uncomment and modify when API is added
-    # ports:
-    #   - "3000:3000"
+      - CONFIG_DIR=/app/configurations
+      - PORT=3000
+      - DEFAULT_ADMIN_USERNAME=${DEFAULT_ADMIN_USERNAME:-admin}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD:-}
+    ports:
+      - "3000:3000"
     healthcheck:
       interval: 30s
       timeout: 10s
