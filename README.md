@@ -39,6 +39,8 @@ The engine provides the following core business capabilities:
 - **Intelligent Caching**: Multi-layer caching system to minimize API calls and improve performance
   - Raw API response caching
   - Processed data caching
+  - Configurable cache expiration policies via `cache-policy.json`
+  - Automatic cache purging to manage disk space
 - **Rate Limiting**: Configurable rate limiting per provider to respect API constraints
 - **Concurrent Processing**: Efficient parallel processing of movies and TV shows
 - **Error Handling**: Robust error handling with detailed logging and recovery mechanisms
@@ -52,6 +54,10 @@ The engine provides the following core business capabilities:
 - **Incremental Updates**: Only processes new or updated content to minimize processing time
 
 #### 7. **Operational Excellence**
+- **Automated Job Scheduling**: Uses Bree.js for reliable job scheduling with configurable intervals:
+  - Provider title processing: Every 1 hour
+  - Main title aggregation: Every 30 minutes (first run 5 minutes after startup)
+  - Cache purging: Every 15 minutes
 - **Comprehensive Logging**: Detailed logging with configurable log levels (debug, info, error)
 - **Progress Monitoring**: Real-time progress updates for long-running operations
 - **Health Monitoring**: Health check support for containerized deployments
@@ -118,6 +124,15 @@ docker build -t playarr .
 docker-compose build
 ```
 
+### CI/CD
+
+The project includes GitHub Actions workflow (`.github/workflows/docker-build.yml`) that automatically builds Docker images on:
+- Push to `main` or `master` branches
+- Pull requests to `main` or `master` branches
+- Tags matching `v*` pattern
+
+The workflow uses Docker Buildx for multi-platform builds and includes automated testing of the built image.
+
 ### Running with Docker
 
 ```bash
@@ -149,6 +164,15 @@ The `docker-compose.yml` file includes:
 - Environment variable configuration
 
 **Note**: Configurations, data, and cache directories are **not** included in the Docker image and **must** be mounted as volumes. The UI will be used to configure providers and settings.
+
+### Docker Image Details
+
+The Dockerfile uses:
+- **Multi-stage build**: Optimized for size and build speed
+- **Node.js 20 Alpine**: Lightweight base image
+- **dumb-init**: Proper signal handling for graceful shutdowns in containers
+- **Health check**: Verifies data and cache directories are accessible
+- **`.dockerignore`**: Excludes unnecessary files (configurations, data, cache, logs, node_modules, etc.) from the build context
 
 ### Environment Variables
 
@@ -291,22 +315,61 @@ The settings file is located at `configurations/settings.json` and contains glob
   - **concurrect**: Maximum concurrent requests to TMDB API.
   - **duration_seconds**: Time window in seconds.
 
+### Cache Policy Configuration
+
+The cache policy file is located at `configurations/cache-policy.json` and controls automatic cache expiration and purging. The `CachePurgeJob` runs every 15 minutes to remove expired cache files based on TTL (Time To Live) values specified in hours.
+
+```json
+{
+  "tmdb/search/movie": null,
+  "tmdb/search/tv": null,
+  "tmdb/find/imdb": null,
+  "tmdb/movie": null,
+  "tmdb/tv": null,
+  "tmdb/movie/{tmdbId}/similar": null,
+  "tmdb/tv/{tmdbId}/similar": null,
+  "tmdb/tv/{tmdbId}/season": 6,
+  "{providerId}/categories": 1,
+  "{providerId}/metadata": 1,
+  "{providerId}/extended/movies": null,
+  "{providerId}/extended/tvshows": 6,
+  "{providerId}": 6
+}
+```
+
+#### Cache Policy Fields Explained
+
+- **Key format**: Cache path patterns (supports dynamic segments like `{providerId}` and `{tmdbId}`)
+- **Value**: TTL in hours:
+  - `null`: Cache never expires (kept indefinitely)
+  - `number`: TTL in hours (e.g., `6` = expires after 6 hours)
+- **Example**: `"tmdb/tv/{tmdbId}/season": 6` means season data expires after 6 hours
+- **Dynamic matching**: The purge job matches patterns like `tmdb/tv/12345/season` to `tmdb/tv/{tmdbId}/season`
+
+Files older than their TTL are automatically purged, and empty directories are cleaned up.
+
 ### Configuration File Location
 
 All configuration files should be placed in:
 - **Provider configs**: `configurations/providers/*.json`
 - **Settings**: `configurations/settings.json`
+- **Cache policy**: `configurations/cache-policy.json` (optional, defaults to no expiration if not present)
 
 The engine automatically loads all enabled providers from the `configurations/providers/` directory and processes them in priority order.
 
 ## Features
 
 - Fetches movies and TV shows from AGTV (M3U8) and Xtream Codec providers
-- Disk caching for efficient data retrieval
+- Disk caching for efficient data retrieval with configurable expiration policies
+- Automatic cache purging based on TTL policies
 - Automatic update detection for TV shows (Xtream)
 - Stores processed titles in `data/titles/` directory
 - Supports provider-specific cleanup rules and ignore patterns
 - Respects provider priority and enabled status
+- Scheduled job processing with Bree.js:
+  - Provider title fetching: Every 1 hour
+  - Main title aggregation: Every 30 minutes
+  - Cache purging: Every 15 minutes
 
 ## Project Structure
 
@@ -314,7 +377,8 @@ The engine automatically loads all enabled providers from the `configurations/pr
 playarr/
 ├── configurations/
 │   ├── providers/          # Provider configuration files
-│   └── settings.json       # Global settings (TMDB token, etc.)
+│   ├── settings.json       # Global settings (TMDB token, etc.)
+│   └── cache-policy.json   # Cache expiration policies
 ├── data/
 │   ├── categories/         # Provider categories (generated)
 │   ├── main/               # Main titles (generated)
@@ -325,8 +389,15 @@ playarr/
 │   ├── managers/           # Storage manager
 │   ├── providers/          # Provider implementations
 │   ├── utils/              # Utility functions
+│   ├── workers/            # Worker scripts for Bree.js scheduler
 │   ├── package.json        # Engine dependencies
 │   └── index.js            # Main entry point
+├── .github/
+│   └── workflows/
+│       └── docker-build.yml # CI/CD workflow for Docker builds
+├── Dockerfile              # Docker image definition
+├── docker-compose.yml      # Docker Compose configuration
+├── .dockerignore          # Files excluded from Docker builds
 ├── package.json            # Root package (monorepo scripts)
 └── README.md
 ```
