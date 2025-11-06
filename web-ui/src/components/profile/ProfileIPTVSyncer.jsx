@@ -9,15 +9,15 @@ const ProfileIPTVSyncer = ({ apiKey }) => {
   return (
     <Paper elevation={3} sx={{ p: 3 }}>
       <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 2 }}>
-        IPTV Syncer Deployment
+        Strmarr Deployment
       </Typography>
 
       <Typography variant="body1" sx={{ mb: 3, color: 'text.primary' }}>
-        Use this endpoint URL with iptv-syncer to sync your media files. The endpoint returns a JSON
+        Use this endpoint URL with Strmarr to sync your media files. The endpoint returns a JSON
         mapping of file paths to stream URLs for all titles in your watchlist.{' '}
         <Typography
           component="a"
-          href="https://gitlab.com/elad.bar/iptv-syncer"
+          href="https://github.com/elad-bar/strmarr"
           target="_blank"
           rel="noopener noreferrer"
           sx={{
@@ -28,7 +28,7 @@ const ProfileIPTVSyncer = ({ apiKey }) => {
             }
           }}
         >
-          Learn more about iptv-syncer
+          Learn more about Strmarr
         </Typography>
       </Typography>
 
@@ -81,14 +81,14 @@ const ProfileIPTVSyncer = ({ apiKey }) => {
 {`version: '3.8'
 
 services:
-  iptv-syncer:
-    image: "registry.gitlab.com/elad.bar/iptv-syncer:latest"
+  strmarr:
+    image: "ghcr.io/elad-bar/strmarr:latest"
     restart: unless-stopped
     user: "root"
     environment:
-      - MEDIA_PATH=/app
-      - SYNC_BASE_URL=${window.location.origin}
-      - IPTV_MANAGER_API_KEY=${apiKey}
+      - MEDIA_PATH=/app/media
+      - PLAYARR_BASE_URL=${window.location.origin}
+      - PLAYARR_API_KEY=${apiKey}
       - SYNC_INTERVAL=0 * * * *
     volumes:
       - /etc/localtime:/etc/localtime:ro
@@ -121,16 +121,16 @@ services:
         >
           <Box component="pre" sx={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
 {`docker run -d \\
-  --name iptv-syncer \\
+  --name strmarr \\
   --restart unless-stopped \\
-  -e MEDIA_PATH=/app \\
-  -e SYNC_BASE_URL="${window.location.origin}" \\
-  -e IPTV_MANAGER_API_KEY="${apiKey}" \\
+  -e MEDIA_PATH=/app/media \\
+  -e PLAYARR_BASE_URL="${window.location.origin}" \\
+  -e PLAYARR_API_KEY="${apiKey}" \\
   -e SYNC_INTERVAL="0 * * * *" \\
   -v /etc/localtime:/etc/localtime:ro \\
   -v /etc/timezone:/etc/timezone:ro \\
   -v ./media:/app/media \\
-  registry.gitlab.com/elad.bar/iptv-syncer:latest`}
+  ghcr.io/elad-bar/strmarr:latest`}
           </Box>
         </Box>
       </Box>
