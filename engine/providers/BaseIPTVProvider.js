@@ -28,7 +28,7 @@ import { generateTitleKey, generateCategoryKey } from '../utils/titleUtils.js';
  * Extends BaseProvider with IPTV-specific functionality
  * @abstract
  */
-export class BaseIPTVProvider extends BaseProvider {
+export class BaseIPTVProvider extends BaseProvider { 
   /**
    * @param {Object} providerData - Provider configuration data
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
@@ -36,6 +36,11 @@ export class BaseIPTVProvider extends BaseProvider {
    */
   constructor(providerData, cache, data) {
     super(providerData, cache, data);
+    
+    // In-memory cache for titles and ignored titles
+    // Loaded once at the start of job execution and kept in memory
+    this._titlesCache = null;
+    this._ignoredCache = null;
   }
 
   /**
@@ -316,36 +321,115 @@ export class BaseIPTVProvider extends BaseProvider {
   }
 
   /**
+   * Load all titles from disk into memory cache
+   * Should be called once at the start of job execution
+   * @returns {TitleData[]} Array of all title data objects
+   */
+  loadAllTitles() {
+    try {
+      const allTitles = this.data.get('titles', `${this.providerId}.titles.json`);
+      if (!Array.isArray(allTitles)) {
+        this._titlesCache = [];
+        return [];
+      }
+      this._titlesCache = allTitles;
+      return allTitles;
+    } catch (error) {
+      this.logger.debug(`No titles file found: ${error.message}`);
+      this._titlesCache = [];
+      return [];
+    }
+  }
+
+  /**
+   * Get all titles from memory cache
+   * If cache is not loaded, loads from disk first
+   * @returns {TitleData[]} Array of all title data objects
+   */
+  getAllTitles() {
+    if (this._titlesCache === null) {
+      return this.loadAllTitles();
+    }
+    return this._titlesCache;
+  }
+
+  /**
    * Load titles metadata for a specific type
    * Loads from consolidated file: data/titles/{providerId}.titles.json
    * Filters titles by type property
+   * Can use cache if available for better performance
    * @param {string} type - Title type ('movies' or 'tvshows')
    * @returns {TitleData[]} Array of title data objects filtered by type
    */
   loadTitles(type) {
-    try {
-      const allTitles = this.data.get('titles', `${this.providerId}.titles.json`);
-      if (!Array.isArray(allTitles)) {
-        return [];
-      }
-      // Filter titles by type property
-      return allTitles.filter(t => t.type === type);
-    } catch (error) {
-      this.logger.debug(`No titles file found for ${type}: ${error.message}`);
-      return [];
+    // Use cache if available, otherwise load from disk
+    const allTitles = this.getAllTitles();
+    // Filter titles by type property
+    return allTitles.filter(t => t.type === type);
+  }
+
+  /**
+   * Update titles in memory cache
+   * Merges new titles with existing cache (updates existing, adds new)
+   * @private
+   * @param {TitleData[]} titles - Array of title data objects to merge into cache
+   */
+  updateTitlesInMemory(titles) {
+    if (this._titlesCache === null) {
+      // If cache not initialized, initialize it
+      this._titlesCache = [];
     }
+
+    // Create map of existing titles by title_key for fast lookup
+    const existingTitleMap = new Map(
+      this._titlesCache.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t])
+    );
+
+    // Update existing titles and add new ones
+    for (const title of titles) {
+      if (!title.title_id) continue;
+      
+      const titleKey = title.title_key || generateTitleKey(title.type || 'movies', title.title_id);
+      const existingIndex = this._titlesCache.findIndex(t => {
+        const tKey = t.title_key || generateTitleKey(t.type, t.title_id);
+        return tKey === titleKey;
+      });
+
+      if (existingIndex >= 0) {
+        // Update existing title
+        this._titlesCache[existingIndex] = title;
+      } else {
+        // Add new title
+        this._titlesCache.push(title);
+      }
+    }
+  }
+
+  /**
+   * Update ignored titles in memory cache
+   * Replaces the entire ignored cache with new data
+   * @private
+   * @param {Object<string, string>} ignored - Object mapping title_key to reason for ignoring
+   */
+  updateIgnoredInMemory(ignored) {
+    this._ignoredCache = { ...ignored };
   }
 
   /**
    * Save titles metadata to a consolidated file per provider
    * Saves all titles to: data/titles/{providerId}.titles.json
    * Adds type and title_key properties to each title
-   * @param {string} type - Title type ('movies' or 'tvshows')
+   * @param {string} [type] - Optional title type ('movies' or 'tvshows') - if not provided, extracted from each title
    * @param {TitleData[]} titles - Array of title data objects to save
    * @returns {Promise<{saved: number}>} Number of titles saved
    */
   async saveTitles(type, titles) {
-    this.logger.debug(`Saving ${titles.length} titles for ${type}`);
+    // If type is not provided, extract from titles (for backward compatibility)
+    if (!type && titles.length > 0 && titles[0].type) {
+      // Type will be extracted from each title individually
+    }
+
+    this.logger.debug(`Saving ${titles.length} titles`);
 
     const now = new Date().toISOString();
     const titlesCacheKey = ['titles', `${this.providerId}.titles.json`];
@@ -358,8 +442,12 @@ export class BaseIPTVProvider extends BaseProvider {
     const mergedTitles = titles.map(title => {
       if (!title.title_id) return null;
 
-      // Ensure type and title_key are set
+      // Ensure type and title_key are set - extract type from title or use provided type
       const titleType = title.type || type;
+      if (!titleType) {
+        this.logger.warn(`Title ${title.title_id} has no type, skipping`);
+        return null;
+      }
       const titleKey = title.title_key || generateTitleKey(titleType, title.title_id);
       
       const existingTitle = existingTitleMap.get(titleKey);
@@ -384,40 +472,60 @@ export class BaseIPTVProvider extends BaseProvider {
 
     try {
       this.data.set(allTitles, ...titlesCacheKey);
-      this.logger.info(`Saved ${mergedTitles.length} titles for ${type}`);
+      // Update in-memory cache to keep it in sync with disk
+      this._titlesCache = allTitles;
+      this.logger.info(`Saved ${mergedTitles.length} titles`);
       return { saved: mergedTitles.length };
     } catch (error) {
-      this.logger.error(`Error saving titles for ${type}: ${error.message}`);
+      this.logger.error(`Error saving titles: ${error.message}`);
       throw error;
     }    
+  }
+
+  /**
+   * Get all ignored titles from memory cache
+   * If cache is not loaded, loads from disk first
+   * @returns {Object<string, string>} Object mapping title_key to reason for ignoring
+   */
+  getAllIgnored() {
+    if (this._ignoredCache === null) {
+      try {
+        const allIgnored = this.data.get('titles', `${this.providerId}.ignored.json`) || {};
+        if (!allIgnored || typeof allIgnored !== 'object' || Array.isArray(allIgnored)) {
+          this._ignoredCache = {};
+          return {};
+        }
+        this._ignoredCache = allIgnored;
+        return allIgnored;
+      } catch (error) {
+        this._ignoredCache = {};
+        return {};
+      }
+    }
+    return this._ignoredCache;
   }
 
   /**
    * Load ignored titles from consolidated JSON file
    * Loads from: data/titles/{providerId}.ignored.json
    * Filters by type and returns title_id mappings for backward compatibility
+   * Can use cache if available for better performance
    * @param {string} type - Media type ('movies' or 'tvshows')
    * @returns {Object<string, string>} Object mapping title_id to reason for ignoring
    */
   loadIgnoredTitles(type) {
-    try {
-      const allIgnored = this.data.get('titles', `${this.providerId}.ignored.json`) || {};
-      if (!allIgnored || typeof allIgnored !== 'object' || Array.isArray(allIgnored)) {
-        return {};
+    // Use cache if available, otherwise load from disk
+    const allIgnored = this.getAllIgnored();
+    
+    // Filter by type and convert title_key back to title_id for backward compatibility
+    const filtered = {};
+    for (const [titleKey, reason] of Object.entries(allIgnored)) {
+      if (titleKey.startsWith(`${type}-`)) {
+        const titleId = titleKey.substring(type.length + 1); // Remove "movies-" or "tvshows-" prefix
+        filtered[titleId] = reason;
       }
-      
-      // Filter by type and convert title_key back to title_id for backward compatibility
-      const filtered = {};
-      for (const [titleKey, reason] of Object.entries(allIgnored)) {
-        if (titleKey.startsWith(`${type}-`)) {
-          const titleId = titleKey.substring(type.length + 1); // Remove "movies-" or "tvshows-" prefix
-          filtered[titleId] = reason;
-        }
-      }
-      return filtered;
-    } catch (error) {
-      return {};
     }
+    return filtered;
   }
 
   /**
@@ -452,6 +560,24 @@ export class BaseIPTVProvider extends BaseProvider {
       this.logger.info(`Saved ${count} ignored ${type} titles`);
     } catch (error) {
       this.logger.error(`Error saving ignored titles for ${type}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Save all ignored titles to consolidated JSON file at once
+   * Saves to: data/titles/{providerId}.ignored.json
+   * Accepts the full ignored object with title_key format (no type separation)
+   * @param {Object<string, string>} allIgnored - Object mapping title_key to reason for ignoring
+   */
+  saveAllIgnoredTitles(allIgnored) {
+    try {
+      this.data.set(allIgnored, 'titles', `${this.providerId}.ignored.json`);
+      // Update in-memory cache to keep it in sync with disk
+      this._ignoredCache = { ...allIgnored };
+      const count = Object.keys(allIgnored).length;
+      this.logger.info(`Saved ${count} ignored titles`);
+    } catch (error) {
+      this.logger.error(`Error saving ignored titles: ${error.message}`);
     }
   }
 

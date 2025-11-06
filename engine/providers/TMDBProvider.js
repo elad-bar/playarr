@@ -59,6 +59,10 @@ export class TMDBProvider extends BaseProvider {
     super(providerData, cache, data, 'TMDB');
     this.apiBaseUrl = 'https://api.themoviedb.org/3';
     this.apiToken = providerData.token;
+    
+    // In-memory cache for main titles
+    // Loaded once at the start of job execution and kept in memory
+    this._mainTitlesCache = null;
   }
 
   /**
@@ -270,6 +274,688 @@ export class TMDBProvider extends BaseProvider {
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
     );
+  }
+
+  /**
+   * Get all similar titles across multiple pages with pagination handling
+   * @param {string} type - Media type: 'movie' or 'tv'
+   * @param {number} tmdbId - TMDB ID
+   * @param {number} [maxPages=10] - Maximum number of pages to fetch
+   * @returns {Promise<Array<Object>>} Array of similar title objects (from response.results)
+   */
+  async getSimilarAllPages(type, tmdbId, maxPages = 10) {
+    const allResults = [];
+    let page = 1;
+    let hasMorePages = true;
+
+    while (hasMorePages && page <= maxPages) {
+      try {
+        const response = await this.getSimilar(type, tmdbId, page);
+        
+        if (!response || !response.results) {
+          break;
+        }
+
+        allResults.push(...response.results);
+
+        // Check if there are more pages (but respect maxPages limit)
+        const totalPages = response.total_pages || 1;
+        hasMorePages = page < totalPages && page < maxPages;
+        page++;
+      } catch (error) {
+        this.logger.error(`Error fetching similar titles page ${page} for ${type} ID ${tmdbId}: ${error.message}`);
+        break;
+      }
+    }
+
+    return allResults;
+  }
+
+  /**
+   * Get similar title IDs filtered by available titles
+   * Fetches similar titles from TMDB API and filters to only include titles that exist in the available set
+   * Returns title_keys for the filtered similar titles
+   * @param {string} tmdbType - TMDB media type: 'movie' or 'tv'
+   * @param {number} tmdbId - TMDB ID
+   * @param {Set<number>} availableTitleIds - Set of available TMDB IDs to filter against
+   * @param {string} type - Media type ('movies' or 'tvshows') for title key generation
+   * @param {number} [maxPages=10] - Maximum number of pages to fetch
+   * @returns {Promise<Array<string>>} Array of title_keys for similar titles that exist in availableTitleIds
+   */
+  async getSimilarTitleKeys(tmdbType, tmdbId, availableTitleIds, type, maxPages = 10) {
+    // Get all similar titles across pages (pagination handled internally)
+    const allResults = await this.getSimilarAllPages(tmdbType, tmdbId, maxPages);
+
+    // Filter results to only include titles that exist in main titles
+    // Convert matching IDs to title_keys
+    const similarTitleKeys = allResults
+      .map(result => result.id)
+      .filter(id => availableTitleIds.has(id))
+      .map(id => generateTitleKey(type, id));
+
+    return similarTitleKeys;
+  }
+
+  /**
+   * Load all main titles from disk into memory cache
+   * Should be called once at the start of job execution
+   * @returns {Array<Object>} Array of all main title objects
+   */
+  loadMainTitles() {
+    try {
+      const allMainTitles = this.data.get('titles', 'main.json') || [];
+      this._mainTitlesCache = allMainTitles;
+      return allMainTitles;
+    } catch (error) {
+      this.logger.debug(`No main titles file found: ${error.message}`);
+      this._mainTitlesCache = [];
+      return [];
+    }
+  }
+
+  /**
+   * Get all main titles from memory cache
+   * If cache is not loaded, loads from disk first
+   * @returns {Array<Object>} Array of all main title objects
+   */
+  getMainTitles() {
+    if (this._mainTitlesCache === null) {
+      return this.loadMainTitles();
+    }
+    return this._mainTitlesCache;
+  }
+
+  /**
+   * Enrich main titles with similar titles
+   * Fetches similar titles from TMDB API, filters to only include titles available in main titles,
+   * and stores the filtered title_keys under the 'similar' property as an array
+   * @returns {Promise<void>}
+   */
+  async enrichSimilarTitles() {
+    this.logger.info('Starting similar titles enrichment process...');
+    const batchSize = this.getRecommendedBatchSize();
+
+    // Process all titles together
+    await this._enrichSimilarTitles(batchSize);
+
+    this.logger.info('Similar titles enrichment completed');
+  }
+
+  /**
+   * Enrich similar titles for all main titles
+   * @private
+   * @param {number} batchSize - Batch size for processing
+   * @returns {Promise<void>}
+   */
+  async _enrichSimilarTitles(batchSize) {
+    // Get main titles from memory cache
+    const allMainTitles = this.getMainTitles();
+    
+    if (allMainTitles.length === 0) {
+      this.logger.info('No main titles found for similar titles enrichment');
+      return;
+    }
+
+    // Create a Set of available title_ids for fast lookup (for filtering similar titles)
+    // Include all titles, not just one type
+    const availableTitleIds = new Set(allMainTitles.map(t => t.title_id));
+    
+    // Create a Set of available title_keys for matching similar titles
+    const availableTitleKeys = new Set(allMainTitles.map(t => t.title_key || generateTitleKey(t.type, t.title_id)));
+    
+    this.logger.info(`Enriching similar titles for ${allMainTitles.length} main titles...`);
+
+    const updatedTitles = [];
+    let processedCount = 0;
+
+    // Load existing main titles to preserve other properties
+    const existingMainTitleMap = new Map(
+      allMainTitles.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t])
+    );
+
+    // Save callback for progress tracking
+    const saveCallback = async () => {
+      if (updatedTitles.length > 0) {
+        try {
+          await this._saveMainTitles(updatedTitles, existingMainTitleMap);
+          this.logger.debug(`Saved ${updatedTitles.length} accumulated titles with similar titles via progress callback`);
+          updatedTitles.length = 0; // Clear after saving
+        } catch (error) {
+          this.logger.error(`Error saving accumulated titles: ${error.message}`);
+        }
+      }
+    };
+
+    // Register for progress tracking
+    const progressKey = 'similar_titles';
+    let totalRemaining = allMainTitles.length;
+    this.registerProgress(progressKey, totalRemaining, saveCallback);
+
+    try {
+      // Process in batches
+      for (let i = 0; i < allMainTitles.length; i += batchSize) {
+        const batch = allMainTitles.slice(i, i + batchSize);
+
+        await Promise.all(batch.map(async (mainTitle) => {
+          try {
+            // Determine tmdbType from each title's type
+            const tmdbType = mainTitle.type === 'movies' ? 'movie' : 'tv';
+            const type = mainTitle.type;
+            
+            const similarTitleIds = await this.getSimilarTitleKeys(
+              tmdbType,
+              mainTitle.title_id,
+              availableTitleIds,
+              type
+            );
+
+            const titleKey = mainTitle.title_key || generateTitleKey(mainTitle.type, mainTitle.title_id);
+            
+            // Create updated title with similar titles (store as title_keys)
+            const updatedTitle = {
+              ...existingMainTitleMap.get(titleKey) || mainTitle,
+              similar: similarTitleIds
+            };
+
+            updatedTitles.push(updatedTitle);
+            processedCount++;
+          } catch (error) {
+            const titleKey = mainTitle.title_key || generateTitleKey(mainTitle.type, mainTitle.title_id);
+            this.logger.error(`Error enriching similar titles for ID ${mainTitle.title_id}: ${error.message}`);
+            // Still add the title without similar titles to preserve it
+            const existingTitle = existingMainTitleMap.get(titleKey) || mainTitle;
+            if (!existingTitle.similar) {
+              existingTitle.similar = [];
+            }
+            updatedTitles.push(existingTitle);
+          }
+        }));
+
+        totalRemaining = allMainTitles.length - processedCount;
+        this.updateProgress(progressKey, totalRemaining);
+
+        // Log progress
+        if ((i + batchSize) % 100 === 0 || i + batchSize >= allMainTitles.length) {
+          this.logger.debug(
+            `Progress: ${Math.min(i + batchSize, allMainTitles.length)}/${allMainTitles.length} titles processed for similar titles enrichment`
+          );
+        }
+      }
+    } finally {
+      // Save any remaining accumulated titles
+      await saveCallback();
+      
+      // Unregister from progress tracking
+      this.unregisterProgress(progressKey);
+    }
+
+    // Final save to ensure all titles are saved
+    if (updatedTitles.length > 0) {
+      await this._saveMainTitles(updatedTitles, existingMainTitleMap);
+    }
+
+    this.logger.info(`Similar titles enrichment completed for ${processedCount} titles`);
+  }
+
+  /**
+   * Process main titles: generate, enrich similar, and generate streams
+   * Orchestrates the complete main title processing workflow after TMDB ID matching
+   * @param {Map<string, Array<Object>>} providerTitlesByProvider - Map of providerId -> titles array
+   * @returns {Promise<{movies: number, tvShows: number}>} Count of generated main titles by type
+   */
+  async processMainTitles(providerTitlesByProvider) {
+    if (!providerTitlesByProvider || providerTitlesByProvider.size === 0) {
+      this.logger.warn('No provider titles available for main title processing.');
+      return { movies: 0, tvShows: 0 };
+    }
+
+    // Generate main titles from provider titles with TMDB IDs
+    const result = await this.generateMainTitles(providerTitlesByProvider);
+
+    // Run enrichSimilarTitles and generateMainTitlesStreams in parallel
+    // Only generate streams if main titles were changed
+    const parallelTasks = [this.enrichSimilarTitles()];
+    
+    if ((result.movies + result.tvShows) > 0) {
+      parallelTasks.push(this.generateMainTitlesStreams(providerTitlesByProvider));
+    }
+    
+    await Promise.all(parallelTasks);
+
+    return result;
+  }
+
+  /**
+   * Generate main titles from all provider titles with TMDB IDs
+   * Groups provider titles by TMDB ID and creates main titles using TMDB API data
+   * @param {Map<string, Array<Object>>} providerTitlesByProvider - Map of providerId -> titles array
+   * @returns {Promise<{movies: number, tvShows: number}>} Count of generated main titles by type for reporting
+   */
+  async generateMainTitles(providerTitlesByProvider) {
+    if (!providerTitlesByProvider || providerTitlesByProvider.size === 0) {
+      this.logger.warn('No providers available for main title generation.');
+      return { movies: 0, tvShows: 0 };
+    }
+
+    this.logger.info('Starting main title generation process...');
+    const batchSize = this.getRecommendedBatchSize();
+
+    // Group all titles by TMDB ID (key: {type}-{tmdbId}, value: {type, providerTitleGroups})
+    const providerTitlesByTMDB = new Map(); // Map<string, {type: string, providerTitleGroups: Array<{providerId, title}>}>
+
+    for (const [providerId, allTitles] of providerTitlesByProvider) {
+      for (const title of allTitles) {
+        if (title.tmdb_id && title.type) {
+          const tmdbId = title.tmdb_id;
+          const type = title.type;
+          const key = `${type}-${tmdbId}`;
+          
+          if (!providerTitlesByTMDB.has(key)) {
+            providerTitlesByTMDB.set(key, {
+              type,
+              providerTitleGroups: []
+            });
+          }
+          
+          providerTitlesByTMDB.get(key).providerTitleGroups.push({
+            providerId,
+            title
+          });
+        }
+      }
+    }
+
+    // Get existing main titles from memory cache
+    const allMainTitles = this.getMainTitles();
+    const existingMainTitleMap = new Map(
+      allMainTitles.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t])
+    );
+
+    // Process all titles together
+    const countsByType = await this._generateMainTitles(batchSize, providerTitlesByTMDB, existingMainTitleMap);
+
+    const totalCount = countsByType.movies + countsByType.tvShows;
+    this.logger.info(
+      `Main title generation completed: ${totalCount} titles processed`
+    );
+
+    return { movies: countsByType.movies, tvShows: countsByType.tvShows };
+  }
+
+  /**
+   * Check if main title needs regeneration based on provider title updates
+   * @private
+   * @param {Object|null} existingMainTitle - Existing main title or null
+   * @param {Array<Object>} providerTitleGroups - Array of provider title groups
+   * @returns {boolean} True if regeneration is needed
+   */
+  _needsRegeneration(existingMainTitle, providerTitleGroups) {
+    // If main title doesn't exist, needs regeneration
+    if (!existingMainTitle || !existingMainTitle.lastUpdated) {
+      return true;
+    }
+
+    const mainLastUpdated = new Date(existingMainTitle.lastUpdated).getTime();
+
+    // Check if any provider title has been updated after main title
+    for (const group of providerTitleGroups) {
+      const providerLastUpdated = group.title.lastUpdated 
+        ? new Date(group.title.lastUpdated).getTime() 
+        : 0;
+      
+      if (providerLastUpdated > mainLastUpdated) {
+        return true; // At least one provider title is newer
+      }
+    }
+
+    return false; // All provider titles are older or equal to main title
+  }
+
+  /**
+   * Generate main titles from provider titles grouped by TMDB ID
+   * @private
+   * @param {number} batchSize - Batch size for processing
+   * @param {Map<string, {type: string, providerTitleGroups: Array}>} providerTitlesByTMDB - Pre-grouped provider titles by {type}-{tmdbId} key
+   * @param {Map<string, Object>} existingMainTitleMap - Map of existing main titles by title_key
+   * @returns {Promise<{movies: number, tvShows: number}>} Count of generated main titles by type for reporting
+   */
+  async _generateMainTitles(batchSize, providerTitlesByTMDB, existingMainTitleMap) {
+    if (providerTitlesByTMDB.size === 0) {
+      this.logger.info('No titles with TMDB IDs found for main title generation');
+      return { movies: 0, tvShows: 0 };
+    }
+
+    // Filter titles that need regeneration
+    const titlesToProcess = [];
+    let skippedCount = 0;
+    
+    for (const [key, value] of providerTitlesByTMDB) {
+      const { type, providerTitleGroups } = value;
+      const match = key.match(/^(movies|tvshows)-(\d+)$/);
+      if (!match) continue;
+      
+      const tmdbId = parseInt(match[2], 10);
+      const titleKey = generateTitleKey(type, tmdbId);
+      const existingMainTitle = existingMainTitleMap.get(titleKey);
+      
+      if (this._needsRegeneration(existingMainTitle, providerTitleGroups)) {
+        titlesToProcess.push({ key, type, tmdbId, providerTitleGroups });
+      } else {
+        skippedCount++;
+      }
+    }
+    
+    if (skippedCount > 0) {
+      this.logger.debug(`Skipping ${skippedCount} main titles (no provider updates since last generation)`);
+    }
+    
+    if (titlesToProcess.length === 0) {
+      this.logger.info('No main titles need regeneration');
+      return { movies: 0, tvShows: 0 };
+    }
+    
+    this.logger.info(`Generating ${titlesToProcess.length} main titles (${skippedCount} skipped)...`);
+
+    const mainTitles = [];
+    let processedCount = 0;
+    const processedCountByType = { movies: 0, tvShows: 0 };
+
+    // Track remaining titles for progress
+    let totalRemaining = titlesToProcess.length;
+
+    // Save callback for progress tracking
+    const saveCallback = async () => {
+      if (mainTitles.length > 0) {
+        try {
+          await this._saveMainTitles(mainTitles, existingMainTitleMap);
+          this.logger.debug(`Saved ${mainTitles.length} accumulated main titles via progress callback`);
+          mainTitles.length = 0; // Clear after saving
+        } catch (error) {
+          this.logger.error(`Error saving accumulated main titles: ${error.message}`);
+        }
+      }
+    };
+
+    // Register for progress tracking
+    const progressKey = 'main_titles';
+    this.registerProgress(progressKey, totalRemaining, saveCallback);
+
+    try {
+      // Process in batches
+      for (let i = 0; i < titlesToProcess.length; i += batchSize) {
+        const batch = titlesToProcess.slice(i, i + batchSize);
+
+        await Promise.all(batch.map(async ({ type, tmdbId, providerTitleGroups }) => {
+          const mainTitle = await this.generateMainTitle(
+            tmdbId,
+            type,
+            providerTitleGroups
+          );
+
+          if (mainTitle) {
+            // Type and title_key should already be set by TMDBProvider, but ensure they exist
+            if (!mainTitle.type) mainTitle.type = type;
+            if (!mainTitle.title_key) mainTitle.title_key = generateTitleKey(type, tmdbId);
+            
+            // Preserve createdAt if title already exists
+            const titleKey = mainTitle.title_key;
+            const existing = existingMainTitleMap.get(titleKey);
+            if (existing && existing.createdAt) {
+              mainTitle.createdAt = existing.createdAt;
+            }
+            
+            mainTitles.push(mainTitle);
+            processedCount++;
+            
+            // Track by type for return value
+            if (type === 'movies') processedCountByType.movies++;
+            else if (type === 'tvshows') processedCountByType.tvShows++;
+          }
+        }));
+
+        totalRemaining = titlesToProcess.length - processedCount;
+        this.updateProgress(progressKey, totalRemaining);
+
+        // Log progress
+        if ((i + batchSize) % 100 === 0 || i + batchSize >= titlesToProcess.length) {
+          this.logger.debug(
+            `Progress: ${Math.min(i + batchSize, titlesToProcess.length)}/${titlesToProcess.length} main titles processed`
+          );
+        }
+      }
+    } finally {
+      // Save any remaining accumulated titles
+      await saveCallback();
+      
+      // Unregister from progress tracking
+      this.unregisterProgress(progressKey);
+    }
+
+    // Final save to ensure all titles are saved
+    if (mainTitles.length > 0) {
+      await this._saveMainTitles(mainTitles, existingMainTitleMap);
+    }
+
+    return processedCountByType;
+  }
+
+  /**
+   * Generate main titles streams data file
+   * Creates a dictionary mapping stream keys to stream metadata for all main titles
+   * Key format: {type}-{tmdb_id}-{stream_id}-{provider}
+   * @param {Map<string, Array<Object>>} providerTitlesByProvider - Map of providerId -> titles array
+   * @returns {Promise<void>}
+   */
+  async generateMainTitlesStreams(providerTitlesByProvider) {
+    this.logger.info('Starting main titles streams generation...');
+    
+    try {
+      // Get all main titles from memory cache
+      const allMainTitles = this.getMainTitles();
+      
+      if (allMainTitles.length === 0) {
+        this.logger.info('No main titles found for streams generation');
+        return;
+      }
+
+      // Create map keyed by {type}-{tmdb_id} for each provider
+      const providerTitlesByProviderMap = new Map();
+      for (const [providerId, allTitles] of providerTitlesByProvider) {
+        if (allTitles.length === 0) {
+          continue;
+        }
+        
+        // Create map keyed by {type}-{tmdb_id}
+        const providerTitlesMap = new Map();
+        for (const title of allTitles) {
+          if (title.tmdb_id && title.type) {
+            const key = `${title.type}-${title.tmdb_id}`;
+            providerTitlesMap.set(key, title);
+          }
+        }
+        
+        if (providerTitlesMap.size > 0) {
+          providerTitlesByProviderMap.set(providerId, providerTitlesMap);
+        }
+      }
+
+      // Build streams dictionary
+      const streamsDict = {};
+      
+      for (const mainTitle of allMainTitles) {
+        const { type, title_id, title, release_date, poster_path, genres, streams } = mainTitle;
+        
+        if (!streams || Object.keys(streams).length === 0) {
+          continue;
+        }
+
+        // Extract year from release_date
+        const year = release_date ? release_date.split('-')[0] : '';
+        const titleWithYear = year ? `${title} (${year})` : title;
+        
+        // Extract genre names from objects with id and name
+        const genreNames = (genres || [])
+          .map(g => g.name)
+          .filter(Boolean)
+          .join(', ');
+        
+        // Process each stream
+        for (const [streamId, streamData] of Object.entries(streams)) {
+          // Get provider IDs from stream data
+          let providerIds = [];
+          if (Array.isArray(streamData)) {
+            providerIds = streamData;
+          } else if (streamData && typeof streamData === 'object' && streamData.sources) {
+            providerIds = streamData.sources;
+          }
+          
+          if (providerIds.length === 0) {
+            continue;
+          }
+
+          // Extract season/episode for TV shows
+          let seasonNumber = null;
+          let episodeNumber = null;
+          let tvgId = `tmdb-${title_id}`;
+          let tvgName = titleWithYear;
+          let tvgType = type === 'movies' ? 'movie' : 'series';
+          
+          if (type === 'tvshows' && streamId !== 'main') {
+            // Parse Sxx-Exx format
+            const match = streamId.match(/^S(\d+)-E(\d+)$/);
+            if (match) {
+              seasonNumber = parseInt(match[1], 10);
+              episodeNumber = parseInt(match[2], 10);
+              tvgId = `tmdb-${title_id}-S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`;
+              tvgName = `${titleWithYear} S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`;
+            }
+          }
+
+          // Process each provider for this stream
+          for (const providerId of providerIds) {
+            const providerTitlesMap = providerTitlesByProviderMap.get(providerId);
+            if (!providerTitlesMap) {
+              continue;
+            }
+
+            // Look up provider title
+            const providerTitleKey = `${type}-${title_id}`;
+            const providerTitle = providerTitlesMap.get(providerTitleKey);
+            
+            if (!providerTitle || !providerTitle.streams || !providerTitle.streams[streamId]) {
+              continue;
+            }
+
+            const streamUrl = providerTitle.streams[streamId];
+            
+            // Generate key: type-tmdb_id-stream_id-provider
+            const streamKey = `${type}-${title_id}-${streamId}-${providerId}`;
+            
+            // Generate proxy_path
+            let proxyPath = '';
+            if (type === 'movies') {
+              proxyPath = `${type}/${title} (${year}) [tmdb=${title_id}]/${title} (${year}).strm`;
+            } else {
+              // TV show
+              const seasonStr = seasonNumber ? `Season ${seasonNumber}` : 'Season 1';
+              const episodeStr = seasonNumber && episodeNumber 
+                ? `S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}` 
+                : 'S01E01';
+              proxyPath = `${type}/${title} (${year}) [tmdb=${title_id}]/${seasonStr}/${title} (${year}) ${episodeStr}.strm`;
+            }
+
+            // Build stream object
+            const streamObj = {
+              'tvg-id': tvgId,
+              'tvg-name': tvgName,
+              'tvg-type': tvgType,
+              'tvg-logo': poster_path || '',
+              'group-title': genreNames,
+              'proxy_url': streamUrl,
+              'proxy_path': proxyPath
+            };
+
+            // Add season/episode numbers for TV shows (just the number, no leading zeros)
+            if (type === 'tvshows' && seasonNumber !== null && episodeNumber !== null) {
+              streamObj['tvg-season-num'] = seasonNumber;
+              streamObj['tvg-episode-num'] = episodeNumber;
+            }
+
+            streamsDict[streamKey] = streamObj;
+          }
+        }
+      }
+
+      // Save to data file
+      const outputPath = ['titles', 'main-titles-streams.json'];
+      this.data.set(streamsDict, ...outputPath);
+      
+      const streamCount = Object.keys(streamsDict).length;
+      this.logger.info(`Generated main titles streams: ${streamCount} streams saved to main-titles-streams.json`);
+    } catch (error) {
+      this.logger.error(`Error generating main titles streams: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Save main titles to consolidated data directory
+   * @private
+   * @param {Array<Object>} newMainTitles - Array of new main titles to save (can be mixed types)
+   * @param {Map<string, Object>} existingMainTitleMap - Map of existing main titles by title_key
+   * @returns {Promise<Array<Object>>} Updated titles array
+   */
+  async _saveMainTitles(newMainTitles, existingMainTitleMap) {
+    const cacheKey = ['titles', 'main.json'];
+    // Use cached main titles if available, otherwise load from disk
+    const allExistingTitles = this._mainTitlesCache || this.data.get(...cacheKey) || [];
+
+    // Ensure all new titles have title_key
+    newMainTitles = newMainTitles.map(t => {
+      if (!t.title_key && t.type && t.title_id) {
+        t.title_key = generateTitleKey(t.type, t.title_id);
+      }
+      return t;
+    });
+
+    // Create map of new titles by title_key
+    const newTitleMap = new Map(newMainTitles.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t]));
+
+    // Merge: update existing titles that are in newTitles, keep others unchanged
+    const updatedTitles = allExistingTitles.map(existing => {
+      const titleKey = existing.title_key || generateTitleKey(existing.type, existing.title_id);
+      const newTitle = newTitleMap.get(titleKey);
+      if (newTitle) {
+        // Preserve createdAt if it exists
+        return {
+          ...newTitle,
+          createdAt: existing.createdAt || newTitle.createdAt || new Date().toISOString()
+        };
+      }
+      return existing;
+    });
+
+    // Add any new titles that don't exist yet
+    for (const newTitle of newMainTitles) {
+      const titleKey = newTitle.title_key || generateTitleKey(newTitle.type, newTitle.title_id);
+      if (!existingMainTitleMap.has(titleKey)) {
+        updatedTitles.push({
+          ...newTitle,
+          createdAt: newTitle.createdAt || new Date().toISOString()
+        });
+      }
+    }
+
+    try {
+      this.data.set(updatedTitles, ...cacheKey);
+      // Update in-memory cache to keep it in sync with disk
+      this._mainTitlesCache = updatedTitles;
+      this.logger.info(`Saved ${newMainTitles.length} main titles (total: ${updatedTitles.length} titles)`);
+      return updatedTitles;
+    } catch (error) {
+      this.logger.error(`Error saving main titles: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
