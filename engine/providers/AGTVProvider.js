@@ -13,7 +13,8 @@ export class AGTVProvider extends BaseIPTVProvider {
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
    */
   constructor(providerData, cache, data) {
-    super(providerData, cache, data);
+    // AGTV uses 10k batch size since everything is in-memory and extremely fast
+    super(providerData, cache, data, 10000);
         
     /**
      * Configuration for each media type

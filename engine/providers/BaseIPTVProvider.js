@@ -33,14 +33,22 @@ export class BaseIPTVProvider extends BaseProvider {
    * @param {Object} providerData - Provider configuration data
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
+   * @param {number} [metadataBatchSize=100] - Batch size for processing metadata (default: 100)
    */
-  constructor(providerData, cache, data) {
+  constructor(providerData, cache, data, metadataBatchSize = 100) {
     super(providerData, cache, data);
     
     // In-memory cache for titles and ignored titles
     // Loaded once at the start of job execution and kept in memory
     this._titlesCache = null;
     this._ignoredCache = null;
+    
+    /**
+     * Batch size for processing metadata
+     * Controls memory usage (max concurrent promises), not save frequency
+     * @type {number}
+     */
+    this.metadataBatchSize = metadataBatchSize;
   }
 
   /**
@@ -82,7 +90,7 @@ export class BaseIPTVProvider extends BaseProvider {
 
     // Step 3: Process in batches for memory efficiency
     // Batch size controls memory usage (max concurrent promises), not save frequency
-    const batchSize = 100; // Process 100 at a time to limit memory
+    const batchSize = this.metadataBatchSize;
     const batches = [];
     for (let i = 0; i < filteredTitles.length; i += batchSize) {
       batches.push(filteredTitles.slice(i, i + batchSize));

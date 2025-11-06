@@ -20,6 +20,9 @@ const logger = createLogger('Main');
 async function main() {
   logger.info('Starting Playarr Engine with Bree.js job scheduler...');
 
+  // Track job execution state to prevent concurrent execution
+  let isProcessProvidersTitlesRunning = false;
+
   // Configure Bree.js jobs with schedules
   const bree = new Bree({
     root: path.join(__dirname, 'workers'),
@@ -27,10 +30,10 @@ async function main() {
     jobs: [
       {
         name: 'processProvidersTitles',
-        path: 'processProvidersTitles.js',
+        path: path.join(__dirname, 'workers', 'processProvidersTitles.js'),
         interval: '1h', // Every 1 hour
         timeout: 0, // Run immediately on startup
-        closeWorkerAfterMs: 0, // Keep worker alive - prevents parallel execution
+        closeWorkerAfterMs: 60000, // Close worker 60 seconds after completion
         worker: {
           workerData: {
             cacheDir: CACHE_DIR,
@@ -40,10 +43,10 @@ async function main() {
       },
       {
         name: 'processMainTitles',
-        path: 'processMainTitles.js',
-        interval: '30m', // Every 30 minutes
-        timeout: '5m', // First run 5 minutes after startup
-        closeWorkerAfterMs: 0, // Keep worker alive - prevents parallel execution
+        path: path.join(__dirname, 'workers', 'processMainTitles.js'),
+        interval: '1m', // Every 3 minutes
+        timeout: '30s', // First run 5 minutes after startup
+        closeWorkerAfterMs: 60000, // Close worker 60 seconds after completion
         worker: {
           workerData: {
             cacheDir: CACHE_DIR,
@@ -53,10 +56,10 @@ async function main() {
       },
       {
         name: 'cachePurge',
-        path: 'cachePurge.js',
+        path: path.join(__dirname, 'workers', 'cachePurge.js'),
         interval: '15m', // Every 15 minutes
         timeout: 0, // Run immediately on startup
-        closeWorkerAfterMs: 0, // Keep worker alive - prevents parallel execution
+        closeWorkerAfterMs: 60000, // Close worker 60 seconds after completion
         worker: {
           workerData: {
             cacheDir: CACHE_DIR,
@@ -67,14 +70,32 @@ async function main() {
     ]
   });
 
-  // Handle job events
+  // Track processProvidersTitles execution state
   bree.on('worker created', (name) => {
     logger.info(`Worker created: ${name}`);
+    if (name === 'processProvidersTitles') {
+      isProcessProvidersTitlesRunning = true;
+      logger.info('processProvidersTitles is now running - processMainTitles will be skipped until it completes');
+    }
   });
 
   bree.on('worker deleted', (name) => {
     logger.info(`Worker deleted: ${name}`);
+    if (name === 'processProvidersTitles') {
+      isProcessProvidersTitlesRunning = false;
+      logger.info('processProvidersTitles completed - processMainTitles can now run');
+    }
   });
+
+  // Override the run method to prevent processMainTitles from running when processProvidersTitles is active
+  const originalRun = bree.run.bind(bree);
+  bree.run = async function(name) {
+    if (name === 'processMainTitles' && isProcessProvidersTitlesRunning) {
+      logger.info('Skipping processMainTitles - processProvidersTitles is currently running');
+      return;
+    }
+    return originalRun(name);
+  };
 
   bree.on('worker message', (name, message) => {
     if (message.success) {
@@ -103,7 +124,7 @@ async function main() {
 
     logger.info('Job scheduler started. Jobs will run according to schedule.');
     logger.info('- processProvidersTitles: On startup and every 1 hour');
-    logger.info('- processMainTitles: First run in 5 minutes, then every 30 minutes');
+    logger.info('- processMainTitles: First run in 5 minutes, then every 3 minutes (skipped if processProvidersTitles is running)');
     logger.info('- cachePurge: On startup and every 15 minutes');
     
     // Keep the process running
