@@ -178,10 +178,18 @@ export class TMDBProvider extends BaseProvider {
     const url = this._buildApiUrl('/find/' + imdbId, {
       external_source: 'imdb_id'
     });
-    
+
+    const type_caches_mapping = {
+      'movies': 'movie',
+      'tvshows': 'tv'
+    };
+
+    const type_cache_key = type_caches_mapping[type];
+    const cache_key = ['tmdb', type_cache_key, 'imdb', `${imdbId}.json`];
+
     return await this.fetchWithCache(
       url,
-      ['tmdb', type, 'imdb', `${imdbId}.json`],
+      cache_key,
       null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
