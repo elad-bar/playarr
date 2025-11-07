@@ -317,7 +317,7 @@ export class AGTVProvider extends BaseIPTVProvider {
         try {
           const m3u8Content = await this._fetchM3U8WithCache(
             m3u8Url,
-            [this.providerId, `${type}_${page}.m3u8`]
+            [this.providerId, type, 'metadata', `list-${page}.m3u8`]
           );
 
           const titles = this._parseM3U8Content(m3u8Content, type);
@@ -352,7 +352,7 @@ export class AGTVProvider extends BaseIPTVProvider {
       try {
         const m3u8Content = await this._fetchM3U8WithCache(
           m3u8Url,
-          [this.providerId, `${type}.m3u8`]
+          [this.providerId, type, 'metadata', 'list.m3u8']
         );
 
         const titles = this._parseM3U8Content(m3u8Content, type);

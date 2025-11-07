@@ -345,7 +345,7 @@ export class XtreamProvider extends BaseIPTVProvider {
       const categoriesUrl = this._getApiUrl(config.categoryAction);
       const categoriesResponse = await this.fetchWithCache(
         categoriesUrl,
-        [this.providerId, 'categories', `${type}.json`]
+        [this.providerId, type, 'categories', 'data.json']
       );
       
       // Normalize raw categories to standard format
@@ -389,7 +389,7 @@ export class XtreamProvider extends BaseIPTVProvider {
     const metadataUrl = this._getApiUrl(config.metadataAction);
     const responseData = await this.fetchWithCache(
       metadataUrl,
-      [this.providerId, 'metadata', `${type}.json`]
+      [this.providerId, type, 'metadata', 'data.json']
     );
     
     // Handle both array and object formats for backward compatibility
@@ -498,7 +498,7 @@ export class XtreamProvider extends BaseIPTVProvider {
       
       const fullResponseData = await this.fetchWithCache(
         extendedUrl,
-        [this.providerId, 'extended', type, `${titleId}.json`],
+        [this.providerId, type, 'extended', `${titleId}.json`],
         ttlHours
       );
 

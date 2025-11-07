@@ -141,7 +141,7 @@ export class TMDBProvider extends BaseProvider {
     const url = this._buildApiUrl(endpoint, params);
     return await this.fetchWithCache(
       url,
-      ['tmdb', 'search', type, `${title}_${year || 'no-year'}.json`],
+      ['tmdb', type,'search', `${title}_${year || 'no-year'}.json`],
       null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
@@ -174,46 +174,21 @@ export class TMDBProvider extends BaseProvider {
    * @param {string} imdbId - IMDB ID (e.g., 'tt0133093')
    * @returns {Promise<Object>} TMDB find results with movie_results and tv_results arrays
    */
-  async findByIMDBId(imdbId) {
+  async findByIMDBId(imdbId, type) {
     const url = this._buildApiUrl('/find/' + imdbId, {
       external_source: 'imdb_id'
     });
     
     return await this.fetchWithCache(
       url,
-      ['tmdb', 'find', 'imdb', `${imdbId}.json`],
+      ['tmdb', type, 'imdb', `${imdbId}.json`],
       null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
     );
   }
 
-  /**
-   * Find TMDB ID by IMDB ID for movies
-   * @param {string} imdbId - IMDB ID (e.g., 'tt0133093')
-   * @returns {Promise<Object|null>} First movie result or null if not found
-   */
-  async findMovieByIMDBId(imdbId) {
-    const result = await this.findByIMDBId(imdbId);
-    if (result.movie_results && result.movie_results.length > 0) {
-      return result.movie_results[0];
-    }
-    return null;
-  }
-
-  /**
-   * Find TMDB ID by IMDB ID for TV shows
-   * @param {string} imdbId - IMDB ID (e.g., 'tt0944947')
-   * @returns {Promise<Object|null>} First TV show result or null if not found
-   */
-  async findTVShowByIMDBId(imdbId) {
-    const result = await this.findByIMDBId(imdbId);
-    if (result.tv_results && result.tv_results.length > 0) {
-      return result.tv_results[0];
-    }
-    return null;
-  }
-
+  
   /**
    * Get details by TMDB ID (movies or TV shows)
    * @param {string} type - Media type: 'movie' or 'tv'
@@ -226,7 +201,7 @@ export class TMDBProvider extends BaseProvider {
     
     return await this.fetchWithCache(
       url,
-      ['tmdb', type, `${tmdbId}.json`],
+      ['tmdb', type, 'details', `${tmdbId}.json`],
       null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
@@ -262,7 +237,7 @@ export class TMDBProvider extends BaseProvider {
     
     return await this.fetchWithCache(
       url,
-      ['tmdb', 'tv', `${tmdbId}`, 'season', `${seasonNumber}.json`],
+      ['tmdb', 'tv', 'season', `${tmdbId}-S${seasonNumber}.json`],
       6, // Cache for 6 hours
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
@@ -285,7 +260,7 @@ export class TMDBProvider extends BaseProvider {
     
     return await this.fetchWithCache(
       url,
-      ['tmdb', type, String(tmdbId), 'similar', `page_${page}.json`],
+      ['tmdb', type, 'similar', `${tmdbId}-${page}.json`],
       null, // Cache forever (null = Infinity)
       false, // forceRefresh
       { headers: this._getAuthHeaders() }
@@ -998,7 +973,7 @@ export class TMDBProvider extends BaseProvider {
       try {
         // Check if title_id looks like an IMDB ID (starts with 'tt')
         if (title.title_id.startsWith('tt')) {
-          const result = await this.findByIMDBId(title.title_id);
+          const result = await this.findByIMDBId(title.title_id, type);
           
           if (type === 'movies' && result.movie_results && result.movie_results.length > 0) {
             return result.movie_results[0].id;
