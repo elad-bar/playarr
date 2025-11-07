@@ -23,7 +23,7 @@ class StreamManager {
    */
   constructor(database) {
     this._database = database;
-    this._timeout = 3000; // 3 seconds timeout for URL checks
+    this._timeout = 7500; // 7.5 seconds timeout for URL checks
   }
 
   /**
