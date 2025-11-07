@@ -1,9 +1,9 @@
 import React, { useEffect, useCallback, useRef, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { Box, Typography, Card, CardContent, CardMedia, IconButton, CircularProgress, TextField, InputAdornment, Tooltip, ToggleButtonGroup, ToggleButton, useTheme, useMediaQuery, Button, Chip, Drawer, Divider, Badge } from '@mui/material';
-import { PlaylistAdd, PlaylistAddCheck, Search as SearchIcon, FilterList, CalendarMonth, Star as StarIcon, Movie as MovieIcon, LiveTv as LiveTvIcon, ErrorOutline, ChevronLeft, Close } from '@mui/icons-material';
+import { PlaylistAdd, PlaylistAddCheck, Search as SearchIcon, FilterList, CalendarMonth, Star as StarIcon, Movie as MovieIcon, LiveTv as LiveTvIcon, ErrorOutline, ChevronLeft, Close, Clear } from '@mui/icons-material';
 import { debounce } from 'lodash';
-import { fetchTitles, updateFilters, setSelectedTitle, addToWatchlist, removeFromWatchlist, incrementPage } from '../../store/slices/titlesSlice';
+import { fetchTitles, updateFilters, setSelectedTitle, addToWatchlist, removeFromWatchlist, incrementPage, clearFilters } from '../../store/slices/titlesSlice';
 import TitleDetailsDialog from './TitleDetailsDialog';
 
 // Base64 encoded placeholder image (1x1 transparent pixel)
@@ -128,6 +128,19 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
     // Handle media type change
     const handleMediaTypeChange = (event, newValue) => {
         dispatch(updateFilters({ mediaType: newValue }));
+    };
+
+    // Handle clear all filters
+    const handleClearFilters = () => {
+        dispatch(clearFilters());
+        // Also clear the search query in parent component if callback is provided
+        if (onSearchChange) {
+            const syntheticEvent = {
+                target: { value: '' }
+            };
+            onSearchChange(syntheticEvent);
+        }
+        dispatch(fetchTitles());
     };
 
     const handleTitleClick = (title) => {
@@ -263,19 +276,40 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                         <Typography variant="h6" component="div" sx={{ fontWeight: 600 }}>
                             Filters
                         </Typography>
-                        <IconButton
-                            size="small"
-                            onClick={() => setSidebarOpen(false)}
-                            aria-label="close sidebar"
-                            sx={{ 
-                                color: 'text.secondary',
-                                '&:hover': {
-                                    backgroundColor: 'action.hover'
-                                }
-                            }}
-                        >
-                            {isMobile ? <Close /> : <ChevronLeft />}
-                        </IconButton>
+                        <Box sx={{ display: 'flex', gap: 0.5 }}>
+                            <Tooltip title="Clear all filters">
+                                <IconButton
+                                    size="small"
+                                    onClick={handleClearFilters}
+                                    aria-label="clear filters"
+                                    disabled={activeFilterCount === 0}
+                                    sx={{ 
+                                        color: 'text.secondary',
+                                        '&:hover': {
+                                            backgroundColor: 'action.hover'
+                                        },
+                                        '&:disabled': {
+                                            opacity: 0.3
+                                        }
+                                    }}
+                                >
+                                    <Clear />
+                                </IconButton>
+                            </Tooltip>
+                            <IconButton
+                                size="small"
+                                onClick={() => setSidebarOpen(false)}
+                                aria-label="close sidebar"
+                                sx={{ 
+                                    color: 'text.secondary',
+                                    '&:hover': {
+                                        backgroundColor: 'action.hover'
+                                    }
+                                }}
+                            >
+                                {isMobile ? <Close /> : <ChevronLeft />}
+                            </IconButton>
+                        </Box>
                     </Box>
 
                     <Divider sx={{ mb: 2 }} />
