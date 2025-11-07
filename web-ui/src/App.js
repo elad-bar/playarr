@@ -177,7 +177,7 @@ const AppContent = () => {
                                         flexGrow: 1
                                     }}
                                 >
-                                    IPTV Stream Manager
+                                    Playarr
                                 </Typography>
                                 <Tooltip title={`Switch to ${mode === 'light' ? 'dark' : 'light'} mode`}>
                                     <IconButton color="inherit" onClick={handleThemeToggle}>
