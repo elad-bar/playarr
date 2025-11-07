@@ -118,11 +118,13 @@ class StreamManager {
       logger.debug(`Streams data contains ${Object.keys(streamsData).length} entries`);
 
       // Get providers data to access streams_urls for base URL concatenation
+      // Filter to only enabled providers
       const providersCollection = toCollectionName(DatabaseCollections.IPTV_PROVIDERS);
-      const providers = await this._database.getDataList(providersCollection) || [];
+      const allProviders = await this._database.getDataList(providersCollection) || [];
+      const providers = allProviders.filter(p => p.enabled !== false);
       const providersMap = new Map(providers.map(p => [p.id, p]));
 
-      logger.debug(`Loaded ${providers.length} provider(s)`);
+      logger.debug(`Loaded ${providers.length} enabled provider(s) out of ${allProviders.length} total`);
 
       // Find all streams matching this title and stream ID
       // Stream key format: {type}-{tmdbId}-{streamId}-{providerId}
@@ -143,6 +145,12 @@ class StreamManager {
           const parts = streamKey.split('-');
           const providerId = parts[parts.length - 1];
           const provider = providersMap.get(providerId);
+
+          // Skip if provider is not found (disabled or deleted)
+          if (!provider) {
+            logger.debug(`Skipping stream for disabled/deleted provider ${providerId}`);
+            continue;
+          }
 
           logger.debug(`Processing stream for provider ${providerId}, proxy_url: ${proxyUrl}`);
 
