@@ -131,7 +131,7 @@ export const removeFromWatchlist = createAsyncThunk(
 export const updateWatchlistBulk = createAsyncThunk(
   'titles/updateWatchlistBulk',
   async (data) => {
-    const response = await axiosInstance.put(API_ENDPOINTS.watchlistBulk, data);
+    await axiosInstance.put(API_ENDPOINTS.watchlistBulk, data);
     // Return the titles array with titleKey and watchlist status for state update
     // data.titles should be an array of { key, watchlist }
     return data.titles || [];
