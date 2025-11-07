@@ -282,6 +282,17 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                 {renderAlphabetFilter()}
 
                 {error && renderErrorMessage()}
+
+                {/* Total Count Display */}
+                {!error && pagination.total > 0 && (
+                    <Typography 
+                        variant="body2" 
+                        color="text.secondary" 
+                        sx={{ mt: 1, mb: 2 }}
+                    >
+                        {pagination.total} {pagination.total === 1 ? 'title' : 'titles'} found
+                    </Typography>
+                )}
             </Box>
 
             {/* Titles Grid */}
