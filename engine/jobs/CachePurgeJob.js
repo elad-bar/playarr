@@ -21,31 +21,43 @@ export class CachePurgeJob extends BaseJob {
   constructor(cache, data, providers, tmdbProvider) {
     super('CachePurgeJob', cache, data, providers, tmdbProvider);
     this.cachePolicyPath = path.join(__dirname, '../../data/settings/cache-policy.json');
+    // Check environment variable for actual deletion (default: false = dry-run mode)
+    this.enableDeletion = process.env.CACHE_PURGE_ENABLED === 'true';
   }
 
   /**
    * Execute the cache purge job
-   * @returns {Promise<{purged: number, errors: number}>} Count of purged files and errors
+   * @returns {Promise<{purged: number, errors: number, filesToDelete: string[]}>} Count of purged files, errors, and list of files to delete
    */
   async execute() {
     this._validateDependencies();
 
-    this.logger.info('Starting cache purge job...');
+    const mode = this.enableDeletion ? 'DELETE' : 'DRY-RUN';
+    this.logger.info(`Starting cache purge job (${mode} mode)...`);
 
     try {
       // Load cache policy
       const policy = this._loadCachePolicy();
       if (Object.keys(policy).length === 0) {
         this.logger.warn('No cache policy found, skipping purge');
-        return { purged: 0, errors: 0 };
+        return { purged: 0, errors: 0, filesToDelete: [] };
       }
 
       // Scan cache directory and purge expired files
       const result = await this._purgeExpiredFiles(policy);
+      
+      const mode = this.enableDeletion ? 'DELETE' : 'DRY-RUN';
+      const action = this.enableDeletion ? 'purged' : 'would be deleted';
+      const message = `Cache purge completed (Mode: ${mode}),  ${result.filesToDelete.length} file(s) ${action}, ${result.errors} error(s)`;
 
-      this.logger.info(
-        `Cache purge completed: ${result.purged} file(s) purged, ${result.errors} error(s)`
-      );
+      this.logger.info(message);
+      
+      if (result.filesToDelete.length > 0) {
+        this.logger.info(`Files that ${action}:`);
+        result.filesToDelete.forEach(file => {
+          this.logger.info(`  - ${file}`);
+        });
+      }
 
       return result;
     } catch (error) {
@@ -75,18 +87,19 @@ export class CachePurgeJob extends BaseJob {
    * Purge expired cache files based on policy
    * @private
    * @param {Object} policy - Cache policy object
-   * @returns {Promise<{purged: number, errors: number}>} Count of purged files and errors
+   * @returns {Promise<{purged: number, errors: number, filesToDelete: string[]}>} Count of purged files, errors, and list of files to delete
    */
   async _purgeExpiredFiles(policy) {
     let purgedCount = 0;
     let errorCount = 0;
+    const filesToDelete = [];
 
     try {
       // Recursively scan cache directory
       const cacheDir = this.cache.storageDir;
       if (!fs.existsSync(cacheDir)) {
         this.logger.debug('Cache directory does not exist, nothing to purge');
-        return { purged: 0, errors: 0 };
+        return { purged: 0, errors: 0, filesToDelete: [] };
       }
 
       const files = await this._getAllFiles(cacheDir);
@@ -123,10 +136,18 @@ export class CachePurgeJob extends BaseJob {
           const maxAgeMs = ttlHours * 60 * 60 * 1000;
 
           if (ageMs >= maxAgeMs) {
-            // File is expired, delete it
-            fs.removeSync(filePath);
-            purgedCount++;
-            this.logger.debug(`Purged expired cache file: ${relativePath} (age: ${Math.round(ageMs / 3600000)}h, TTL: ${ttlHours}h)`);
+            // File is expired, add to deletion list
+            filesToDelete.push(relativePath);
+            
+            if (this.enableDeletion) {
+              // Actually delete the file
+              fs.removeSync(filePath);
+              purgedCount++;
+              this.logger.debug(`Purged expired cache file: ${relativePath} (age: ${Math.round(ageMs / 3600000)}h, TTL: ${ttlHours}h)`);
+            } else {
+              // Dry-run mode: just log what would be deleted
+              this.logger.debug(`Would purge expired cache file: ${relativePath} (age: ${Math.round(ageMs / 3600000)}h, TTL: ${ttlHours}h)`);
+            }
           }
         } catch (error) {
           errorCount++;
@@ -134,15 +155,17 @@ export class CachePurgeJob extends BaseJob {
         }
       }
 
-      // Clean up empty directories
-      await this._cleanupEmptyDirectories(cacheDir);
+      // Clean up empty directories (only if deletion is enabled)
+      if (this.enableDeletion) {
+        await this._cleanupEmptyDirectories(cacheDir);
+      }
 
     } catch (error) {
       this.logger.error(`Error during file purge: ${error.message}`);
       errorCount++;
     }
 
-    return { purged: purgedCount, errors: errorCount };
+    return { purged: purgedCount, errors: errorCount, filesToDelete };
   }
 
   /**
