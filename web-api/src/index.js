@@ -127,7 +127,7 @@ async function initialize() {
     const cacheRouter = new CacheRouter(cacheService, fileStorage, titlesManager, statsManager, categoriesManager, database);
     const tmdbRouter = new TMDBRouter(tmdbManager, database);
     const healthcheckRouter = new HealthcheckRouter(fileStorage, settingsManager);
-    const xtreamRouter = new XtreamRouter(xtreamManager, database);
+    const xtreamRouter = new XtreamRouter(xtreamManager, database, streamManager);
 
     // Step 4: Register routes
     app.use('/api/auth', authRouter.router);

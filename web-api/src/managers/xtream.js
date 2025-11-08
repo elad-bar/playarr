@@ -6,6 +6,7 @@ const logger = createLogger('XtreamManager');
 /**
  * Xtream Code API manager for exposing movies and TV shows in Xtream Code format
  * Matches Xtream Code API response structure
+ * Filters by user watchlist (same as playlist endpoints)
  */
 class XtreamManager {
   /**
@@ -19,18 +20,58 @@ class XtreamManager {
   }
 
   /**
+   * Get watchlist titles for a specific media type
+   * @private
+   * @param {Object} user - Authenticated user object
+   * @param {string} mediaType - Media type ('movies' or 'tvshows')
+   * @returns {Promise<Map<string, Object>>} Map of title_key to title object
+   */
+  async _getWatchlistTitles(user, mediaType) {
+    // Get titles in watchlist from user only (no fallbacks)
+    if (!user || !user.watchlist || !Array.isArray(user.watchlist)) {
+      return new Map();
+    }
+
+    const watchlistTitleKeys = user.watchlist;
+    const titlesData = await this._titlesManager.getTitlesData();
+    
+    if (!titlesData) {
+      return new Map();
+    }
+
+    const watchlistTitles = new Map();
+
+    for (const titleKey of watchlistTitleKeys) {
+      // Filter by media type from title key prefix
+      if (!titleKey.startsWith(`${mediaType}-`)) {
+        continue;
+      }
+
+      // Get title from titles data
+      const title = titlesData.get(titleKey);
+      if (!title) {
+        continue;
+      }
+
+      watchlistTitles.set(titleKey, title);
+    }
+
+    return watchlistTitles;
+  }
+
+  /**
    * Get VOD (movie) categories
    * @param {Object} user - Authenticated user object
    * @returns {Promise<Array>} Array of category objects
    */
   async getVodCategories(user) {
     try {
-      const titlesData = await this._titlesManager.getTitlesData();
+      const watchlistTitles = await this._getWatchlistTitles(user, 'movies');
       const categories = new Map();
 
-      // Extract unique categories from movies
-      for (const [titleKey, title] of titlesData.entries()) {
-        if (title.type === 'movies' && title.genres && Array.isArray(title.genres)) {
+      // Extract unique categories from movies in watchlist
+      for (const [titleKey, title] of watchlistTitles.entries()) {
+        if (title.genres && Array.isArray(title.genres)) {
           title.genres.forEach(genre => {
             const genreName = typeof genre === 'string' ? genre : genre.name;
             if (genreName && !categories.has(genreName)) {
@@ -60,11 +101,10 @@ class XtreamManager {
    */
   async getVodStreams(user, baseUrl, categoryId = null) {
     try {
-      const titlesData = await this._titlesManager.getTitlesData();
+      const watchlistTitles = await this._getWatchlistTitles(user, 'movies');
       const movies = [];
 
-      for (const [titleKey, title] of titlesData.entries()) {
-        if (title.type !== 'movies') continue;
+      for (const [titleKey, title] of watchlistTitles.entries()) {
 
         // Filter by category if specified
         if (categoryId) {
@@ -76,8 +116,8 @@ class XtreamManager {
           if (!hasCategory) continue;
         }
 
-        // Generate stream URL pointing to stream endpoint
-        const streamUrl = `${baseUrl}/api/stream/movies/${title.title_id}?api_key=${user.api_key}`;
+        // Generate stream URL in Xtream Code API standard format
+        const streamUrl = `${baseUrl}/movie/${user.username}/${user.api_key}/movies-${title.title_id}.mp4`;
 
         const movie = {
           stream_id: title.title_id,
@@ -124,12 +164,12 @@ class XtreamManager {
    */
   async getSeriesCategories(user) {
     try {
-      const titlesData = await this._titlesManager.getTitlesData();
+      const watchlistTitles = await this._getWatchlistTitles(user, 'tvshows');
       const categories = new Map();
 
-      // Extract unique categories from TV shows
-      for (const [titleKey, title] of titlesData.entries()) {
-        if (title.type === 'tvshows' && title.genres && Array.isArray(title.genres)) {
+      // Extract unique categories from TV shows in watchlist
+      for (const [titleKey, title] of watchlistTitles.entries()) {
+        if (title.genres && Array.isArray(title.genres)) {
           title.genres.forEach(genre => {
             const genreName = typeof genre === 'string' ? genre : genre.name;
             if (genreName && !categories.has(genreName)) {
@@ -159,11 +199,10 @@ class XtreamManager {
    */
   async getSeries(user, baseUrl, categoryId = null) {
     try {
-      const titlesData = await this._titlesManager.getTitlesData();
+      const watchlistTitles = await this._getWatchlistTitles(user, 'tvshows');
       const series = [];
 
-      for (const [titleKey, title] of titlesData.entries()) {
-        if (title.type !== 'tvshows') continue;
+      for (const [titleKey, title] of watchlistTitles.entries()) {
 
         // Filter by category if specified
         if (categoryId) {
@@ -210,16 +249,16 @@ class XtreamManager {
    */
   async getVodInfo(user, baseUrl, vodId) {
     try {
-      const titlesData = await this._titlesManager.getTitlesData();
+      const watchlistTitles = await this._getWatchlistTitles(user, 'movies');
       const titleKey = `movies-${vodId}`;
-      const title = titlesData.get(titleKey);
+      const title = watchlistTitles.get(titleKey);
 
-      if (!title || title.type !== 'movies') {
+      if (!title) {
         return null;
       }
 
-      // Generate stream URL pointing to stream endpoint
-      const streamUrl = `${baseUrl}/api/stream/movies/${title.title_id}?api_key=${user.api_key}`;
+      // Generate stream URL in Xtream Code API standard format
+      const streamUrl = `${baseUrl}/movie/${user.username}/${user.api_key}/movies-${title.title_id}.mp4`;
 
       return {
         info: {
@@ -232,7 +271,7 @@ class XtreamManager {
           cast: '',
           director: '',
           genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', '),
-          releaseDate: title.release_date || '',
+          releasedate: title.release_date || '',
           last_modified: title.lastUpdated || title.createdAt || ''
         },
         movie_data: {
@@ -257,15 +296,17 @@ class XtreamManager {
    */
   async getSeriesInfo(user, baseUrl, seriesId) {
     try {
-      const titlesData = await this._titlesManager.getTitlesData();
+      const watchlistTitles = await this._getWatchlistTitles(user, 'tvshows');
       const titleKey = `tvshows-${seriesId}`;
-      const title = titlesData.get(titleKey);
+      const title = watchlistTitles.get(titleKey);
 
-      if (!title || title.type !== 'tvshows') {
+      if (!title) {
         return null;
       }
 
-      const episodes = [];
+      // Group episodes by season
+      const episodesBySeason = {};
+      const seasonsMap = new Map();
 
       // Build episodes from streams
       if (title.streams && typeof title.streams === 'object') {
@@ -276,12 +317,29 @@ class XtreamManager {
             const season = parseInt(match[1], 10);
             const episode = parseInt(match[2], 10);
             
-            // Generate stream URL pointing to stream endpoint
-            const streamUrl = `${baseUrl}/api/stream/tvshows/${title.title_id}/${season}/${episode}?api_key=${user.api_key}`;
+            // Track unique seasons
+            if (!seasonsMap.has(season)) {
+              seasonsMap.set(season, {
+                season_num: season,
+                air_date: '',
+                name: `Season ${season}`,
+                cover: '',
+                overview: ''
+              });
+            }
+            
+            // Initialize season array if needed
+            if (!episodesBySeason[season]) {
+              episodesBySeason[season] = [];
+            }
+            
+            // Generate stream URL in Xtream Code API standard format
+            const streamUrl = `${baseUrl}/series/${user.username}/${user.api_key}/tvshows-${title.title_id}-${season}-${episode}.mp4`;
 
-            episodes.push({
+            episodesBySeason[season].push({
               id: `${seriesId}-${season}-${episode}`,
               episode_num: episode,
+              season_num: season,
               title: `Episode ${episode}`,
               container_extension: 'mp4',
               info: {
@@ -295,6 +353,18 @@ class XtreamManager {
             });
           }
         }
+      }
+
+      // Build seasons object (keyed by season number as string)
+      const seasons = {};
+      for (const [seasonNum, seasonData] of seasonsMap.entries()) {
+        seasons[String(seasonNum)] = seasonData;
+      }
+
+      // Build episodes object (keyed by season number as string)
+      const episodes = {};
+      for (const [seasonNum, episodeList] of Object.entries(episodesBySeason)) {
+        episodes[String(seasonNum)] = episodeList;
       }
 
       return {
@@ -311,6 +381,7 @@ class XtreamManager {
           rating: title.vote_average?.toString() || '0',
           rating_5based: ((title.vote_average || 0) / 2).toFixed(1)
         },
+        seasons: seasons,
         episodes: episodes
       };
     } catch (error) {

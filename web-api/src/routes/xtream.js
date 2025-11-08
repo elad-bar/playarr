@@ -46,10 +46,12 @@ class XtreamRouter {
   /**
    * @param {import('../managers/xtream.js').XtreamManager} xtreamManager - Xtream manager instance
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
+   * @param {import('../managers/stream.js').StreamManager} streamManager - Stream manager instance
    */
-  constructor(xtreamManager, database) {
+  constructor(xtreamManager, database, streamManager) {
     this._xtreamManager = xtreamManager;
     this._database = database;
+    this._streamManager = streamManager;
     this.router = express.Router();
     
     // Action handlers configuration map
@@ -152,6 +154,85 @@ class XtreamRouter {
       } catch (error) {
         console.error('Xtream API error:', error);
         return res.status(500).json({ error: 'Internal server error' });
+      }
+    });
+
+    /**
+     * GET /movie/:username/:password/:streamId
+     * Handle movie stream requests in Xtream Code API format
+     * Format: /movie/{username}/{password}/movies-{title_id}.mp4
+     */
+    this.router.get('/movie/:username/:password/:streamId', async (req, res) => {
+      try {
+        const { username, password, streamId } = req.params;
+
+        // Authenticate user
+        const user = await this._authenticateUser(username, password);
+        if (!user) {
+          return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        // Parse stream ID to extract title ID
+        const titleId = this._parseMovieStreamId(streamId);
+        if (!titleId) {
+          return res.status(400).json({ error: 'Invalid stream ID format' });
+        }
+
+        // Get best source for the movie
+        const streamUrl = await this._streamManager.getBestSource(titleId, 'movies');
+
+        if (!streamUrl) {
+          return res.status(503).json({ error: 'No available providers' });
+        }
+
+        // Redirect to the actual stream URL
+        return res.redirect(streamUrl);
+      } catch (error) {
+        console.error('Movie stream error:', error);
+        return res.status(500).json({ error: 'Failed to get stream' });
+      }
+    });
+
+    /**
+     * GET /series/:username/:password/:streamId
+     * Handle series stream requests in Xtream Code API format
+     * Format: /series/{username}/{password}/tvshows-{title_id}-{season}-{episode}.mp4
+     */
+    this.router.get('/series/:username/:password/:streamId', async (req, res) => {
+      try {
+        const { username, password, streamId } = req.params;
+
+        // Authenticate user
+        const user = await this._authenticateUser(username, password);
+        if (!user) {
+          return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        // Parse stream ID to extract title ID, season, and episode
+        const parsed = this._parseSeriesStreamId(streamId);
+        if (!parsed) {
+          return res.status(400).json({ error: 'Invalid stream ID format' });
+        }
+
+        const { title_id, season, episode } = parsed;
+
+        // Get best source for the TV show episode
+        const streamUrl = await this._streamManager.getBestSource(
+          title_id,
+          'tvshows',
+          season,
+          episode
+        );
+
+        if (!streamUrl) {
+          return res.status(503).json({ error: 'No available providers' });
+        }
+
+        // Redirect to the actual stream URL
+        return res.redirect(streamUrl);
+      } catch (error) {
+        console.error('Series stream error:', error);
+        return res.status(500).json({ error: 'Failed to get stream' });
       }
     });
   }
@@ -270,6 +351,81 @@ class XtreamRouter {
   async _handleGetSimpleDataTable(req, user, baseUrl) {
     // Not implemented, return empty object
     return {};
+  }
+
+  /**
+   * Parse movie stream ID to extract title ID
+   * @private
+   * @param {string} streamId - Stream ID in format: movies-{title_id}.mp4
+   * @returns {string|null} Title ID or null if invalid format
+   */
+  _parseMovieStreamId(streamId) {
+    // Format: movies-{title_id}.mp4
+    if (!streamId || !streamId.startsWith('movies-') || !streamId.endsWith('.mp4')) {
+      return null;
+    }
+    
+    // Remove 'movies-' prefix and '.mp4' suffix
+    const titleId = streamId.slice(7, -4); // Remove 'movies-' (7 chars) and '.mp4' (4 chars)
+    
+    if (!titleId || titleId.length === 0) {
+      return null;
+    }
+    
+    return titleId;
+  }
+
+  /**
+   * Parse series stream ID to extract title ID, season, and episode
+   * @private
+   * @param {string} streamId - Stream ID in format: tvshows-{title_id}-{season}-{episode}.mp4
+   * @returns {Object|null} Object with title_id, season, episode or null if invalid format
+   */
+  _parseSeriesStreamId(streamId) {
+    // Format: tvshows-{title_id}-{season}-{episode}.mp4
+    if (!streamId || !streamId.startsWith('tvshows-') || !streamId.endsWith('.mp4')) {
+      return null;
+    }
+    
+    // Remove 'tvshows-' prefix and '.mp4' suffix
+    const withoutPrefix = streamId.slice(8); // Remove 'tvshows-' (8 chars)
+    const withoutSuffix = withoutPrefix.slice(0, -4); // Remove '.mp4' (4 chars)
+    
+    // Split by '-' to get components
+    // Expected: {title_id}-{season}-{episode}
+    const parts = withoutSuffix.split('-');
+    
+    // Need at least 3 parts: title_id, season, episode
+    // But title_id might contain dashes, so we need to handle that
+    // The last two parts should be season and episode (numbers)
+    if (parts.length < 3) {
+      return null;
+    }
+    
+    // Last two parts should be season and episode
+    const seasonStr = parts[parts.length - 2];
+    const episodeStr = parts[parts.length - 1];
+    
+    const season = parseInt(seasonStr, 10);
+    const episode = parseInt(episodeStr, 10);
+    
+    // Validate season and episode are valid numbers
+    if (isNaN(season) || isNaN(episode) || season < 1 || episode < 1) {
+      return null;
+    }
+    
+    // Title ID is everything except the last two parts
+    const titleId = parts.slice(0, -2).join('-');
+    
+    if (!titleId || titleId.length === 0) {
+      return null;
+    }
+    
+    return {
+      title_id: titleId,
+      season: season,
+      episode: episode
+    };
   }
 
   /**
