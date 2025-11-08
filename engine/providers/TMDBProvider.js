@@ -770,6 +770,9 @@ export class TMDBProvider extends BaseProvider {
       this.logger.info(`Saved ${Object.keys(allStreamsDict).length} stream entries to main-titles-streams.json`);
     }
 
+    // Refresh API cache after both titles and streams are saved
+    await this.refreshAPICache('titles');
+
     return processedCountByType;
   }
 
@@ -947,9 +950,6 @@ export class TMDBProvider extends BaseProvider {
       // Update in-memory cache to keep it in sync with disk
       this._mainTitlesCache = updatedTitles;
       this.logger.info(`Saved ${newMainTitles.length} main titles (total: ${updatedTitles.length} titles)`);
-      
-      // Refresh API cache
-      await this.refreshAPICache('titles');
       
       return updatedTitles;
     } catch (error) {
