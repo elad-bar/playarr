@@ -236,11 +236,17 @@ export class AGTVProvider extends BaseIPTVProvider {
    * @returns {Promise<string>} M3U8 content as string
    */
   async _fetchM3U8WithCache(url, cacheKeyParts, maxAgeHours = 6) {
-    // Check cache first (if file exists, it's valid - purge job handles expiration)
+    // Check cache first - verify it exists AND is not expired
     const cached = this.cache.getText(...cacheKeyParts);
     if (cached) {
-      this.logger.debug(`Loading M3U8 from cache: ${cacheKeyParts.join('/')}`);
-      return cached;
+      // Check if cache is expired based on policy
+      const isExpired = this.cache.isExpired(...cacheKeyParts);
+      if (!isExpired) {
+        this.logger.debug(`Loading M3U8 from cache: ${cacheKeyParts.join('/')}`);
+        return cached;
+      } else {
+        this.logger.debug(`M3U8 cache expired for: ${cacheKeyParts.join('/')}, fetching fresh data`);
+      }
     }
 
     // Fetch from API with rate limiting

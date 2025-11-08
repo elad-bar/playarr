@@ -207,8 +207,7 @@ export class BaseProvider {
 
   /**
    * Fetch data from API with caching support
-   * Checks cache first (file existence), then fetches from API if cache doesn't exist or forceRefresh is true
-   * Cache expiration is handled by CachePurgeJob based on cache-policy.json
+   * Checks cache first and validates expiration based on cache-policy.json, then fetches from API if cache doesn't exist, is expired, or forceRefresh is true
    * @param {string} url - API URL to fetch from
    * @param {string[]} cacheKeyParts - Cache key parts array (e.g., [providerId, 'metadata', 'movies.json'])
    * @param {number|null} [ttlHours=1] - TTL in hours (null for Infinity). Used to update cache policy.
@@ -220,12 +219,18 @@ export class BaseProvider {
     // Convert Infinity to null for JSON storage
     const ttl = ttlHours === Infinity ? null : ttlHours;
 
-    // Check cache first (if file exists, it's valid - purge job handles expiration)
+    // Check cache first - verify it exists AND is not expired
     if (!forceRefresh && cacheKeyParts.length > 0) {
       const cached = this.cache.get(...cacheKeyParts);
       if (cached) {
-        this.logger.debug(`Loading from cache: ${cacheKeyParts.join('/')}`);
-        return cached;
+        // Check if cache is expired based on policy
+        const isExpired = this.cache.isExpired(...cacheKeyParts);
+        if (!isExpired) {
+          this.logger.debug(`Loading from cache: ${cacheKeyParts.join('/')}`);
+          return cached;
+        } else {
+          this.logger.debug(`Cache expired for: ${cacheKeyParts.join('/')}, fetching fresh data`);
+        }
       }
     }
 

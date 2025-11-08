@@ -139,6 +139,74 @@ export class StorageManager {
   }
 
   /**
+   * Check if policy key matches file path (handles dynamic segments)
+   * @private
+   * @param {string} policyKey - Policy key to check (e.g., "tmdb/tv/{tmdbId}/season")
+   * @param {string} filePathKey - File path key (e.g., "tmdb/tv/12345/season")
+   * @returns {boolean} True if policy key matches file path
+   */
+  _matchesPolicyKey(policyKey, filePathKey) {
+    // Replace dynamic segments in policy key with regex pattern
+    const regexPattern = policyKey
+      .replace(/\{providerId\}/g, '[^/]+')
+      .replace(/\{tmdbId\}/g, '[^/]+');
+    
+    const regex = new RegExp(`^${regexPattern}$`);
+    return regex.test(filePathKey);
+  }
+
+  /**
+   * Check if cache is expired based on cache policy
+   * @param {...string} keyParts - Cache key parts
+   * @returns {boolean} True if cache is expired or doesn't exist, false if valid or no policy found
+   */
+  isExpired(...keyParts) {
+    try {
+      const cachePath = this._buildPath(...keyParts);
+      if (!fs.existsSync(cachePath)) {
+        return true; // Doesn't exist, treat as expired to force fetch
+      }
+
+      // Get TTL from policy
+      const policyKey = this._buildPolicyKey(...keyParts);
+      const policy = this._loadCachePolicy();
+      
+    // Try exact match first
+      let ttlHours = policy[policyKey];
+      
+      // If not found, try pattern matching for dynamic keys
+      if (ttlHours === undefined) {
+        for (const [policyKeyPattern, ttl] of Object.entries(policy)) {
+          if (this._matchesPolicyKey(policyKeyPattern, policyKey)) {
+            ttlHours = ttl;
+            break;
+          }
+        }
+      }
+
+      // If no policy found, cache never expires (backward compatibility)
+      if (ttlHours === undefined) {
+        return false;
+      }
+
+      // If TTL is null, cache never expires
+      if (ttlHours === null) {
+        return false;
+      }
+
+      // Check file age
+      const stats = fs.statSync(cachePath);
+      const ageMs = Date.now() - stats.mtimeMs;
+      const maxAgeMs = ttlHours * 60 * 60 * 1000;
+
+      return ageMs >= maxAgeMs;
+    } catch (error) {
+      this.logger.error(`Error checking cache expiration: ${error.message}`);
+      return true; // Treat errors as expired to force refresh
+    }
+  }
+
+  /**
    * Get data from cache
    * @param {...string} keyParts - Cache key parts (providerId is optional)
    * @returns {*|null} Cached data or null if cache doesn't exist

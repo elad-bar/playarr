@@ -52,19 +52,20 @@ async function main() {
             dataDir: DATA_DIR
           }
         }
-      },
-      {
-        name: 'cachePurge',
-        path: path.join(__dirname, 'workers', 'cachePurge.js'),
-        interval: '15m', // Every 15 minutes
-        timeout: 0, // Run immediately on startup
-        worker: {
-          workerData: {
-            cacheDir: CACHE_DIR,
-            dataDir: DATA_DIR
-          }
-        }
       }
+      // Cache purge job disabled - expiration is now checked on-demand when cache is accessed
+      // {
+      //   name: 'cachePurge',
+      //   path: path.join(__dirname, 'workers', 'cachePurge.js'),
+      //   interval: '15m', // Every 15 minutes
+      //   timeout: 0, // Run immediately on startup
+      //   worker: {
+      //     workerData: {
+      //       cacheDir: CACHE_DIR,
+      //       dataDir: DATA_DIR
+      //     }
+      //   }
+      // }
     ]
   });
 
@@ -143,7 +144,6 @@ async function main() {
     logger.info('Job scheduler started. Jobs will run according to schedule.');
     logger.info('- processProvidersTitles: On startup and every 1 hour');
     logger.info('- processMainTitles: First run in 5 minutes, then every 3 minutes (skipped if processProvidersTitles is running)');
-    logger.info('- cachePurge: On startup and every 15 minutes');
     
     // Keep the process running
     process.on('SIGINT', async () => {
