@@ -419,6 +419,11 @@ export class TMDBProvider extends BaseProvider {
         return false;
       }
       
+      // Skip titles that already have similar data (already processed)
+      if (title.similar !== undefined) {
+        return false;
+      }
+      
       // Only process if title was just created (createdAt == lastUpdated)
       return title.createdAt === title.lastUpdated;
     });
@@ -486,7 +491,8 @@ export class TMDBProvider extends BaseProvider {
             // Create updated title with similar titles (store as title_keys)
             const updatedTitle = {
               ...existingMainTitleMap.get(titleKey) || mainTitle,
-              similar: similarTitleIds
+              similar: similarTitleIds,
+              lastUpdated: new Date().toISOString() // Update lastUpdated to mark as processed
             };
 
             updatedTitles.push(updatedTitle);
@@ -499,6 +505,8 @@ export class TMDBProvider extends BaseProvider {
             if (!existingTitle.similar) {
               existingTitle.similar = [];
             }
+            // Update lastUpdated even on error to prevent reprocessing
+            existingTitle.lastUpdated = new Date().toISOString();
             updatedTitles.push(existingTitle);
           }
         }));
@@ -954,9 +962,11 @@ export class TMDBProvider extends BaseProvider {
       const newTitle = newTitleMap.get(titleKey);
       if (newTitle) {
         // Preserve createdAt if it exists
+        // Preserve lastUpdated from newTitle if set, otherwise keep existing lastUpdated
         return {
           ...newTitle,
-          createdAt: existing.createdAt || newTitle.createdAt || new Date().toISOString()
+          createdAt: existing.createdAt || newTitle.createdAt || new Date().toISOString(),
+          lastUpdated: newTitle.lastUpdated || existing.lastUpdated || new Date().toISOString()
         };
       }
       return existing;
