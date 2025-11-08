@@ -23,13 +23,27 @@ export class ProcessProvidersTitlesJob extends BaseJob {
   async execute() {
     this._validateDependencies();
 
-    // Fetch categories from all providers first
-    await this.fetchAllCategories();
+    try {
+      // Fetch categories from all providers first
+      await this.fetchAllCategories();
 
-    // Then fetch metadata from all providers
-    const results = await this.fetchAllMetadata();
+      // Then fetch metadata from all providers
+      const results = await this.fetchAllMetadata();
 
-    return results;
+      return results;
+    } finally {
+      // Unload titles from memory to free resources
+      // Note: fetchMetadata() updates _titlesCache via saveTitles(), so cleanup is needed
+      try {
+        this.logger.debug('Unloading titles from memory cache...');
+        for (const [providerId, providerInstance] of this.providers) {
+          providerInstance.unloadTitles();
+        }
+        this.logger.debug('Memory cleanup completed');
+      } catch (error) {
+        this.logger.error(`Error during memory cleanup: ${error.message}`);
+      }
+    }
   }
 
   /**

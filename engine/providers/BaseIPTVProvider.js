@@ -614,5 +614,16 @@ export class BaseIPTVProvider extends BaseProvider {
     ignoredTitles[titleId] = reason;
     await this.saveIgnoredTitles(type, ignoredTitles);
   }
+
+  /**
+   * Unload titles from memory cache
+   * Clears in-memory caches to free memory after job execution
+   * Safe to call multiple times (idempotent)
+   */
+  unloadTitles() {
+    this._titlesCache = null;
+    this._ignoredCache = null;
+    this.logger.debug('Unloaded titles from memory cache');
+  }
 }
 

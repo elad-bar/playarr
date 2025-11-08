@@ -24,30 +24,44 @@ export class ProcessMainTitlesJob extends BaseJob {
   async execute() {
     this._validateDependencies();
 
-    // Load all provider titles and main titles into memory once at the start
-    // This ensures all subsequent operations use cached data instead of reading from disk
-    this.logger.info('Loading all provider titles and main titles into memory...');
-    for (const [providerId, providerInstance] of this.providers) {
-      providerInstance.loadAllTitles();
-      providerInstance.getAllIgnored(); // Initialize ignored cache as well
+    try {
+      // Load all provider titles and main titles into memory once at the start
+      // This ensures all subsequent operations use cached data instead of reading from disk
+      this.logger.info('Loading all provider titles and main titles into memory...');
+      for (const [providerId, providerInstance] of this.providers) {
+        providerInstance.loadAllTitles();
+        providerInstance.getAllIgnored(); // Initialize ignored cache as well
+      }
+      // Load main titles into memory (managed by TMDBProvider)
+      this.tmdbProvider.loadMainTitles();
+      this.logger.info(`All provider titles and main titles loaded into memory (${this.tmdbProvider.getMainTitles().length} main titles)`);
+
+      // Match TMDB IDs for all provider titles
+      await this.matchAllTMDBIds();
+
+      // Extract provider titles into dictionary for main title processing
+      const providerTitlesByProvider = new Map();
+      for (const [providerId, providerInstance] of this.providers) {
+        providerTitlesByProvider.set(providerId, providerInstance.getAllTitles());
+      }
+
+      // Delegate main title processing to TMDBProvider
+      const result = await this.tmdbProvider.processMainTitles(providerTitlesByProvider);
+
+      return result;
+    } finally {
+      // Unload titles from memory to free resources
+      try {
+        this.logger.debug('Unloading titles from memory cache...');
+        for (const [providerId, providerInstance] of this.providers) {
+          providerInstance.unloadTitles();
+        }
+        this.tmdbProvider.unloadMainTitles();
+        this.logger.debug('Memory cleanup completed');
+      } catch (error) {
+        this.logger.error(`Error during memory cleanup: ${error.message}`);
+      }
     }
-    // Load main titles into memory (managed by TMDBProvider)
-    this.tmdbProvider.loadMainTitles();
-    this.logger.info(`All provider titles and main titles loaded into memory (${this.tmdbProvider.getMainTitles().length} main titles)`);
-
-    // Match TMDB IDs for all provider titles
-    await this.matchAllTMDBIds();
-
-    // Extract provider titles into dictionary for main title processing
-    const providerTitlesByProvider = new Map();
-    for (const [providerId, providerInstance] of this.providers) {
-      providerTitlesByProvider.set(providerId, providerInstance.getAllTitles());
-    }
-
-    // Delegate main title processing to TMDBProvider
-    const result = await this.tmdbProvider.processMainTitles(providerTitlesByProvider);
-
-    return result;
   }
 
   /**

@@ -370,6 +370,16 @@ export class TMDBProvider extends BaseProvider {
   }
 
   /**
+   * Unload main titles from memory cache
+   * Clears in-memory cache to free memory after job execution
+   * Safe to call multiple times (idempotent)
+   */
+  unloadMainTitles() {
+    this._mainTitlesCache = null;
+    this.logger.debug('Unloaded main titles from memory cache');
+  }
+
+  /**
    * Enrich main titles with similar titles
    * Fetches similar titles from TMDB API, filters to only include titles available in main titles,
    * and stores the filtered title_keys under the 'similar' property as an array
