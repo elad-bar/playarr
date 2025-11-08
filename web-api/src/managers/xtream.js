@@ -317,14 +317,18 @@ class XtreamManager {
             const season = parseInt(match[1], 10);
             const episode = parseInt(match[2], 10);
             
-            // Track unique seasons
+            // Track unique seasons with all required fields
             if (!seasonsMap.has(season)) {
               seasonsMap.set(season, {
-                season_num: season,
+                season_number: season,
                 air_date: '',
                 name: `Season ${season}`,
+                overview: '',
                 cover: '',
-                overview: ''
+                cover_big: '',
+                episode_count: 0,
+                id: season,
+                vote_average: 0
               });
             }
             
@@ -333,14 +337,16 @@ class XtreamManager {
               episodesBySeason[season] = [];
             }
             
-            // Generate stream URL in Xtream Code API standard format
-            const streamUrl = `${baseUrl}/series/${user.username}/${user.api_key}/tvshows-${title.title_id}-${season}-${episode}.mp4`;
+            // Format season and episode numbers with padding (S01E01)
+            const seasonPadded = String(season).padStart(2, '0');
+            const episodePadded = String(episode).padStart(2, '0');
 
             episodesBySeason[season].push({
-              id: `${seriesId}-${season}-${episode}`,
+              id: `tvshows-${title.title_id}-${season}-${episode}`,
               episode_num: episode,
               season_num: season,
-              title: `Episode ${episode}`,
+              season: season,
+              title: `S${seasonPadded}E${episodePadded}`,
               container_extension: 'mp4',
               info: {
                 plot: '',
@@ -348,18 +354,18 @@ class XtreamManager {
                 duration: '',
                 rating: '0',
                 rating_5based: '0'
-              },
-              stream_url: streamUrl
+              }
             });
+            
+            // Update episode count for this season
+            const seasonData = seasonsMap.get(season);
+            seasonData.episode_count = episodesBySeason[season].length;
           }
         }
       }
 
-      // Build seasons object (keyed by season number as string)
-      const seasons = {};
-      for (const [seasonNum, seasonData] of seasonsMap.entries()) {
-        seasons[String(seasonNum)] = seasonData;
-      }
+      // Build seasons as array (sorted by season_number)
+      const seasons = Array.from(seasonsMap.values()).sort((a, b) => a.season_number - b.season_number);
 
       // Build episodes object (keyed by season number as string)
       const episodes = {};
