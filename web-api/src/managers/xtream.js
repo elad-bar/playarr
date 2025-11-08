@@ -257,28 +257,48 @@ class XtreamManager {
         return null;
       }
 
-      // Generate stream URL in Xtream Code API standard format
-      const streamUrl = `${baseUrl}/movie/${user.username}/${user.api_key}/movies-${title.title_id}.mp4`;
+      // Build movie_image URL from poster_path
+      const movieImage = title.poster_path 
+        ? `https://image.tmdb.org/t/p/w300${title.poster_path}` 
+        : '';
+
+      // Build backdrop_path array
+      const backdropPath = title.backdrop_path 
+        ? [`https://image.tmdb.org/t/p/w300${title.backdrop_path}`]
+        : [];
+
+      // Calculate duration_secs and format duration
+      const durationSecs = title.runtime ? title.runtime * 60 : 0;
+      const duration = this._formatDuration(title.runtime);
+
+      // Get category ID
+      const categoryId = this._getCategoryId(title.genres);
+
+      // Convert createdAt to Unix timestamp
+      const added = this._toUnixTimestamp(title.createdAt);
 
       return {
         info: {
-          tmdb_id: title.title_id,
-          name: title.title,
-          release_date: title.release_date || '',
-          rating: title.vote_average?.toString() || '0',
-          duration: title.runtime ? `${title.runtime} min` : '',
+          movie_image: movieImage,
+          tmdb_id: title.title_id?.toString() || '',
+          backdrop_path: backdropPath,
+          genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(' / ') || '',
           plot: title.overview || '',
           cast: '',
+          rating: title.vote_average?.toString() || '0',
           director: '',
-          genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', '),
           releasedate: title.release_date || '',
-          last_modified: title.lastUpdated || title.createdAt || ''
+          duration_secs: durationSecs,
+          duration: duration
         },
         movie_data: {
           stream_id: title.title_id,
           name: title.title,
+          added: added,
+          category_id: categoryId.toString(),
           container_extension: 'mp4',
-          stream_url: streamUrl
+          custom_sid: '',
+          direct_source: ''
         }
       };
     } catch (error) {
@@ -393,6 +413,44 @@ class XtreamManager {
     } catch (error) {
       logger.error(`Error getting series info for ${seriesId}:`, error);
       return null;
+    }
+  }
+
+  /**
+   * Format duration from minutes to HH:MM:SS format
+   * @private
+   * @param {number|null|undefined} runtimeMinutes - Runtime in minutes
+   * @returns {string} Duration in HH:MM:SS format or empty string
+   */
+  _formatDuration(runtimeMinutes) {
+    if (!runtimeMinutes || runtimeMinutes === 0) {
+      return '';
+    }
+
+    const totalSeconds = runtimeMinutes * 60;
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  /**
+   * Convert ISO timestamp to Unix timestamp (seconds since epoch)
+   * @private
+   * @param {string|null|undefined} isoTimestamp - ISO timestamp string
+   * @returns {string} Unix timestamp in seconds or current timestamp if not available
+   */
+  _toUnixTimestamp(isoTimestamp) {
+    if (!isoTimestamp) {
+      return Math.floor(Date.now() / 1000).toString();
+    }
+
+    try {
+      const date = new Date(isoTimestamp);
+      return Math.floor(date.getTime() / 1000).toString();
+    } catch (error) {
+      return Math.floor(Date.now() / 1000).toString();
     }
   }
 
