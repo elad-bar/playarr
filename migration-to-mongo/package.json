@@ -1,0 +1,23 @@
+{
+  "name": "playarr-migration",
+  "version": "1.0.0",
+  "description": "MongoDB migration scripts for Playarr",
+  "type": "module",
+  "main": "scripts/migrate.js",
+  "scripts": {
+    "postinstall": "node scripts/setup.js",
+    "setup": "node scripts/setup.js",
+    "migrate": "node scripts/migrate.js",
+    "create-indexes": "node scripts/create-indexes.js",
+    "validate": "node scripts/validate-migration.js"
+  },
+  "dependencies": {
+    "mongodb": "^6.3.0",
+    "fs-extra": "^11.2.0",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

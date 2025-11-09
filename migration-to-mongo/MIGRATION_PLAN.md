@@ -42,6 +42,7 @@ Main titles collection (consolidated from main.json)
   genres: Array,
   runtime: Number,          // Movies only
   similar_titles: Array,    // Array of title_key strings
+  streams: Object,          // Embedded summary: { "main": ["provider1", "provider2"] } or { "S01-E01": ["provider1"] }
   createdAt: ISODate,
   lastUpdated: ISODate
 }
@@ -54,7 +55,15 @@ Main titles collection (consolidated from main.json)
 - `{ release_date: 1 }`
 - `{ type: 1, release_date: 1 }` - Compound for filtering
 
-**Migration Source:** `data/titles/main.json`
+**Migration Source:** 
+- `data/titles/main.json` - Main title data
+- `data/titles/main-titles-streams.json` - Streams data (used to build embedded summary)
+
+**Transformation:**
+- Streams summary is built from `main-titles-streams.json` by grouping streams by `title_key` and `stream_id`
+- Format: `{ stream_id: [provider_ids] }` - e.g., `{ "main": ["provider1", "provider2"] }` for movies, `{ "S01-E01": ["provider1"] }` for TV shows
+- Full stream details (with URLs) are stored in the separate `title_streams` collection
+- The embedded summary enables efficient queries without joining the `title_streams` collection
 
 ---
 
@@ -211,20 +220,22 @@ Global settings (from settings.json)
 **Schema:**
 ```javascript
 {
-  _id: ObjectId,
-  tmdb_token: String,
-  tmdb_api_rate: Object,   // { concurrent: Number, duration_seconds: Number }
-  // ... all other setting fields preserved as-is
+  _id: String,              // Setting key (e.g., "tmdb_token", "tmdb_api_rate")
+  value: Any,               // Setting value (can be String, Object, Number, etc.)
   createdAt: ISODate,
   lastUpdated: ISODate
 }
 ```
 
 **Indexes:**
-- No additional indexes needed (single document collection)
+- `{ _id: 1 }` - Unique (key is the _id)
 
 **Migration Source:** `data/settings/settings.json`
-**Note:** Stored as single document since settings are always accessed together
+**Transformation:**
+- Each key-value pair becomes a separate document
+- Document `_id` = setting key
+- Document `value` = setting value
+- Example: `{ "tmdb_token": "..." }` becomes `{ _id: "tmdb_token", value: "...", createdAt, lastUpdated }`
 
 ---
 
@@ -234,18 +245,22 @@ Cache expiration policies (from cache-policy.json)
 **Schema:**
 ```javascript
 {
-  _id: ObjectId,
-  policies: Object,         // { "tmdb/search/movie": null, "tmdb/tv/{tmdbId}/season": 6, ... }
+  _id: String,              // Cache path key (e.g., "tmdb/search/movie", "agtv/tvshows/metadata")
+  value: Number | null,     // TTL value in hours (or null for no cache)
   createdAt: ISODate,
   lastUpdated: ISODate
 }
 ```
 
 **Indexes:**
-- No additional indexes needed (single document collection)
+- `{ _id: 1 }` - Unique (key is the _id)
 
 **Migration Source:** `data/settings/cache-policy.json`
-**Note:** Stored as single document with policies object since policies are always accessed together and pattern matching is done in application code
+**Transformation:**
+- Each key-value pair becomes a separate document
+- Document `_id` = cache path key
+- Document `value` = TTL value (Number or null)
+- Example: `{ "tmdb/search/movie": null }` becomes `{ _id: "tmdb/search/movie", value: null, createdAt, lastUpdated }`
 
 ---
 
@@ -313,9 +328,11 @@ API statistics (from stats.json)
 ### Data Transformation
 
 #### For titles collection:
-- Remove `streams` field (moved to separate collection)
+- Build embedded `streams` summary from `main-titles-streams.json` by grouping by `title_key` and `stream_id`
+- Format: `{ stream_id: [provider_ids] }` - e.g., `{ "main": ["provider1", "provider2"] }` for movies
 - Preserve all other fields
 - Ensure `title_key` is present (generate if missing: `{type}-{title_id}`)
+- Full stream details (with URLs) are stored in separate `title_streams` collection
 
 #### For title_streams collection:
 - Parse key format: `{type}-{tmdbId}-{streamId}-{providerId}`
@@ -344,12 +361,16 @@ API statistics (from stats.json)
 - Ensure `id` field is unique
 
 #### For settings collection:
-- Keep as single document
-- Preserve all setting fields as-is
+- Transform each key-value pair into a document
+- Document `_id` = setting key
+- Document `value` = setting value
+- Preserve timestamps for each document
 
 #### For cache_policy collection:
-- Keep as single document
-- Preserve `policies` object as-is
+- Transform each key-value pair into a document
+- Document `_id` = cache path key
+- Document `value` = TTL value (Number or null)
+- Preserve timestamps for each document
 
 #### For stats collection:
 - Keep as single document
@@ -388,7 +409,8 @@ API statistics (from stats.json)
 
 - Keep JSON files as backup during transition period
 - Ignored titles are merged into `provider_titles` collection as `ignored` boolean flag and `ignored_reason` field
-- Settings, cache_policy, and stats are stored as single documents since they're always accessed together
+- Settings and cache_policy are stored as one document per key-value pair for efficient individual key lookups
+- Stats is stored as a single document since stats are always accessed together
 - Monitor MongoDB performance and adjust indexes as needed
 - Document any schema changes or optimizations
 
