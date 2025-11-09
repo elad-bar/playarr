@@ -328,25 +328,4 @@ export class BaseProvider {
 
     return response.data;
   }
-
-  /**
-   * Refresh API cache for a specific collection key
-   * @param {string} cacheKey - Cache key to refresh (e.g., 'titles', 'provider-id.titles', 'provider-id.categories')
-   * @param {number} [port=3000] - API server port (default: 3000)
-   * @returns {Promise<void>}
-   */
-  async refreshAPICache(cacheKey, port = 3000) {
-    if (!cacheKey) {
-      return;
-    }
-
-    try {
-      const url = `http://localhost:${port}/api/cache/refresh/${cacheKey}`;
-      await axios.post(url, {}, { timeout: 5000 });
-      this.logger.debug(`Refreshed API cache for key: ${cacheKey}`);
-    } catch (error) {
-      // Don't fail operation if cache refresh fails
-      this.logger.debug(`Cache refresh skipped for key ${cacheKey}: ${error.message}`);
-    }
-  }
 }

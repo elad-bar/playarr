@@ -184,9 +184,6 @@ async function initialize() {
       logger.info(`Server running on port ${PORT}`);
       logger.info(`API available at http://localhost:${PORT}/api`);
       logger.info(`Socket.IO available at ws://localhost:${PORT}/socket.io`);
-      
-      // Initialize API titles cache after server starts
-      await cacheRouter.initializeAPITitlesCache();
     });
   } catch (error) {
     logger.error('Failed to initialize application:', error);

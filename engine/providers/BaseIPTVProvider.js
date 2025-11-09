@@ -316,9 +316,6 @@ export class BaseIPTVProvider extends BaseProvider {
       const totalSaved = result.inserted + result.updated;
       this.logger.info(`Saved ${totalSaved} categories for ${type} to MongoDB (${result.inserted} inserted, ${result.updated} updated)`);
       
-      // Refresh API cache
-      await this.refreshAPICache(`${this.providerId}.categories`);
-      
       return { saved: totalSaved, inserted: result.inserted, updated: result.updated };
     } catch (error) {
       this.logger.error(`Error saving categories for ${type} to MongoDB: ${error.message}`);
@@ -512,9 +509,6 @@ export class BaseIPTVProvider extends BaseProvider {
       const totalSaved = result.inserted + result.updated;
       this.logger.info(`Saved ${totalSaved} titles to MongoDB (${result.inserted} inserted, ${result.updated} updated)`);
       
-      // Refresh API cache
-      await this.refreshAPICache(`${this.providerId}.titles`);
-      
       return { saved: totalSaved, inserted: result.inserted, updated: result.updated };
     } catch (error) {
       this.logger.error(`Error saving titles to MongoDB: ${error.message}`);
@@ -654,9 +648,6 @@ export class BaseIPTVProvider extends BaseProvider {
       const count = Object.keys(allIgnored).length;
       const reasonGroups = Object.keys(titlesByReason).length;
       this.logger.info(`Saved ${count} ignored titles to MongoDB (${reasonGroups} reason groups)`);
-      
-      // Refresh API cache
-      await this.refreshAPICache(`${this.providerId}.ignored`);
     } catch (error) {
       this.logger.error(`Error saving ignored titles to MongoDB: ${error.message}`);
       throw error;

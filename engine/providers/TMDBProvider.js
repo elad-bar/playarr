@@ -828,9 +828,6 @@ export class TMDBProvider extends BaseProvider {
       }
     }
 
-    // Refresh API cache after both titles and streams are saved
-    await this.refreshAPICache('titles');
-
     return processedCountByType;
   }
 
