@@ -10,7 +10,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, '../cache');
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
 const logger = createLogger('Main');
 
 /**
@@ -36,8 +35,7 @@ async function main() {
         timeout: 0, // Run immediately on startup
         worker: {
           workerData: {
-            cacheDir: CACHE_DIR,
-            dataDir: DATA_DIR
+            cacheDir: CACHE_DIR
           }
         }
       },
@@ -48,24 +46,10 @@ async function main() {
         timeout: '1m', // First run 1 minute after startup
         worker: {
           workerData: {
-            cacheDir: CACHE_DIR,
-            dataDir: DATA_DIR
+            cacheDir: CACHE_DIR
           }
         }
       }
-      // Cache purge job disabled - expiration is now checked on-demand when cache is accessed
-      // {
-      //   name: 'cachePurge',
-      //   path: path.join(__dirname, 'workers', 'cachePurge.js'),
-      //   interval: '15m', // Every 15 minutes
-      //   timeout: 0, // Run immediately on startup
-      //   worker: {
-      //     workerData: {
-      //       cacheDir: CACHE_DIR,
-      //       dataDir: DATA_DIR
-      //     }
-      //   }
-      // }
     ]
   });
 

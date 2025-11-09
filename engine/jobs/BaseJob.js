@@ -2,26 +2,24 @@ import { createLogger } from '../utils/logger.js';
 
 /**
  * Base class for all jobs in the engine
- * Provides common functionality: cache, data storage, providers, TMDB provider, and logger
+ * Provides common functionality: cache, providers, TMDB provider, and logger
  * @abstract
  */
 export class BaseJob {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
-   * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
    * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @param {Map<string, import('../providers/BaseIPTVProvider.js').BaseIPTVProvider>} providers - Map of providerId -> provider instance (already initialized)
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider singleton instance
    */
-  constructor(jobName, cache, data, mongoData, providers, tmdbProvider) {
+  constructor(jobName, cache, mongoData, providers, tmdbProvider) {
     if (this.constructor === BaseJob) {
       throw new Error('BaseJob is an abstract class and cannot be instantiated directly');
     }
 
     this.jobName = jobName;
     this.cache = cache;
-    this.data = data;
     this.mongoData = mongoData;
     this.providers = providers; // Map<string, BaseIPTVProvider>
     this.tmdbProvider = tmdbProvider;
@@ -46,9 +44,6 @@ export class BaseJob {
   _validateDependencies() {
     if (!this.cache) {
       throw new Error('Cache storage manager is required');
-    }
-    if (!this.data) {
-      throw new Error('Data storage manager is required');
     }
     if (!this.mongoData) {
       throw new Error('MongoDB data service is required');

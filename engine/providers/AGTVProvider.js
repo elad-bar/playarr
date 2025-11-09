@@ -44,6 +44,18 @@ export class AGTVProvider extends BaseIPTVProvider {
   }
 
   /**
+   * Get default cache policies for AGTV provider
+   * @returns {Object} Cache policy object
+   */
+  getDefaultCachePolicies() {
+    const providerId = this.providerId;
+    return {
+      [`${providerId}/movies/metadata`]: 6,           // 6 hours (for M3U8 list.m3u8)
+      [`${providerId}/tvshows/metadata`]: 6,          // 6 hours (for M3U8 list-{page}.m3u8)
+    };
+  }
+
+  /**
    * @returns {string} 'agtv'
    * @override
    */
@@ -261,7 +273,7 @@ export class AGTVProvider extends BaseIPTVProvider {
     if (cacheKeyParts.length > 0) {
       // Convert Infinity to null for JSON storage
       const ttl = maxAgeHours === Infinity ? null : maxAgeHours;
-      this.cache.setText(response.data, ttl, ...cacheKeyParts);
+      await this.cache.setText(response.data, ttl, ...cacheKeyParts);
     }
 
     return response.data;

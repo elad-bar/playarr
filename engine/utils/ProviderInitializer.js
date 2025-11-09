@@ -16,7 +16,6 @@ export class ProviderInitializer {
   // Static singleton instance
   static instance = null;
   static cache = null;
-  static data = null;
   static mongoClient = null;
   static mongoData = null;
   static providers = null; // Map<string, BaseIPTVProvider>
@@ -27,10 +26,9 @@ export class ProviderInitializer {
   /**
    * Initialize providers (singleton - only initializes once)
    * @param {string} cacheDir - Directory path for cache storage
-   * @param {string} dataDir - Directory path for data storage
    * @returns {Promise<void>}
    */
-  static async initialize(cacheDir, dataDir) {
+  static async initialize(cacheDir) {
     // If already initialized, skip
     if (ProviderInitializer.initialized) {
       ProviderInitializer.logger.debug('Providers already initialized, skipping...');
@@ -54,10 +52,22 @@ export class ProviderInitializer {
       throw new Error(`MongoDB connection failed: ${error.message}`);
     }
 
-    // Initialize storage managers (cache directory remains file-based)
-    ProviderInitializer.cache = new StorageManager(cacheDir, false);
-    ProviderInitializer.data = new StorageManager(dataDir, false);
-    ProviderInitializer.logger.info('✓ Storage managers initialized');
+    // Initialize storage manager (cache directory remains file-based)
+    ProviderInitializer.cache = new StorageManager(cacheDir, false, ProviderInitializer.mongoData);
+    
+    // Initialize cache policies (load once from MongoDB)
+    await ProviderInitializer.cache.initialize();
+    
+    ProviderInitializer.logger.info('✓ Storage manager initialized');
+
+    // Load settings from MongoDB (generic, for all components)
+    let settings = {};
+    try {
+      settings = await ProviderInitializer.mongoData.getSettings();
+      ProviderInitializer.logger.info('✓ Settings loaded from MongoDB');
+    } catch (error) {
+      ProviderInitializer.logger.warn(`Failed to load settings from MongoDB: ${error.message}`);
+    }
 
     // Initialize IPTV providers
     ProviderInitializer.providers = new Map();
@@ -67,6 +77,10 @@ export class ProviderInitializer {
     for (const providerData of providerConfigs) {
       try {
         const instance = ProviderInitializer._createProviderInstance(providerData);
+        
+        // Initialize cache policies for this provider
+        await instance.initializeCachePolicies();
+        
         ProviderInitializer.providers.set(providerData.id, instance);
         ProviderInitializer.logger.info(`✓ Loaded provider: ${providerData.id} (${providerData.type})`);
       } catch (error) {
@@ -78,11 +92,11 @@ export class ProviderInitializer {
       ProviderInitializer.logger.warn('No providers were successfully loaded');
     }
 
-    // Initialize TMDB provider (singleton)
-    ProviderInitializer.tmdbProvider = TMDBProvider.getInstance(
+    // Initialize TMDB provider (singleton) - now async and requires settings
+    ProviderInitializer.tmdbProvider = await TMDBProvider.getInstance(
       ProviderInitializer.cache,
-      ProviderInitializer.data,
-      ProviderInitializer.mongoData
+      ProviderInitializer.mongoData,
+      settings
     );
     ProviderInitializer.logger.info('✓ TMDB provider initialized');
 
@@ -126,17 +140,6 @@ export class ProviderInitializer {
     return ProviderInitializer.cache;
   }
 
-  /**
-   * Get initialized data storage manager
-   * @returns {import('../managers/StorageManager.js').StorageManager} Data storage manager
-   * @throws {Error} If not initialized
-   */
-  static getData() {
-    if (!ProviderInitializer.initialized || !ProviderInitializer.data) {
-      throw new Error('Data storage not initialized. Call initialize() first.');
-    }
-    return ProviderInitializer.data;
-  }
 
   /**
    * Get initialized MongoDB data service
@@ -156,7 +159,6 @@ export class ProviderInitializer {
    */
   static _reset() {
     ProviderInitializer.cache = null;
-    ProviderInitializer.data = null;
     ProviderInitializer.mongoClient = null;
     ProviderInitializer.mongoData = null;
     ProviderInitializer.providers = null;
@@ -172,9 +174,9 @@ export class ProviderInitializer {
    */
   static _createProviderInstance(providerData) {
     if (providerData.type === 'agtv') {
-      return new AGTVProvider(providerData, ProviderInitializer.cache, ProviderInitializer.data, ProviderInitializer.mongoData);
+      return new AGTVProvider(providerData, ProviderInitializer.cache, ProviderInitializer.mongoData);
     } else if (providerData.type === 'xtream') {
-      return new XtreamProvider(providerData, ProviderInitializer.cache, ProviderInitializer.data, ProviderInitializer.mongoData);
+      return new XtreamProvider(providerData, ProviderInitializer.cache, ProviderInitializer.mongoData);
     } else {
       throw new Error(`Unknown provider type: ${providerData.type}`);
     }

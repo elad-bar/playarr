@@ -62,13 +62,11 @@ export class BaseProvider {
   /**
    * @param {Object} providerData - Provider configuration data
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
-   * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
    * @param {string} [loggerContext] - Optional logger context override
    */
-  constructor(providerData, cache, data, loggerContext = null) {
+  constructor(providerData, cache, loggerContext = null) {
     this.providerData = providerData;
     this.cache = cache;
-    this.data = data;
     this.providerId = providerData.id || 'default';
 
     // Create logger with custom context or default to provider type
@@ -97,6 +95,9 @@ export class BaseProvider {
     
     // Single progress interval per provider instance
     this._progressInterval = null;
+    
+    // In-memory cache for this provider's policies
+    this._cachePolicies = null; // Will be loaded via initializeCachePolicies()
   }
 
   /**
@@ -202,6 +203,92 @@ export class BaseProvider {
   }
 
   /**
+   * Get default cache policies for this provider
+   * Override in subclasses to define provider-specific policies
+   * @returns {Object} Cache policy object with key-value pairs
+   */
+  getDefaultCachePolicies() {
+    // Base implementation returns empty - subclasses should override
+    return {};
+  }
+
+  /**
+   * Initialize cache policies for this provider
+   * Loads from MongoDB, creates defaults if missing
+   * Must be called after construction
+   * @returns {Promise<void>}
+   */
+  async initializeCachePolicies() {
+    if (!this.cache || !this.cache.mongoData) {
+      this.logger.warn('Cache manager or MongoDB not available, skipping cache policy initialization');
+      this._cachePolicies = {};
+      return;
+    }
+
+    try {
+      const defaultPolicies = this.getDefaultCachePolicies();
+      if (Object.keys(defaultPolicies).length === 0) {
+        // No policies defined for this provider
+        this._cachePolicies = {};
+        return;
+      }
+
+      // Get existing policies from MongoDB for this provider's keys
+      const existingPolicies = await this.cache.mongoData.getCachePolicies();
+      
+      // Filter to only this provider's policies
+      const providerPolicies = {};
+      const policiesToCreate = {};
+      
+      for (const [key, defaultValue] of Object.entries(defaultPolicies)) {
+        if (existingPolicies.hasOwnProperty(key)) {
+          // Policy exists in MongoDB, use it
+          providerPolicies[key] = existingPolicies[key];
+        } else {
+          // Policy doesn't exist, use default and create it
+          providerPolicies[key] = defaultValue;
+          policiesToCreate[key] = defaultValue;
+        }
+      }
+
+      // Create missing policies in MongoDB
+      if (Object.keys(policiesToCreate).length > 0) {
+        this.logger.info(`Initializing ${Object.keys(policiesToCreate).length} cache policies for ${this.providerId}`);
+        const promises = Object.entries(policiesToCreate).map(([key, value]) =>
+          this.cache.mongoData.updateCachePolicy(key, value)
+        );
+        await Promise.all(promises);
+      }
+
+      // Store in provider's memory
+      this._cachePolicies = providerPolicies;
+      
+      // Also register with StorageManager's shared cache
+      if (this.cache.registerCachePolicies) {
+        this.cache.registerCachePolicies(providerPolicies);
+      }
+
+      this.logger.debug(`Cache policies initialized for ${this.providerId}: ${Object.keys(providerPolicies).length} policies`);
+    } catch (error) {
+      this.logger.error(`Error initializing cache policies: ${error.message}`);
+      // Fallback to defaults in memory
+      this._cachePolicies = this.getDefaultCachePolicies();
+    }
+  }
+
+  /**
+   * Get cache policy TTL for a specific key
+   * @param {string} policyKey - Policy key (e.g., "tmdb/search/movie")
+   * @returns {number|null|undefined} TTL in hours, null for Infinity, or undefined if not found
+   */
+  getCachePolicy(policyKey) {
+    if (!this._cachePolicies) {
+      return undefined;
+    }
+    return this._cachePolicies[policyKey];
+  }
+
+  /**
    * Fetch data from API with caching support
    * Checks cache first and validates expiration based on cache-policy.json, then fetches from API if cache doesn't exist, is expired, or forceRefresh is true
    * @param {string} url - API URL to fetch from
@@ -235,8 +322,8 @@ export class BaseProvider {
     const response = await this.limiter.schedule(() => axios.get(url, options));
     
     if (cacheKeyParts.length > 0) {
-      // Pass TTL to cache.set() to update policy file
-      this.cache.set(response.data, ttl, ...cacheKeyParts);
+      // Pass TTL to cache.set() to update policy (now async)
+      await this.cache.set(response.data, ttl, ...cacheKeyParts);
     }
 
     return response.data;

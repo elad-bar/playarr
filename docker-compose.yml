@@ -8,15 +8,15 @@ services:
     container_name: playarr
     restart: unless-stopped
     volumes:
-      # Mount data and cache directories for persistence
-      - ./data:/app/data
+      # Mount cache directory for persistence
       - ./cache:/app/cache
       # Mount logs directory
       - ./logs:/app/logs
+      # Mount data directory only if needed for migration scripts
+      # - ./data:/app/data
     environment:
       - NODE_ENV=production
       - CACHE_DIR=/app/cache
-      - DATA_DIR=/app/data
       - LOGS_DIR=/app/logs
       - PORT=3000
       - DEFAULT_ADMIN_USERNAME=${DEFAULT_ADMIN_USERNAME:-admin}
@@ -28,7 +28,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-      test: ["CMD", "test", "-d", "/app/data"]
+      test: ["CMD", "test", "-d", "/app/cache"]
     # Optional: Resource limits
     # deploy:
     #   resources:

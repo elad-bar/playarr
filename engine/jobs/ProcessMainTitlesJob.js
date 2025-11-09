@@ -8,13 +8,12 @@ import { BaseJob } from './BaseJob.js';
 export class ProcessMainTitlesJob extends BaseJob {
   /**
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
-   * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
    * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @param {Map<string, import('../providers/BaseIPTVProvider.js').BaseIPTVProvider>} providers - Map of providerId -> provider instance (already initialized)
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider singleton instance
    */
-  constructor(cache, data, mongoData, providers, tmdbProvider) {
-    super('ProcessMainTitlesJob', cache, data, mongoData, providers, tmdbProvider);
+  constructor(cache, mongoData, providers, tmdbProvider) {
+    super('ProcessMainTitlesJob', cache, mongoData, providers, tmdbProvider);
   }
 
   /**

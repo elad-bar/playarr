@@ -64,7 +64,7 @@ COPY --from=engine-builder /app/engine/node_modules ./engine/node_modules
 # Copy engine source code
 COPY engine/ ./engine/
 
-# Create logs directory (data and cache will be mounted as volumes)
+# Create logs directory (cache will be mounted as volume)
 RUN mkdir -p /app/logs
 
 # Create startup script to run both engine and API
@@ -76,7 +76,6 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
 # Set environment variables
 ENV NODE_ENV=production
 ENV CACHE_DIR=/app/cache
-ENV DATA_DIR=/app/data
 ENV LOGS_DIR=/app/logs
 ENV PORT=3000
 
@@ -85,7 +84,7 @@ EXPOSE 3000
 
 # Health check (simple file system check)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD test -d /app/data && test -d /app/cache || exit 1
+  CMD test -d /app/cache || exit 1
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]

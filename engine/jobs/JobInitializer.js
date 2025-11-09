@@ -10,20 +10,17 @@ import { MongoDataService } from '../services/MongoDataService.js';
 /**
  * Job Initializer
  * Handles initialization of all dependencies required by jobs:
- * - Cache and data storage managers
+ * - Cache storage manager
  * - IPTV provider instances
  * - TMDB provider singleton
  */
 export class JobInitializer {
   /**
    * @param {string} cacheDir - Directory path for cache storage
-   * @param {string} dataDir - Directory path for data storage
    */
-  constructor(cacheDir, dataDir) {
+  constructor(cacheDir) {
     this.cacheDir = cacheDir;
-    this.dataDir = dataDir;
     this.cache = null;
-    this.data = null;
     this.mongoClient = null;
     this.mongoData = null;
     this.providers = null; // Map<string, BaseIPTVProvider>
@@ -33,7 +30,7 @@ export class JobInitializer {
 
   /**
    * Initialize all dependencies
-   * @returns {Promise<{cache: StorageManager, data: StorageManager, mongoData: MongoDataService, providers: Map<string, BaseIPTVProvider>, tmdbProvider: TMDBProvider}>} Initialized dependencies
+   * @returns {Promise<{cache: StorageManager, mongoData: MongoDataService, providers: Map<string, BaseIPTVProvider>, tmdbProvider: TMDBProvider}>} Initialized dependencies
    */
   async initialize() {
     this.logger.info('Initializing job dependencies...');
@@ -53,10 +50,22 @@ export class JobInitializer {
       throw new Error(`MongoDB connection failed: ${error.message}`);
     }
 
-    // Initialize storage managers (cache directory remains file-based)
-    this.cache = new StorageManager(this.cacheDir, false); // false = wrapData, saves raw API response without wrapper
-    this.data = new StorageManager(this.dataDir, false); // false = wrapData, saves directly without wrapper (for backward compatibility, but not used for data)
-    this.logger.info('✓ Storage managers initialized');
+    // Initialize storage manager (cache directory remains file-based)
+    this.cache = new StorageManager(this.cacheDir, false, this.mongoData); // false = wrapData, saves raw API response without wrapper
+    
+    // Initialize cache policies (load once from MongoDB)
+    await this.cache.initialize();
+    
+    this.logger.info('✓ Storage manager initialized');
+
+    // Load settings from MongoDB (generic, for all components)
+    let settings = {};
+    try {
+      settings = await this.mongoData.getSettings();
+      this.logger.info('✓ Settings loaded from MongoDB');
+    } catch (error) {
+      this.logger.warn(`Failed to load settings from MongoDB: ${error.message}`);
+    }
 
     // Initialize IPTV providers
     this.providers = new Map();
@@ -66,6 +75,10 @@ export class JobInitializer {
     for (const providerData of providerConfigs) {
       try {
         const instance = this._createProviderInstance(providerData);
+        
+        // Initialize cache policies for this provider
+        await instance.initializeCachePolicies();
+        
         this.providers.set(providerData.id, instance);
         this.logger.info(`✓ Loaded provider: ${providerData.id} (${providerData.type})`);
       } catch (error) {
@@ -77,15 +90,14 @@ export class JobInitializer {
       this.logger.warn('No providers were successfully loaded');
     }
 
-    // Initialize TMDB provider (singleton)
-    this.tmdbProvider = TMDBProvider.getInstance(this.cache, this.data, this.mongoData);
+    // Initialize TMDB provider (singleton) - now async and requires settings
+    this.tmdbProvider = await TMDBProvider.getInstance(this.cache, this.mongoData, settings);
     this.logger.info('✓ TMDB provider initialized');
 
     this.logger.info('Job dependencies initialization completed');
 
     return {
       cache: this.cache,
-      data: this.data,
       mongoData: this.mongoData,
       providers: this.providers,
       tmdbProvider: this.tmdbProvider
@@ -100,9 +112,9 @@ export class JobInitializer {
    */
   _createProviderInstance(providerData) {
     if (providerData.type === 'agtv') {
-      return new AGTVProvider(providerData, this.cache, this.data, this.mongoData);
+      return new AGTVProvider(providerData, this.cache, this.mongoData);
     } else if (providerData.type === 'xtream') {
-      return new XtreamProvider(providerData, this.cache, this.data, this.mongoData);
+      return new XtreamProvider(providerData, this.cache, this.mongoData);
     } else {
       throw new Error(`Unknown provider type: ${providerData.type}`);
     }
@@ -110,17 +122,16 @@ export class JobInitializer {
 
   /**
    * Get initialized dependencies
-   * @returns {{cache: StorageManager, data: StorageManager, mongoData: MongoDataService, providers: Map<string, BaseIPTVProvider>, tmdbProvider: TMDBProvider}} Initialized dependencies
+   * @returns {{cache: StorageManager, mongoData: MongoDataService, providers: Map<string, BaseIPTVProvider>, tmdbProvider: TMDBProvider}} Initialized dependencies
    * @throws {Error} If dependencies are not initialized
    */
   getDependencies() {
-    if (!this.cache || !this.data || !this.mongoData || !this.providers || !this.tmdbProvider) {
+    if (!this.cache || !this.mongoData || !this.providers || !this.tmdbProvider) {
       throw new Error('Dependencies not initialized. Call initialize() first.');
     }
 
     return {
       cache: this.cache,
-      data: this.data,
       mongoData: this.mongoData,
       providers: this.providers,
       tmdbProvider: this.tmdbProvider

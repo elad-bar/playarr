@@ -193,7 +193,6 @@ The Dockerfile uses:
 You can customize the Docker container using environment variables:
 
 - `CACHE_DIR`: Cache directory path (default: `/app/cache`)
-- `DATA_DIR`: Data directory path (default: `/app/data`)
 - `LOGS_DIR`: Logs directory path (default: `/app/logs`)
 - `PORT`: API server port (default: `3000`)
 - `NODE_ENV`: Node environment (default: `production`)
@@ -205,11 +204,11 @@ You can customize the Docker container using environment variables:
 
 ## Configurations
 
-Configuration files are now stored in the `data/settings/` directory. The engine and API share the same configuration files:
+Configuration data is stored in MongoDB collections. The engine and API share the same MongoDB database:
 
 ### Provider Configurations
 
-Provider configurations are stored in a single file `data/settings/iptv-providers.json` containing an array of provider objects. Each provider has an `id` field that serves as the unique identifier.
+Provider configurations are stored in the MongoDB `iptv_providers` collection. Each provider has an `id` field that serves as the unique identifier.
 
 #### Provider Configuration Structure
 
@@ -311,7 +310,7 @@ Xtream Codec providers use the Xtream API. Example configuration:
 
 ### Settings Configuration
 
-The settings file is located at `data/settings/settings.json` and contains global configuration:
+Settings are stored in the MongoDB `settings` collection and contain global configuration:
 
 ```json
 {
@@ -332,7 +331,7 @@ The settings file is located at `data/settings/settings.json` and contains globa
 
 ### Cache Policy Configuration
 
-The cache policy file is located at `data/settings/cache-policy.json` and controls automatic cache expiration and purging. The `CachePurgeJob` runs every 15 minutes to remove expired cache files based on TTL (Time To Live) values specified in hours.
+Cache policies are stored in the MongoDB `cache_policy` collection and control cache expiration. Policies are loaded into memory at startup and checked synchronously during cache operations. Expiration is checked on-demand when cache is accessed, eliminating the need for a separate purge job.
 
 ```json
 {
@@ -359,33 +358,34 @@ The cache policy file is located at `data/settings/cache-policy.json` and contro
   - `null`: Cache never expires (kept indefinitely)
   - `number`: TTL in hours (e.g., `6` = expires after 6 hours)
 - **Example**: `"tmdb/tv/{tmdbId}/season": 6` means season data expires after 6 hours
-- **Dynamic matching**: The purge job matches patterns like `tmdb/tv/12345/season` to `tmdb/tv/{tmdbId}/season`
+- **Dynamic matching**: Patterns like `tmdb/tv/12345/season` are matched to `tmdb/tv/{tmdbId}/season` during cache expiration checks
 
-Files older than their TTL are automatically purged, and empty directories are cleaned up.
+Cache expiration is checked on-demand when accessing cached data. Files older than their TTL are considered expired and will be refreshed on the next access.
 
-### Configuration File Location
+### Configuration Storage
 
-All configuration files are stored in `data/settings/`:
-- **Provider configs**: `data/settings/iptv-providers.json` (single file with array of providers)
-- **Settings**: `data/settings/settings.json` (TMDB token, API rate limits)
-- **Cache policy**: `data/settings/cache-policy.json` (optional, defaults to no expiration if not present)
-- **Users**: `data/settings/users.json` (API user accounts)
+All configuration data is stored in MongoDB collections:
+- **Provider configs**: `iptv_providers` collection (enabled providers with priority)
+- **Settings**: `settings` collection (TMDB token, API rate limits, etc.)
+- **Cache policy**: `cache_policy` collection (TTL values for cache paths)
+- **Users**: `users` collection (API user accounts)
 
-The engine automatically loads all enabled providers from `data/settings/iptv-providers.json` and processes them in priority order.
+The engine automatically loads all enabled providers from the `iptv_providers` collection and processes them in priority order. Cache policies are loaded into memory at startup for fast synchronous checks.
+
+**Note**: The `data/` directory is only used by migration scripts to read legacy files. Runtime data is stored entirely in MongoDB.
 
 ## Features
 
 - Fetches movies and TV shows from AGTV (M3U8) and Xtream Codec providers
 - Disk caching for efficient data retrieval with configurable expiration policies
-- Automatic cache purging based on TTL policies
+- On-demand cache expiration checks based on TTL policies stored in MongoDB
 - Automatic update detection for TV shows (Xtream)
-- Stores processed titles in `data/titles/` directory
+- All data stored in MongoDB for efficient querying and scalability
 - Supports provider-specific cleanup rules and ignore patterns
 - Respects provider priority and enabled status
 - Scheduled job processing with Bree.js:
   - Provider title fetching: Every 1 hour
-  - Main title aggregation: Every 30 minutes
-  - Cache purging: Every 15 minutes
+  - Main title aggregation: Every 5 minutes
 
 ## Web UI and API
 
@@ -427,17 +427,16 @@ The default admin user credentials are set via environment variables:
 
 ```
 playarr/
-├── data/
-│   ├── settings/              # Configuration files
-│   │   ├── iptv-providers.json # Provider configurations (array)
-│   │   ├── settings.json       # Global settings (TMDB token, etc.)
-│   │   ├── cache-policy.json  # Cache expiration policies
-│   │   └── users.json         # User accounts (API)
-│   ├── categories/            # Provider categories (generated)
-│   ├── main/                  # Main titles (generated)
-│   ├── titles/                # Processed titles (generated)
-│   └── stats.json             # API statistics
-├── cache/                     # Raw API response cache
+├── data/                       # Legacy files (used only by migration scripts)
+│   ├── settings/              # Legacy configuration files (migration scripts only)
+│   │   ├── iptv-providers.json # Legacy provider configs
+│   │   ├── settings.json       # Legacy settings
+│   │   ├── cache-policy.json  # Legacy cache policies
+│   │   └── users.json         # Legacy user accounts
+│   ├── categories/            # Legacy categories (migration scripts only)
+│   ├── titles/                # Legacy titles (migration scripts only)
+│   └── stats.json             # Legacy stats (migration scripts only)
+├── cache/                     # Raw API response cache (file-based)
 ├── logs/                      # Application logs
 │   ├── engine.log             # Engine logs
 │   └── api.log                # API logs

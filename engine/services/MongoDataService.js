@@ -567,5 +567,70 @@ export class MongoDataService {
       { upsert: true }
     );
   }
+
+  /**
+   * Get all cache policies from MongoDB as an object
+   * @returns {Promise<Object>} Cache policy object with key-value pairs
+   */
+  async getCachePolicies() {
+    try {
+      const docs = await this.db.collection('cache_policy')
+        .find({})
+        .toArray();
+      
+      const policies = {};
+      for (const doc of docs) {
+        policies[doc._id] = doc.value;
+      }
+      return policies;
+    } catch (error) {
+      logger.error(`Error getting cache policies: ${error.message}`);
+      return {};
+    }
+  }
+
+  /**
+   * Update cache policy in MongoDB
+   * @param {string} policyKey - Cache path key (e.g., "tmdb/search/movie")
+   * @param {number|null} ttlHours - TTL in hours (null for Infinity)
+   * @returns {Promise<void>}
+   */
+  async updateCachePolicy(policyKey, ttlHours) {
+    const now = new Date();
+    await this.db.collection('cache_policy').updateOne(
+      { _id: policyKey },
+      {
+        $set: {
+          value: ttlHours,
+          lastUpdated: now
+        },
+        $setOnInsert: {
+          createdAt: now
+        }
+      },
+      { upsert: true }
+    );
+  }
+
+  /**
+   * Get all settings from MongoDB as an object
+   * @returns {Promise<Object>} Settings object with key-value pairs
+   */
+  async getSettings() {
+    try {
+      const docs = await this.db.collection('settings')
+        .find({})
+        .toArray();
+      
+      const settings = {};
+      for (const doc of docs) {
+        settings[doc._id] = doc.value;
+      }
+      return settings;
+    } catch (error) {
+      logger.error(`Error getting settings: ${error.message}`);
+      return {};
+    }
+  }
 }
 

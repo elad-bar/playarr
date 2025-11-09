@@ -1,12 +1,6 @@
 import { BaseProvider } from './BaseProvider.js';
-import fs from 'fs-extra';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { createLogger } from '../utils/logger.js';
 import { extractYearFromTitle, extractBaseTitle, extractYearFromReleaseDate, generateTitleKey } from '../utils/titleUtils.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * TMDB API provider
@@ -19,25 +13,12 @@ export class TMDBProvider extends BaseProvider {
   /**
    * Get or create the singleton instance of TMDBProvider
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
-   * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
    * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
-   * @returns {TMDBProvider} Singleton instance
+   * @param {Object} settings - Settings object (loaded from MongoDB at higher level)
+   * @returns {Promise<TMDBProvider>} Singleton instance
    */
-  static getInstance(cache, data, mongoData) {
+  static async getInstance(cache, mongoData, settings = {}) {
     if (!TMDBProvider.instance) {
-      const settingsPath = path.join(__dirname, '../../data/settings/settings.json');
-      let settings = {};
-      
-      // Load settings if file exists
-      if (fs.existsSync(settingsPath)) {
-        try {
-          settings = fs.readJsonSync(settingsPath);
-        } catch (error) {
-          const logger = createLogger('TMDBProvider');
-          logger.warn(`Failed to load settings from ${settingsPath}:`, error);
-        }
-      }
-      
       const providerData = {
         id: 'tmdb',
         type: 'tmdb',
@@ -45,7 +26,10 @@ export class TMDBProvider extends BaseProvider {
         token: settings.tmdb_token
       };
 
-      TMDBProvider.instance = new TMDBProvider(providerData, cache, data, mongoData);
+      TMDBProvider.instance = new TMDBProvider(providerData, cache, mongoData);
+      
+      // Initialize cache policies
+      await TMDBProvider.instance.initializeCachePolicies();
     }
     return TMDBProvider.instance;
   }
@@ -54,11 +38,10 @@ export class TMDBProvider extends BaseProvider {
    * Private constructor - use getInstance() instead
    * @param {Object} providerData - Provider configuration data
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
-   * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
    * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    */
-  constructor(providerData, cache, data, mongoData) {
-    super(providerData, cache, data, 'TMDB');
+  constructor(providerData, cache, mongoData) {
+    super(providerData, cache, 'TMDB');
     if (!mongoData) {
       throw new Error('MongoDataService is required');
     }
@@ -84,6 +67,23 @@ export class TMDBProvider extends BaseProvider {
         buildStreams: this._buildTVShowStreams.bind(this),
         tvgType: 'series'
       }
+    };
+  }
+
+  /**
+   * Get default cache policies for TMDB provider
+   * @returns {Object} Cache policy object
+   */
+  getDefaultCachePolicies() {
+    return {
+      'tmdb/search/movie': null,           // Never expire
+      'tmdb/search/tv': null,              // Never expire
+      'tmdb/find/imdb': null,              // Never expire
+      'tmdb/movie/details': null,           // Never expire
+      'tmdb/tv/details': null,             // Never expire
+      'tmdb/tv/season': 6,                 // 6 hours
+      'tmdb/movie/similar': null,          // Never expire
+      'tmdb/tv/similar': null,            // Never expire
     };
   }
 

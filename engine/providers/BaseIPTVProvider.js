@@ -32,12 +32,11 @@ export class BaseIPTVProvider extends BaseProvider {
   /**
    * @param {Object} providerData - Provider configuration data
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
-   * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
    * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @param {number} [metadataBatchSize=100] - Batch size for processing metadata (default: 100)
    */
-  constructor(providerData, cache, data, mongoData, metadataBatchSize = 100) {
-    super(providerData, cache, data);
+  constructor(providerData, cache, mongoData, metadataBatchSize = 100) {
+    super(providerData, cache);
     
     if (!mongoData) {
       throw new Error('MongoDataService is required');
