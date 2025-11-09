@@ -21,7 +21,6 @@ async function main() {
 
   // Track job execution state to prevent concurrent execution
   const runningJobs = new Set();
-  let isProcessProvidersTitlesRunning = false;
 
   // Configure Bree.js jobs with schedules
   const bree = new Bree({
@@ -68,34 +67,19 @@ async function main() {
   bree.on('worker created', (name) => {
     logger.debug(`Worker created: ${name}`);
     runningJobs.add(name);
-    if (name === 'processProvidersTitles') {
-      isProcessProvidersTitlesRunning = true;
-      logger.debug('processProvidersTitles is now running - processMainTitles will be skipped until it completes');
-    }
   });
 
   bree.on('worker deleted', (name) => {
     logger.debug(`Worker deleted: ${name}`);
     runningJobs.delete(name);
-    if (name === 'processProvidersTitles') {
-      isProcessProvidersTitlesRunning = false;
-      logger.debug('processProvidersTitles completed - processMainTitles can now run');
-    }
   });
 
   // Override the run method to prevent any job from running if it's already running
-  // Also prevent processMainTitles from running when processProvidersTitles is active
   const originalRun = bree.run.bind(bree);
   bree.run = async function(name) {
     // Prevent any job from running if it's already running
     if (runningJobs.has(name)) {
       logger.debug(`Skipping ${name} - already running`);
-      return;
-    }
-    
-    // Special case: prevent processMainTitles from running when processProvidersTitles is active
-    if (name === 'processMainTitles' && isProcessProvidersTitlesRunning) {
-      logger.debug('Skipping processMainTitles - processProvidersTitles is currently running');
       return;
     }
     
@@ -138,7 +122,7 @@ async function main() {
 
     logger.info('Job scheduler started. Jobs will run according to schedule.');
     logger.info('- processProvidersTitles: On startup and every 1 hour');
-    logger.info('- processMainTitles: First run in 1 minute, then every 5 minutes (skipped if processProvidersTitles is running)');
+    logger.info('- processMainTitles: First run in 1 minute, then every 5 minutes');
     logger.info('- purgeProviderCache: First run in 1 hour, then every 6 hours');
     
     // Keep the process running

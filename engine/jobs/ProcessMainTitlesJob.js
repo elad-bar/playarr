@@ -1,4 +1,5 @@
 import { BaseJob } from './BaseJob.js';
+import { generateTitleKey } from '../utils/titleUtils.js';
 
 /**
  * Job for processing main titles
@@ -28,6 +29,14 @@ export class ProcessMainTitlesJob extends BaseJob {
     let lastExecution = null;
 
     try {
+      // Check if ProcessProvidersTitlesJob is currently running
+      // This prevents processMainTitles from running while providers are being fetched
+      const providersJobHistory = await this.mongoData.getJobHistory('ProcessProvidersTitlesJob');
+      if (providersJobHistory && providersJobHistory.status === 'running') {
+        this.logger.info('Skipping execution - ProcessProvidersTitlesJob is currently running. Will retry on next schedule.');
+        return { movies: 0, tvShows: 0 }; // Return empty result to indicate skip
+      }
+
       // Get last execution time from job history BEFORE setting status
       // This ensures we have the correct last_execution value from previous successful run
       const jobHistory = await this.mongoData.getJobHistory(jobName);
@@ -42,20 +51,30 @@ export class ProcessMainTitlesJob extends BaseJob {
       await this.mongoData.updateJobStatus(jobName, 'running');
 
       // Load provider titles incrementally (only updated since last execution)
-      // This ensures we only process titles that have changed
-      // Note: loadProviderTitles already filters out ignored titles (ignored: false)
-      this.logger.info('Loading provider titles and main titles into memory...');
       for (const [providerId, providerInstance] of this.providers) {
         await providerInstance.loadProviderTitles(lastExecution);
-        // No need to load ignored titles - they're already filtered out at load time
       }
-      
-      // Load main titles into memory (managed by TMDBProvider)
-      await this.tmdbProvider.loadMainTitles();
-      this.logger.info(`All titles loaded into memory (${this.tmdbProvider.getMainTitles().length} main titles)`);
 
       // Match TMDB IDs for provider titles that don't have one yet
       await this.matchAllTMDBIds();
+
+      // Load main titles for provider titles that have TMDB IDs
+      // Main titles use title_key = type-tmdb_id, not type-title_id
+      const mainTitleKeys = new Set();
+      for (const [providerId, providerInstance] of this.providers) {
+        for (const title of providerInstance.getAllTitles()) {
+          if (title.tmdb_id && title.type) {
+            mainTitleKeys.add(generateTitleKey(title.type, title.tmdb_id));
+          }
+        }
+      }
+      
+      if (mainTitleKeys.size > 0) {
+        const mainTitles = await this.tmdbProvider.getMainTitlesByKeys(Array.from(mainTitleKeys));
+        this.tmdbProvider._mainTitlesCache = mainTitles;
+      } else {
+        this.tmdbProvider._mainTitlesCache = [];
+      }
 
       // Extract provider titles into dictionary for main title processing
       const providerTitlesByProvider = new Map();

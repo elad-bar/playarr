@@ -108,12 +108,26 @@ export class MongoDataService {
         title_key: t.title_key
       }));
 
-    // Check existence in batches
-    const existingKeys = await this._checkExistenceBatch(
-      collection,
-      existenceQueries,
-      (doc) => `${doc.provider_id}|${doc.title_key}`
-    );
+    // Get existing documents in batches to check existence and compare TMDB IDs
+    const existingKeys = new Set();
+    const existingDocs = new Map();
+    
+    if (existenceQueries.length > 0) {
+      // Fetch existing documents in batches (more efficient than checking existence separately)
+      for (let i = 0; i < existenceQueries.length; i += this.existenceCheckBatchSize) {
+        const batch = existenceQueries.slice(i, i + this.existenceCheckBatchSize);
+        const docs = await collection.find(
+          { $or: batch },
+          { projection: { _id: 0, provider_id: 1, title_key: 1, tmdb_id: 1 } } // Only fetch fields we need
+        ).toArray();
+        
+        for (const doc of docs) {
+          const key = `${doc.provider_id}|${doc.title_key}`;
+          existingKeys.add(key);
+          existingDocs.set(key, doc);
+        }
+      }
+    }
 
     // Separate into inserts and updates
     const toInsert = [];
@@ -131,22 +145,31 @@ export class MongoDataService {
       };
 
       if (existingKeys.has(key)) {
-        // Update existing
-        toUpdate.push({
-          updateOne: {
-            filter: { 
-              provider_id: providerId,
-              title_key: title.title_key 
-            },
-            update: {
-              $set: {
-                ...title,
+        // Check if TMDB ID actually changed
+        const existingDoc = existingDocs.get(key);
+        const existingTmdbId = existingDoc?.tmdb_id;
+        const newTmdbId = title.tmdb_id;
+        
+        // Only update if TMDB ID changed or if title doesn't have TMDB ID yet
+        if (existingTmdbId !== newTmdbId) {
+          // Update existing - only if something actually changed
+          toUpdate.push({
+            updateOne: {
+              filter: { 
                 provider_id: providerId,
-                lastUpdated: now
+                title_key: title.title_key 
+              },
+              update: {
+                $set: {
+                  ...title,
+                  provider_id: providerId,
+                  lastUpdated: now
+                }
               }
             }
-          }
-        });
+          });
+        }
+        // If TMDB ID is the same, skip update (no changes)
       } else {
         // Insert new
         toInsert.push(titleDoc);
