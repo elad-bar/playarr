@@ -13,6 +13,12 @@ Migrate Playarr data storage from JSON files to MongoDB to support:
 - **Title Streams**: `data/titles/main-titles-streams.json` - Object with ~20k keys (growing to 300k)
 - **Provider Titles**: `data/titles/{providerId}.titles.json` - Arrays per provider
 - **Provider Categories**: `data/categories/{providerId}.categories.json` - Arrays per provider
+- **Provider Ignored Titles**: `data/titles/{providerId}.ignored.json` - Objects mapping title_key to issue
+- **Users**: `data/settings/users.json` - Array of user objects
+- **IPTV Providers**: `data/settings/iptv-providers.json` - Array of provider configurations
+- **Settings**: `data/settings/settings.json` - Global settings (TMDB token, API rate limits)
+- **Cache Policy**: `data/settings/cache-policy.json` - Object mapping cache paths to TTL values
+- **Stats**: `data/stats.json` - API statistics
 
 ## Target MongoDB Schema
 
@@ -96,6 +102,8 @@ Provider-specific titles (from {providerId}.titles.json files)
   category_id: Number,
   release_date: String,
   streams: Object,           // { "main": "/url" } or { "S01-E01": "/url" }
+  ignored: Boolean,          // Flag indicating if title is ignored (from {providerId}.ignored.json)
+  ignored_reason: String,    // Reason for ignoring (if ignored is true)
   createdAt: ISODate,
   lastUpdated: ISODate
 }
@@ -105,8 +113,17 @@ Provider-specific titles (from {providerId}.titles.json files)
 - `{ provider_id: 1, type: 1 }`
 - `{ provider_id: 1, tmdb_id: 1 }`
 - `{ title_key: 1 }`
+- `{ provider_id: 1, ignored: 1 }` - For filtering ignored titles
 
-**Migration Source:** `data/titles/{providerId}.titles.json` (all provider files)
+**Migration Source:** 
+- `data/titles/{providerId}.titles.json` (all provider files)
+- `data/titles/{providerId}.ignored.json` (all provider files) - Merged into provider_titles as flags
+
+**Transformation:**
+- Load provider titles from `{providerId}.titles.json`
+- Load ignored titles from `{providerId}.ignored.json` (object: `{ title_key: issue }`)
+- For each provider title, check if `title_key` exists in ignored titles
+- Set `ignored: true` and `ignored_reason: issue` if found, otherwise `ignored: false` and `ignored_reason: null`
 
 ---
 
@@ -137,6 +154,123 @@ Provider categories (from {providerId}.categories.json files)
 
 ---
 
+### Collection: `users`
+User accounts (from users.json)
+
+**Schema:**
+```javascript
+{
+  _id: ObjectId,
+  username: String,          // Unique username
+  password: String,          // Hashed password
+  role: String,             // "admin" | "user"
+  watchlist: Array,         // Array of title_key strings
+  createdAt: ISODate,
+  lastUpdated: ISODate
+}
+```
+
+**Indexes:**
+- `{ username: 1 }` - Unique
+- `{ role: 1 }`
+
+**Migration Source:** `data/settings/users.json`
+
+---
+
+### Collection: `iptv_providers`
+IPTV provider configurations (from iptv-providers.json)
+
+**Schema:**
+```javascript
+{
+  _id: ObjectId,
+  id: String,               // Unique provider identifier
+  name: String,
+  type: String,             // "agtv" | "xtream"
+  enabled: Boolean,
+  priority: Number,
+  // ... all other provider configuration fields preserved as-is
+  createdAt: ISODate,
+  lastUpdated: ISODate
+}
+```
+
+**Indexes:**
+- `{ id: 1 }` - Unique
+- `{ enabled: 1 }`
+- `{ priority: 1 }`
+
+**Migration Source:** `data/settings/iptv-providers.json`
+
+---
+
+### Collection: `settings`
+Global settings (from settings.json)
+
+**Schema:**
+```javascript
+{
+  _id: ObjectId,
+  tmdb_token: String,
+  tmdb_api_rate: Object,   // { concurrent: Number, duration_seconds: Number }
+  // ... all other setting fields preserved as-is
+  createdAt: ISODate,
+  lastUpdated: ISODate
+}
+```
+
+**Indexes:**
+- No additional indexes needed (single document collection)
+
+**Migration Source:** `data/settings/settings.json`
+**Note:** Stored as single document since settings are always accessed together
+
+---
+
+### Collection: `cache_policy`
+Cache expiration policies (from cache-policy.json)
+
+**Schema:**
+```javascript
+{
+  _id: ObjectId,
+  policies: Object,         // { "tmdb/search/movie": null, "tmdb/tv/{tmdbId}/season": 6, ... }
+  createdAt: ISODate,
+  lastUpdated: ISODate
+}
+```
+
+**Indexes:**
+- No additional indexes needed (single document collection)
+
+**Migration Source:** `data/settings/cache-policy.json`
+**Note:** Stored as single document with policies object since policies are always accessed together and pattern matching is done in application code
+
+---
+
+### Collection: `stats`
+API statistics (from stats.json)
+
+**Schema:**
+```javascript
+{
+  _id: ObjectId,
+  total_requests: Number,
+  total_titles: Number,
+  // ... all other stat fields preserved as-is
+  lastUpdated: ISODate
+}
+```
+
+**Indexes:**
+- No additional indexes needed (single document collection)
+
+**Migration Source:** `data/stats.json`
+**Note:** Stored as single document since stats are always accessed together
+
+---
+
 ## Migration Phases
 
 ### Phase 1: Preparation
@@ -149,44 +283,22 @@ Provider categories (from {providerId}.categories.json files)
 
 ### Phase 2: Data Migration
 - [ ] Migrate provider_categories (smallest, test first)
-- [ ] Migrate provider_titles
+- [ ] Migrate provider_titles (with ignored titles merged as flags)
 - [ ] Migrate titles (main titles)
 - [ ] Migrate title_streams (largest, most complex)
+- [ ] Migrate users
+- [ ] Migrate iptv_providers
+- [ ] Migrate settings
+- [ ] Migrate cache_policy
+- [ ] Migrate stats
 
 ### Phase 3: Verification
 - [ ] Count documents in each collection
 - [ ] Verify data integrity (sample checks)
 - [ ] Compare counts with source files
+- [ ] Verify ignored titles are correctly merged into provider_titles
 - [ ] Test queries match expected results
 - [ ] Performance testing
-
-### Phase 4: Code Integration
-- [ ] Create MongoDBService wrapper
-- [ ] Update DatabaseService to support MongoDB
-- [ ] Update TitlesManager to use MongoDB queries
-- [ ] Update StreamManager to use MongoDB queries
-- [ ] Update ProvidersManager for provider_titles
-- [ ] Update CategoriesManager for provider_categories
-- [ ] Update engine providers to write to MongoDB
-
-### Phase 5: Testing
-- [ ] Unit tests for MongoDB queries
-- [ ] Integration tests with real data
-- [ ] API endpoint testing
-- [ ] Performance benchmarking
-- [ ] Memory usage comparison
-
-### Phase 6: Deployment
-- [ ] Backup all JSON files
-- [ ] Run migration in production
-- [ ] Verify application works with MongoDB
-- [ ] Monitor performance
-- [ ] Keep JSON files as backup for rollback period
-
-### Phase 7: Cleanup (After Verification Period)
-- [ ] Remove JSON file dependencies
-- [ ] Update documentation
-- [ ] Archive old JSON files
 
 ---
 
@@ -199,10 +311,49 @@ Provider categories (from {providerId}.categories.json files)
 - Handle missing files gracefully
 
 ### Data Transformation
-- Transform main titles: remove `streams` field (moved to separate collection)
-- Transform streams: split key `{type}-{tmdbId}-{streamId}-{providerId}` into fields
-- Transform provider titles: ensure all required fields present
-- Transform categories: ensure category_key is generated
+
+#### For titles collection:
+- Remove `streams` field (moved to separate collection)
+- Preserve all other fields
+- Ensure `title_key` is present (generate if missing: `{type}-{title_id}`)
+
+#### For title_streams collection:
+- Parse key format: `{type}-{tmdbId}-{streamId}-{providerId}`
+- Split into: `title_key = {type}-{tmdbId}`, `stream_id`, `provider_id`
+- Extract `proxy_url` from value object
+
+#### For provider_titles collection:
+- Ensure all required fields present
+- Preserve `streams` object as-is
+- Load corresponding `{providerId}.ignored.json` file
+- For each provider title, check if `title_key` exists in ignored titles object
+- Set `ignored: true` and `ignored_reason: issue` if found in ignored titles
+- Set `ignored: false` and `ignored_reason: null` if not found
+- Generate `title_key` if missing: `{type}-{tmdb_id}`
+
+#### For provider_categories collection:
+- Ensure `category_key` is generated: `{type}-{category_id}`
+
+#### For users collection:
+- Preserve all fields as-is
+- Ensure `username` is unique
+- Preserve `watchlist` array
+
+#### For iptv_providers collection:
+- Preserve all provider configuration fields as-is
+- Ensure `id` field is unique
+
+#### For settings collection:
+- Keep as single document
+- Preserve all setting fields as-is
+
+#### For cache_policy collection:
+- Keep as single document
+- Preserve `policies` object as-is
+
+#### For stats collection:
+- Keep as single document
+- Preserve all stat fields as-is
 
 ### Data Writing
 - Batch inserts (1000-5000 documents per batch)
@@ -219,136 +370,27 @@ Provider categories (from {providerId}.categories.json files)
 
 ---
 
-## Code Changes Required
+## Migration Order (Critical)
 
-### 1. Database Service Layer
-**File:** `web-api/src/services/database.js`
-
-**Changes:**
-- Add MongoDB connection support
-- Implement MongoDB query methods
-- Keep file-based fallback (dual mode during transition)
-- Or create separate `MongoDBService` and switch via config
-
-### 2. Titles Manager
-**File:** `web-api/src/managers/titles.js`
-
-**Changes:**
-- Update `getTitles()` to use MongoDB queries with filters
-- Update `getTitlesData()` to query MongoDB instead of loading all
-- Update `getTitleDetails()` to query by title_key
-- Remove in-memory filtering logic
-
-### 3. Stream Manager
-**File:** `web-api/src/managers/stream.js`
-
-**Changes:**
-- Update `_getSources()` to query `title_streams` collection
-- Query by `title_key` and `stream_id` instead of loading all streams
-
-### 4. Providers Manager
-**File:** `web-api/src/managers/providers.js`
-
-**Changes:**
-- Update provider titles loading to query MongoDB
-- Query `provider_titles` collection by `provider_id`
-
-### 5. Categories Manager
-**File:** `web-api/src/managers/categories.js`
-
-**Changes:**
-- Update to query `provider_categories` collection
-- Filter by `provider_id` and `type`
-
-### 6. Engine Providers
-**Files:** 
-- `engine/providers/BaseIPTVProvider.js`
-- `engine/providers/TMDBProvider.js`
-
-**Changes:**
-- Update `saveTitles()` to write to MongoDB
-- Update `saveCategories()` to write to MongoDB
-- Update stream saving logic
-
----
-
-## Rollback Plan
-
-If issues occur:
-
-1. **Immediate Rollback:**
-   - Switch application back to file-based storage
-   - MongoDB data remains for analysis
-   - JSON files are backup
-
-2. **Data Recovery:**
-   - Export MongoDB collections to JSON
-   - Restore from backups if needed
-
-3. **Gradual Rollback:**
-   - Run both systems in parallel
-   - Compare results
-   - Switch back if discrepancies found
-
----
-
-## Performance Targets
-
-### Query Performance
-- Title list with filters: < 200ms (currently 2-5s)
-- Title details: < 50ms (currently 100-500ms)
-- Stream lookup: < 50ms (currently 1-3s)
-- Search queries: < 300ms (currently 3-10s)
-
-### Memory Usage
-- Application startup: < 500MB (currently 1-2GB with all titles loaded)
-- Per-request: < 50MB (currently 100-500MB)
-
----
-
-## Testing Checklist
-
-- [ ] Migration script handles all data types
-- [ ] All indexes created successfully
-- [ ] Document counts match source files
-- [ ] Sample data integrity verified
-- [ ] Queries return expected results
-- [ ] Pagination works correctly
-- [ ] Search functionality works
-- [ ] Filtering works (type, year, etc.)
-- [ ] Stream lookups work
-- [ ] Provider titles loading works
-- [ ] Categories loading works
-- [ ] Write operations work (saving new titles)
-- [ ] Update operations work
-- [ ] Delete operations work
-- [ ] Performance meets targets
-- [ ] Memory usage acceptable
-
----
-
-## Timeline Estimate
-
-- **Phase 1 (Preparation):** 2-3 days
-- **Phase 2 (Migration):** 1-2 days
-- **Phase 3 (Verification):** 1 day
-- **Phase 4 (Code Integration):** 3-5 days
-- **Phase 5 (Testing):** 2-3 days
-- **Phase 6 (Deployment):** 1 day
-- **Phase 7 (Cleanup):** 1 day
-
-**Total:** ~2-3 weeks (depending on complexity and testing)
+1. **provider_categories** - Smallest, no dependencies
+2. **provider_titles** - Requires ignored titles to be loaded for merging
+3. **titles** - No dependencies
+4. **title_streams** - Can be migrated independently
+5. **iptv_providers** - No dependencies
+6. **users** - No dependencies
+7. **settings** - No dependencies
+8. **cache_policy** - No dependencies
+9. **stats** - No dependencies
 
 ---
 
 ## Notes
 
 - Keep JSON files as backup during transition period
-- Consider running both systems in parallel initially
+- Ignored titles are merged into `provider_titles` collection as `ignored` boolean flag and `ignored_reason` field
+- Settings, cache_policy, and stats are stored as single documents since they're always accessed together
 - Monitor MongoDB performance and adjust indexes as needed
 - Document any schema changes or optimizations
-- Consider MongoDB connection pooling for production
-- Set up MongoDB monitoring/alerting
 
 ---
 
@@ -376,10 +418,10 @@ LOG_LEVEL=info
 ## Success Criteria
 
 1. All data successfully migrated
-2. Application works with MongoDB
-3. Query performance improved
-4. Memory usage reduced
+2. Document counts match source files
+3. Data integrity verified (sample checks pass)
+4. All indexes created successfully
 5. No data loss
-6. All tests passing
-7. Production deployment successful
+6. Ignored titles correctly merged into provider_titles as flags
+7. Migration scripts are reusable and well-documented
 
