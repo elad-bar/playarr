@@ -13,7 +13,6 @@ dotenv.config();
 import { createLogger } from './utils/logger.js';
 
 // Import service classes
-import { CacheService } from './services/cache.js';
 import { MongoDatabaseService } from './services/mongodb-database.js';
 import { WebSocketService } from './services/websocket.js';
 import { MongoClient } from 'mongodb';
@@ -41,7 +40,6 @@ import CategoriesRouter from './routes/categories.js';
 import ProvidersRouter from './routes/providers.js';
 import StreamRouter from './routes/stream.js';
 import PlaylistRouter from './routes/playlist.js';
-import CacheRouter from './routes/cache.js';
 import TMDBRouter from './routes/tmdb.js';
 import HealthcheckRouter from './routes/healthcheck.js';
 import XtreamRouter from './routes/xtream.js';
@@ -84,10 +82,7 @@ async function initialize() {
     logger.info('Initializing application...');
 
     // Step 1: Initialize services (bottom-up)
-    // 1. Create CacheService (no dependencies)
-    const cacheService = new CacheService();
-
-    // 2. Initialize MongoDB connection
+    // 1. Initialize MongoDB connection
     const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
     const dbName = process.env.MONGODB_DB_NAME || 'playarr';
     
@@ -104,8 +99,8 @@ async function initialize() {
       throw new Error(`MongoDB connection failed: ${error.message}`);
     }
 
-    // 3. Create MongoDatabaseService (replaces FileStorageService + DatabaseService)
-    database = new MongoDatabaseService(mongoClient, dbName, cacheService);
+    // 2. Create MongoDatabaseService (replaces FileStorageService + DatabaseService)
+    database = new MongoDatabaseService(mongoClient, dbName);
     await database.initialize();
     logger.info('MongoDB database service initialized');
 
@@ -138,7 +133,6 @@ async function initialize() {
     const providersRouter = new ProvidersRouter(providersManager, database);
     const streamRouter = new StreamRouter(streamManager, database);
     const playlistRouter = new PlaylistRouter(playlistManager, database);
-    const cacheRouter = new CacheRouter(cacheService, titlesManager, statsManager, categoriesManager, database);
     const tmdbRouter = new TMDBRouter(tmdbManager, database);
     const healthcheckRouter = new HealthcheckRouter(database, settingsManager);
     const xtreamRouter = new XtreamRouter(xtreamManager, database, streamManager);
@@ -154,7 +148,6 @@ async function initialize() {
     app.use('/api/iptv', categoriesRouter.router);
     app.use('/api/stream', streamRouter.router);
     app.use('/api/playlist', playlistRouter.router);
-    app.use('/api/cache', cacheRouter.router);
     app.use('/api/tmdb', tmdbRouter.router);
     app.use('/api/healthcheck', healthcheckRouter.router);
     app.use('/player_api.php', xtreamRouter.router); // Xtream Code API at specific path

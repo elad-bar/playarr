@@ -121,18 +121,6 @@ class WebSocketService {
     }
   }
 
-  /**
-   * Get number of connected clients
-   */
-  getConnectionCount() {
-    if (!this._io) {
-      return 0;
-    }
-
-    const defaultCount = this._io.sockets.sockets.size;
-    const apiCount = this._apiNamespace ? this._apiNamespace.sockets.sockets.size : 0;
-    return defaultCount + apiCount;
-  }
 }
 
 // Export class only

@@ -13,12 +13,10 @@ class MongoDatabaseService {
   /**
    * @param {MongoClient} mongoClient - MongoDB client instance
    * @param {string} dbName - Database name
-   * @param {import('./cache.js').CacheService} cacheService - Cache service instance (for compatibility, but MongoDB queries are fast)
    */
-  constructor(mongoClient, dbName, cacheService) {
+  constructor(mongoClient, dbName) {
     this.client = mongoClient;
     this.db = mongoClient.db(dbName);
-    this._cache = cacheService; // Kept for compatibility but not heavily used
     this._isStopping = false;
     
     // Map collection names to MongoDB collection names
@@ -103,17 +101,6 @@ class MongoDatabaseService {
     this._isStopping = value;
   }
 
-  /**
-   * Invalidate cache for a collection (no-op for MongoDB, kept for compatibility)
-   * @param {string} collectionName - Collection name to invalidate
-   */
-  invalidateCollectionCache(collectionName) {
-    // MongoDB queries are fast, caching is less critical
-    // But we can still invalidate cache service if needed
-    if (this._cache) {
-      // Cache keys might be used elsewhere, but MongoDB doesn't need file-level caching
-    }
-  }
 
   /**
    * Get a single document by query
@@ -309,8 +296,6 @@ class MongoDatabaseService {
           { upsert: true }
         );
       }
-      
-      this.invalidateCollectionCache(collectionName);
     } catch (error) {
       logger.error(`Error updating data object in collection ${collectionName}:`, error);
       throw error;
@@ -391,29 +376,9 @@ class MongoDatabaseService {
           });
         }
       }
-      
-      this.invalidateCollectionCache('titles-streams');
     } catch (error) {
       logger.error('Error updating title streams from object:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Get item by ID using collection key
-   * @param {string} collectionName - Collection name
-   * @param {string|number} itemId - Item ID
-   * @returns {Promise<Object|null>} Document or null
-   */
-  async getItemById(collectionName, itemId) {
-    try {
-      const collection = fromCollectionName(collectionName);
-      const key = getCollectionKey(collection);
-      const query = { [key]: itemId };
-      return await this.getData(collectionName, query);
-    } catch (error) {
-      logger.error(`Error getting item by ID from collection ${collectionName}:`, error);
-      return null;
     }
   }
 
@@ -442,7 +407,6 @@ class MongoDatabaseService {
       }
       
       await collection.insertOne(data);
-      this.invalidateCollectionCache(collectionName);
     } catch (error) {
       // Handle duplicate key error gracefully (like file-based version)
       if (error.code === 11000) {
@@ -450,42 +414,6 @@ class MongoDatabaseService {
         return;
       }
       logger.error(`Error inserting data into collection ${collectionName}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Insert multiple documents
-   * @param {string} collectionName - Collection name
-   * @param {Array<Object>} dataItems - Array of documents
-   * @returns {Promise<void>}
-   */
-  async insertDataList(collectionName, dataItems) {
-    try {
-      if (this._isStopping || !dataItems || dataItems.length === 0) {
-        return;
-      }
-
-      const mongoCollection = this._getMongoCollectionName(collectionName);
-      const collection = this.db.collection(mongoCollection);
-      
-      // Add timestamps
-      const now = new Date();
-      const items = dataItems.map(item => ({
-        ...item,
-        createdAt: item.createdAt || now,
-        lastUpdated: item.lastUpdated || now
-      }));
-      
-      await collection.insertMany(items, { ordered: false });
-      this.invalidateCollectionCache(collectionName);
-    } catch (error) {
-      // Handle duplicate key errors gracefully
-      if (error.code === 11000) {
-        logger.debug(`Some duplicate keys in collection ${collectionName}, continuing`);
-        return;
-      }
-      logger.error(`Error inserting data list into collection ${collectionName}:`, error);
       throw error;
     }
   }
@@ -525,42 +453,10 @@ class MongoDatabaseService {
         }
       }
       
-      this.invalidateCollectionCache(collectionName);
       return result.modifiedCount;
     } catch (error) {
       logger.error(`Error updating data in collection ${collectionName}:`, error);
       return 0;
-    }
-  }
-
-  /**
-   * Update multiple documents
-   * @param {string} collectionName - Collection name
-   * @param {Object} data - Update data
-   * @param {Object} query - Query to find documents
-   * @returns {Promise<void>}
-   */
-  async updateDataList(collectionName, data, query) {
-    try {
-      if (this._isStopping) {
-        return;
-      }
-
-      const mongoCollection = this._getMongoCollectionName(collectionName);
-      const mongoQuery = this._buildMongoQuery(collectionName, query);
-      const collection = this.db.collection(mongoCollection);
-      
-      // Add lastUpdated timestamp
-      const updateData = {
-        ...data,
-        lastUpdated: new Date()
-      };
-      
-      await collection.updateMany(mongoQuery, { $set: updateData });
-      this.invalidateCollectionCache(collectionName);
-    } catch (error) {
-      logger.error(`Error updating data list in collection ${collectionName}:`, error);
-      throw error;
     }
   }
 
@@ -581,140 +477,10 @@ class MongoDatabaseService {
       const collection = this.db.collection(mongoCollection);
       
       await collection.deleteOne(mongoQuery);
-      this.invalidateCollectionCache(collectionName);
     } catch (error) {
       logger.error(`Error deleting data from collection ${collectionName}:`, error);
       throw error;
     }
-  }
-
-  /**
-   * Delete multiple documents
-   * @param {string} collectionName - Collection name
-   * @param {Object} query - Query to find documents
-   * @returns {Promise<void>}
-   */
-  async deleteDataList(collectionName, query) {
-    try {
-      if (this._isStopping) {
-        return;
-      }
-
-      const mongoCollection = this._getMongoCollectionName(collectionName);
-      const mongoQuery = this._buildMongoQuery(collectionName, query);
-      const collection = this.db.collection(mongoCollection);
-      
-      await collection.deleteMany(mongoQuery);
-      this.invalidateCollectionCache(collectionName);
-    } catch (error) {
-      logger.error(`Error deleting data list from collection ${collectionName}:`, error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get count of documents
-   * @param {string} collectionName - Collection name
-   * @param {Object} query - Query object
-   * @param {number} limit - Optional limit
-   * @returns {Promise<number>} Count of documents
-   */
-  async getCount(collectionName, query, limit = null) {
-    try {
-      if (this._isStopping) {
-        return 0;
-      }
-
-      const mongoCollection = this._getMongoCollectionName(collectionName);
-      const mongoQuery = this._buildMongoQuery(collectionName, query);
-      const collection = this.db.collection(mongoCollection);
-      
-      let count = await collection.countDocuments(mongoQuery);
-      
-      if (limit && limit > 0) {
-        count = Math.min(count, limit);
-      }
-      
-      return count;
-    } catch (error) {
-      logger.error(`Error getting count from collection ${collectionName}:`, error);
-      return 0;
-    }
-  }
-
-  /**
-   * Get data keys only
-   * @param {string} collectionName - Collection name
-   * @param {Object} query - Query object
-   * @returns {Promise<Array>} Array of keys
-   */
-  async getDataKeys(collectionName, query) {
-    try {
-      if (this._isStopping) {
-        return [];
-      }
-
-      const collection = fromCollectionName(collectionName);
-      const key = getCollectionKey(collection);
-      
-      const mongoCollection = this._getMongoCollectionName(collectionName);
-      const mongoQuery = this._buildMongoQuery(collectionName, query);
-      const mongoCollectionObj = this.db.collection(mongoCollection);
-      
-      const items = await mongoCollectionObj.find(mongoQuery, { projection: { [key]: 1 } }).toArray();
-      return items.map(item => item[key]).filter(Boolean);
-    } catch (error) {
-      logger.error(`Error getting data keys from collection ${collectionName}:`, error);
-      return [];
-    }
-  }
-
-  /**
-   * Read JSON file as array (kept for compatibility, but not used with MongoDB)
-   * @param {string} filePath - File path (not used with MongoDB)
-   * @returns {Promise<Array>} Empty array
-   */
-  async readFile(filePath) {
-    logger.warn(`readFile() called with MongoDB - file path ignored: ${filePath}`);
-    return [];
-  }
-
-  /**
-   * Read JSON file as object (kept for compatibility, but not used with MongoDB)
-   * @param {string} filePath - File path (not used with MongoDB)
-   * @returns {Promise<Object>} Empty object
-   */
-  async readObject(filePath) {
-    logger.warn(`readObject() called with MongoDB - file path ignored: ${filePath}`);
-    return {};
-  }
-
-  /**
-   * Write JSON file as array (kept for compatibility, but not used with MongoDB)
-   * @param {string} filePath - File path (not used with MongoDB)
-   * @param {Array} data - Data (not used with MongoDB)
-   */
-  async writeFile(filePath, data) {
-    logger.warn(`writeFile() called with MongoDB - file path ignored: ${filePath}`);
-  }
-
-  /**
-   * Write JSON file as object (kept for compatibility, but not used with MongoDB)
-   * @param {string} filePath - File path (not used with MongoDB)
-   * @param {Object} data - Data (not used with MongoDB)
-   */
-  async writeObject(filePath, data) {
-    logger.warn(`writeObject() called with MongoDB - file path ignored: ${filePath}`);
-  }
-
-  /**
-   * Get file path helper (kept for compatibility, but not used with MongoDB)
-   * @param {string} relativePath - Relative path (not used with MongoDB)
-   * @returns {string} Empty string
-   */
-  getFilePath(relativePath) {
-    logger.warn(`getFilePath() called with MongoDB - path ignored: ${relativePath}`);
-    return '';
   }
 
   /**
@@ -975,9 +741,6 @@ class MongoDatabaseService {
           const batch = bulkOps.slice(i, i + 1000);
           await collection.bulkWrite(batch, { ordered: false });
         }
-        
-        // Invalidate cache
-        this.invalidateCollectionCache('titles');
       }
       
       return { titlesUpdated, streamsRemoved };
@@ -997,9 +760,6 @@ class MongoDatabaseService {
       const result = await this.db.collection('title_streams')
         .deleteMany({ provider_id: providerId });
       
-      // Invalidate cache
-      this.invalidateCollectionCache('titles-streams');
-      
       return result.deletedCount;
     } catch (error) {
       logger.error(`Error deleting title streams for provider ${providerId}: ${error.message}`);
@@ -1016,9 +776,6 @@ class MongoDatabaseService {
     try {
       const result = await this.db.collection('provider_titles')
         .deleteMany({ provider_id: providerId });
-      
-      // Invalidate cache for provider titles
-      this.invalidateCollectionCache(`${providerId}.titles`);
       
       return result.deletedCount;
     } catch (error) {

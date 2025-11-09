@@ -148,9 +148,6 @@ class ProvidersManager {
         await collection.insertMany(providersWithTimestamps);
       }
       
-      // Invalidate cache
-      this._database.invalidateCollectionCache(this._providersCollection);
-      
       logger.info(`Saved ${providers.length} providers to MongoDB`);
     } catch (error) {
       logger.error('Error writing providers to MongoDB:', error);
@@ -309,7 +306,7 @@ class ProvidersManager {
       // If provider is being disabled, perform cleanup operations
       if (wasEnabled && !willBeEnabled) {
         try {
-          // Remove provider from titles.streams
+          // Remove provider from titles.streams and main-titles-streams
           await this._database.removeProviderFromTitles(providerId);
           
           // Delete all title_streams for this provider
@@ -377,7 +374,7 @@ class ProvidersManager {
 
       // Perform cleanup operations
       try {
-        // Remove provider from titles.streams
+        // Remove provider from titles.streams and main-titles-streams
         await this._database.removeProviderFromTitles(providerId);
         
         // Delete all title_streams for this provider
