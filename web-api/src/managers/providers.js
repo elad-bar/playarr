@@ -306,13 +306,19 @@ class ProvidersManager {
       const wasEnabled = existingProvider.enabled !== false;
       const willBeEnabled = providerData.enabled !== false;
 
-      // If provider is being disabled, remove it from all stream sources
-      if (wasEnabled && !willBeEnabled && this._titlesManager) {
+      // If provider is being disabled, perform cleanup operations
+      if (wasEnabled && !willBeEnabled) {
         try {
-          await this._titlesManager.removeProviderFromStreams(providerId);
+          // Remove provider from titles.streams
+          await this._database.removeProviderFromTitles(providerId);
+          
+          // Delete all title_streams for this provider
+          await this._database.deleteProviderTitleStreams(providerId);
+          
+          // Do NOT delete provider_titles (only on delete, not disable)
         } catch (error) {
           // Log error but don't fail the provider update
-          logger.error(`Error removing provider ${providerId} from streams:`, error);
+          logger.error(`Error cleaning up provider ${providerId}: ${error.message}`);
         }
       }
 
@@ -320,10 +326,12 @@ class ProvidersManager {
       this._normalizeUrls(providerData, existingProvider);
 
       // Update provider data (preserve id and other fields)
+      const now = new Date();
       const updatedProvider = {
         ...existingProvider,
         ...providerData,
         id: providerId, // Ensure id doesn't change
+        lastUpdated: now // Update timestamp
       };
 
       // Update in array and save
@@ -350,7 +358,7 @@ class ProvidersManager {
   }
 
   /**
-   * Delete an IPTV provider
+   * Delete an IPTV provider (logical delete)
    */
   async deleteProvider(providerId) {
     try {
@@ -365,8 +373,31 @@ class ProvidersManager {
         };
       }
 
-      // Remove provider from array and save
-      providers.splice(providerIndex, 1);
+      const provider = providers[providerIndex];
+
+      // Perform cleanup operations
+      try {
+        // Remove provider from titles.streams
+        await this._database.removeProviderFromTitles(providerId);
+        
+        // Delete all title_streams for this provider
+        await this._database.deleteProviderTitleStreams(providerId);
+        
+        // Delete all provider_titles for this provider (only on delete, not disable)
+        await this._database.deleteProviderTitles(providerId);
+      } catch (error) {
+        // Log error but don't fail the provider deletion
+        logger.error(`Error cleaning up provider ${providerId}: ${error.message}`);
+      }
+
+      // Set deleted: true and update lastUpdated timestamp
+      const now = new Date();
+      providers[providerIndex] = {
+        ...provider,
+        deleted: true,
+        lastUpdated: now
+      };
+      
       await this._writeAllProviders(providers);
 
       // Broadcast WebSocket event

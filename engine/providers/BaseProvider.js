@@ -255,7 +255,7 @@ export class BaseProvider {
       if (Object.keys(policiesToCreate).length > 0) {
         this.logger.info(`Initializing ${Object.keys(policiesToCreate).length} cache policies for ${this.providerId}`);
         const promises = Object.entries(policiesToCreate).map(([key, value]) =>
-          this.cache.mongoData.updateCachePolicy(key, value)
+          this.cache.mongoData.updateCachePolicy(key, value, this.providerId)
         );
         await Promise.all(promises);
       }

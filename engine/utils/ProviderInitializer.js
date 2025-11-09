@@ -19,6 +19,7 @@ export class ProviderInitializer {
   static mongoClient = null;
   static mongoData = null;
   static providers = null; // Map<string, BaseIPTVProvider>
+  static loadedProviders = null; // Map<string, { lastUpdated: Date }> - Track loaded providers with timestamps
   static tmdbProvider = null;
   static logger = createLogger('ProviderInitializer');
   static initialized = false;
@@ -71,6 +72,7 @@ export class ProviderInitializer {
 
     // Initialize IPTV providers
     ProviderInitializer.providers = new Map();
+    ProviderInitializer.loadedProviders = new Map();
     const providerConfigs = await BaseProvider.loadProviders(ProviderInitializer.mongoData);
     ProviderInitializer.logger.info(`Found ${providerConfigs.length} enabled provider(s)`);
 
@@ -82,6 +84,9 @@ export class ProviderInitializer {
         await instance.initializeCachePolicies();
         
         ProviderInitializer.providers.set(providerData.id, instance);
+        ProviderInitializer.loadedProviders.set(providerData.id, {
+          lastUpdated: providerData.lastUpdated ? new Date(providerData.lastUpdated) : new Date()
+        });
         ProviderInitializer.logger.info(`✓ Loaded provider: ${providerData.id} (${providerData.type})`);
       } catch (error) {
         ProviderInitializer.logger.error(`✗ Failed to load provider ${providerData.id}: ${error.message}`);
@@ -154,6 +159,128 @@ export class ProviderInitializer {
   }
 
   /**
+   * Reload a provider by ID
+   * @param {string} providerId - Provider ID to reload
+   * @returns {Promise<void>}
+   */
+  static async reloadProvider(providerId) {
+    if (!ProviderInitializer.initialized) {
+      throw new Error('ProviderInitializer not initialized. Call initialize() first.');
+    }
+
+    try {
+      // Load provider config from MongoDB
+      const provider = await ProviderInitializer.mongoData.db.collection('iptv_providers')
+        .findOne({ id: providerId });
+
+      if (!provider) {
+        ProviderInitializer.logger.warn(`Provider ${providerId} not found in MongoDB`);
+        return;
+      }
+
+      // Check if provider should be loaded (enabled and not deleted)
+      if (provider.enabled !== true || provider.deleted === true) {
+        ProviderInitializer.logger.info(`Provider ${providerId} is disabled or deleted, removing from engine`);
+        await ProviderInitializer.removeProvider(providerId);
+        return;
+      }
+
+      // Create new instance
+      const instance = ProviderInitializer._createProviderInstance(provider);
+      
+      // Initialize cache policies
+      await instance.initializeCachePolicies();
+      
+      // Replace in providers Map
+      ProviderInitializer.providers.set(providerId, instance);
+      ProviderInitializer.loadedProviders.set(providerId, {
+        lastUpdated: provider.lastUpdated ? new Date(provider.lastUpdated) : new Date()
+      });
+      
+      ProviderInitializer.logger.info(`✓ Reloaded provider: ${providerId}`);
+    } catch (error) {
+      ProviderInitializer.logger.error(`✗ Failed to reload provider ${providerId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove a provider from the engine
+   * @param {string} providerId - Provider ID to remove
+   * @returns {Promise<void>}
+   */
+  static async removeProvider(providerId) {
+    if (!ProviderInitializer.initialized) {
+      throw new Error('ProviderInitializer not initialized. Call initialize() first.');
+    }
+
+    if (ProviderInitializer.providers.has(providerId)) {
+      ProviderInitializer.providers.delete(providerId);
+      ProviderInitializer.loadedProviders.delete(providerId);
+      ProviderInitializer.logger.info(`✓ Removed provider: ${providerId}`);
+    }
+  }
+
+  /**
+   * Add a new provider to the engine
+   * @param {Object} providerData - Provider configuration data
+   * @returns {Promise<void>}
+   */
+  static async addProvider(providerData) {
+    if (!ProviderInitializer.initialized) {
+      throw new Error('ProviderInitializer not initialized. Call initialize() first.');
+    }
+
+    try {
+      // Check if provider should be loaded
+      if (providerData.enabled !== true || providerData.deleted === true) {
+        ProviderInitializer.logger.debug(`Provider ${providerData.id} is disabled or deleted, skipping`);
+        return;
+      }
+
+      // Create instance
+      const instance = ProviderInitializer._createProviderInstance(providerData);
+      
+      // Initialize cache policies
+      await instance.initializeCachePolicies();
+      
+      // Add to providers Map
+      ProviderInitializer.providers.set(providerData.id, instance);
+      ProviderInitializer.loadedProviders.set(providerData.id, {
+        lastUpdated: providerData.lastUpdated ? new Date(providerData.lastUpdated) : new Date()
+      });
+      
+      ProviderInitializer.logger.info(`✓ Added provider: ${providerData.id} (${providerData.type})`);
+    } catch (error) {
+      ProviderInitializer.logger.error(`✗ Failed to add provider ${providerData.id}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Reload cache policies for all loaded providers
+   * @returns {Promise<void>}
+   */
+  static async reloadCachePolicies() {
+    if (!ProviderInitializer.initialized || !ProviderInitializer.providers) {
+      throw new Error('ProviderInitializer not initialized. Call initialize() first.');
+    }
+
+    ProviderInitializer.logger.info('Reloading cache policies for all providers...');
+    
+    for (const [providerId, provider] of ProviderInitializer.providers) {
+      try {
+        await provider.initializeCachePolicies();
+        ProviderInitializer.logger.debug(`✓ Reloaded cache policies for provider: ${providerId}`);
+      } catch (error) {
+        ProviderInitializer.logger.error(`✗ Failed to reload cache policies for provider ${providerId}: ${error.message}`);
+      }
+    }
+    
+    ProviderInitializer.logger.info('Cache policies reload completed');
+  }
+
+  /**
    * Reset initialization state (useful for testing)
    * @private
    */
@@ -162,6 +289,7 @@ export class ProviderInitializer {
     ProviderInitializer.mongoClient = null;
     ProviderInitializer.mongoData = null;
     ProviderInitializer.providers = null;
+    ProviderInitializer.loadedProviders = null;
     ProviderInitializer.tmdbProvider = null;
     ProviderInitializer.initialized = false;
   }

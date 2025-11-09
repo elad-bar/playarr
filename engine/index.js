@@ -49,6 +49,28 @@ async function main() {
             cacheDir: CACHE_DIR
           }
         }
+      },
+      {
+        name: 'monitorConfiguration',
+        path: path.join(__dirname, 'workers', 'monitorConfiguration.js'),
+        interval: '1m', // Every 1 minute
+        timeout: '30s', // First run 30 seconds after startup
+        worker: {
+          workerData: {
+            cacheDir: CACHE_DIR
+          }
+        }
+      },
+      {
+        name: 'purgeProviderCache',
+        path: path.join(__dirname, 'workers', 'purgeProviderCache.js'),
+        interval: '6h', // Every 6 hours
+        timeout: '1h', // First run 1 hour after startup
+        worker: {
+          workerData: {
+            cacheDir: CACHE_DIR
+          }
+        }
       }
     ]
   });
@@ -127,7 +149,9 @@ async function main() {
 
     logger.info('Job scheduler started. Jobs will run according to schedule.');
     logger.info('- processProvidersTitles: On startup and every 1 hour');
-    logger.info('- processMainTitles: First run in 5 minutes, then every 3 minutes (skipped if processProvidersTitles is running)');
+    logger.info('- processMainTitles: First run in 1 minute, then every 5 minutes (skipped if processProvidersTitles is running)');
+    logger.info('- monitorConfiguration: First run in 30 seconds, then every 1 minute');
+    logger.info('- purgeProviderCache: First run in 1 hour, then every 6 hours');
     
     // Keep the process running
     process.on('SIGINT', async () => {

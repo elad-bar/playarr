@@ -510,12 +510,22 @@ export class MongoDataService {
 
   /**
    * Get IPTV providers from MongoDB
-   * @returns {Promise<Array<Object>>} Array of enabled provider documents, sorted by priority
+   * @returns {Promise<Array<Object>>} Array of enabled, non-deleted provider documents, sorted by priority
    */
   async getIPTVProviders() {
     return await this.db.collection('iptv_providers')
-      .find({ enabled: true })
+      .find({ enabled: true, deleted: { $ne: true } })
       .sort({ priority: 1 })
+      .toArray();
+  }
+
+  /**
+   * Get deleted providers from MongoDB
+   * @returns {Promise<Array<Object>>} Array of deleted provider documents
+   */
+  async getDeletedProviders() {
+    return await this.db.collection('iptv_providers')
+      .find({ deleted: true })
       .toArray();
   }
 
@@ -590,18 +600,55 @@ export class MongoDataService {
   }
 
   /**
+   * Extract provider_id from policy key
+   * @private
+   * @param {string} policyKey - Cache path key (e.g., "agtv/categories", "tmdb/search/movie")
+   * @returns {string|null} Provider ID or null if global policy
+   */
+  _extractProviderIdFromPolicyKey(policyKey) {
+    if (!policyKey || typeof policyKey !== 'string') {
+      return null;
+    }
+    
+    // Check if it starts with known provider prefixes
+    if (policyKey.startsWith('tmdb/')) {
+      return 'tmdb';
+    }
+    
+    // Extract first part before first slash (e.g., "agtv/categories" -> "agtv")
+    const parts = policyKey.split('/');
+    if (parts.length > 0 && parts[0]) {
+      // Check if it's a valid provider ID (not a generic path like "search")
+      const firstPart = parts[0];
+      // Common provider types: agtv, xtream, or any custom provider ID
+      // If it doesn't look like a generic path, assume it's a provider ID
+      if (firstPart !== 'search' && firstPart !== 'find' && firstPart !== 'movie' && firstPart !== 'tv') {
+        return firstPart;
+      }
+    }
+    
+    return null;
+  }
+
+  /**
    * Update cache policy in MongoDB
-   * @param {string} policyKey - Cache path key (e.g., "tmdb/search/movie")
+   * @param {string} policyKey - Cache path key (e.g., "tmdb/search/movie", "agtv/categories")
    * @param {number|null} ttlHours - TTL in hours (null for Infinity)
+   * @param {string|null} [providerId=null] - Optional provider ID. If not provided, will be extracted from policyKey
    * @returns {Promise<void>}
    */
-  async updateCachePolicy(policyKey, ttlHours) {
+  async updateCachePolicy(policyKey, ttlHours, providerId = null) {
     const now = new Date();
+    
+    // Extract provider_id from policyKey if not provided
+    const extractedProviderId = providerId !== null ? providerId : this._extractProviderIdFromPolicyKey(policyKey);
+    
     await this.db.collection('cache_policy').updateOne(
       { _id: policyKey },
       {
         $set: {
           value: ttlHours,
+          provider_id: extractedProviderId,
           lastUpdated: now
         },
         $setOnInsert: {
@@ -610,6 +657,22 @@ export class MongoDataService {
       },
       { upsert: true }
     );
+  }
+
+  /**
+   * Get cache policies by provider ID
+   * @param {string} providerId - Provider identifier
+   * @returns {Promise<Array<Object>>} Array of cache policy documents for the provider
+   */
+  async getCachePoliciesByProvider(providerId) {
+    try {
+      return await this.db.collection('cache_policy')
+        .find({ provider_id: providerId })
+        .toArray();
+    } catch (error) {
+      logger.error(`Error getting cache policies for provider ${providerId}: ${error.message}`);
+      return [];
+    }
   }
 
   /**
@@ -630,6 +693,142 @@ export class MongoDataService {
     } catch (error) {
       logger.error(`Error getting settings: ${error.message}`);
       return {};
+    }
+  }
+
+  /**
+   * Remove provider from titles.streams object
+   * Efficiently queries title_streams first to find only affected titles
+   * @param {string} providerId - Provider ID to remove
+   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number}>}
+   */
+  async removeProviderFromTitles(providerId) {
+    try {
+      // 1. Get all title_streams for this provider
+      const streams = await this.db.collection('title_streams')
+        .find({ provider_id: providerId })
+        .toArray();
+      
+      if (streams.length === 0) {
+        return { titlesUpdated: 0, streamsRemoved: 0 };
+      }
+      
+      // 2. Extract unique title_key values
+      const titleKeys = [...new Set(streams.map(s => s.title_key))];
+      
+      // 3. Fetch only affected titles
+      const titles = await this.db.collection('titles')
+        .find({ title_key: { $in: titleKeys } })
+        .toArray();
+      
+      if (titles.length === 0) {
+        return { titlesUpdated: 0, streamsRemoved: 0 };
+      }
+      
+      let titlesUpdated = 0;
+      let streamsRemoved = 0;
+      const bulkOps = [];
+      
+      // 4. Process each title
+      for (const title of titles) {
+        const streamsObj = title.streams || {};
+        let titleModified = false;
+        const updatedStreams = { ...streamsObj };
+        
+        // Process each stream entry in the streams object
+        for (const [streamKey, streamValue] of Object.entries(streamsObj)) {
+          // Both movies and TV shows use the same structure: { sources: [...] }
+          // TV shows have additional metadata fields (air_date, name, overview, still_path)
+          if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
+            const originalLength = streamValue.sources.length;
+            const filteredSources = streamValue.sources.filter(id => id !== providerId);
+            
+            if (filteredSources.length !== originalLength) {
+              if (filteredSources.length > 0) {
+                // Keep the stream entry with filtered sources (preserve metadata for TV shows)
+                updatedStreams[streamKey] = {
+                  ...streamValue,
+                  sources: filteredSources
+                };
+              } else {
+                // Remove stream entry if no sources left
+                updatedStreams[streamKey] = undefined;
+              }
+              streamsRemoved += (originalLength - filteredSources.length);
+              titleModified = true;
+            }
+          }
+        }
+        
+        // Remove undefined entries (streams with no sources left)
+        for (const key in updatedStreams) {
+          if (updatedStreams[key] === undefined) {
+            delete updatedStreams[key];
+          }
+        }
+        
+        // 5. Prepare update operation
+        if (titleModified) {
+          titlesUpdated++;
+          bulkOps.push({
+            updateOne: {
+              filter: { title_key: title.title_key },
+              update: {
+                $set: {
+                  streams: updatedStreams,
+                  lastUpdated: new Date()
+                }
+              }
+            }
+          });
+        }
+      }
+      
+      // 6. Execute bulk update
+      if (bulkOps.length > 0) {
+        // Process in batches of 1000
+        for (let i = 0; i < bulkOps.length; i += this.batchSize) {
+          const batch = bulkOps.slice(i, i + this.batchSize);
+          await this.db.collection('titles').bulkWrite(batch, { ordered: false });
+        }
+      }
+      
+      return { titlesUpdated, streamsRemoved };
+    } catch (error) {
+      logger.error(`Error removing provider ${providerId} from titles: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all title_streams documents for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<number>} Number of documents deleted
+   */
+  async deleteProviderTitleStreams(providerId) {
+    try {
+      const result = await this.db.collection('title_streams')
+        .deleteMany({ provider_id: providerId });
+      return result.deletedCount;
+    } catch (error) {
+      logger.error(`Error deleting title streams for provider ${providerId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all provider_titles documents for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<number>} Number of documents deleted
+   */
+  async deleteProviderTitles(providerId) {
+    try {
+      const result = await this.db.collection('provider_titles')
+        .deleteMany({ provider_id: providerId });
+      return result.deletedCount;
+    } catch (error) {
+      logger.error(`Error deleting provider titles for provider ${providerId}: ${error.message}`);
+      throw error;
     }
   }
 }

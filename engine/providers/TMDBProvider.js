@@ -23,7 +23,7 @@ export class TMDBProvider extends BaseProvider {
         id: 'tmdb',
         type: 'tmdb',
         api_rate: settings.tmdb_api_rate,
-        token: settings.tmdb_token
+        token: settings.tmdb_token || '' // Allow empty token
       };
 
       TMDBProvider.instance = new TMDBProvider(providerData, cache, mongoData);
@@ -93,6 +93,51 @@ export class TMDBProvider extends BaseProvider {
    */
   getProviderType() {
     return 'tmdb';
+  }
+
+  /**
+   * Update TMDB settings (token and rate limits)
+   * @param {Object} settings - Settings object with tmdb_token and/or tmdb_api_rate
+   * @returns {Promise<void>}
+   */
+  async updateSettings(settings) {
+    let needsRateLimiterUpdate = false;
+
+    // Update API token if provided
+    if (settings.tmdb_token !== undefined) {
+      this.apiToken = settings.tmdb_token || '';
+      this.logger.info('TMDB API token updated');
+    }
+
+    // Update rate limit configuration if provided
+    if (settings.tmdb_api_rate !== undefined) {
+      const oldRate = this.providerData.api_rate;
+      this.providerData.api_rate = settings.tmdb_api_rate;
+      
+      // Check if rate limit configuration actually changed
+      if (JSON.stringify(oldRate) !== JSON.stringify(settings.tmdb_api_rate)) {
+        needsRateLimiterUpdate = true;
+        this.logger.info('TMDB API rate limit configuration updated');
+      }
+    }
+
+    // Reinitialize rate limiter if rate config changed
+    if (needsRateLimiterUpdate) {
+      const rateConfig = this.providerData.api_rate || { concurrent: 1, duration_seconds: 1 };
+      const concurrent = rateConfig.concurrent || rateConfig.concurrect || 1;
+      const durationSeconds = rateConfig.duration_seconds || 1;
+      
+      // Update existing limiter configuration
+      this.limiter.updateSettings({
+        reservoir: concurrent,
+        reservoirRefreshInterval: durationSeconds * 1000,
+        reservoirRefreshAmount: concurrent,
+        maxConcurrent: concurrent,
+        minTime: 0
+      });
+      
+      this.logger.debug(`Rate limiter reconfigured: ${concurrent} requests per ${durationSeconds} second(s)`);
+    }
   }
 
   /**

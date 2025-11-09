@@ -880,6 +880,154 @@ class MongoDatabaseService {
   }
 
   /**
+   * Remove provider from titles.streams object
+   * Efficiently queries title_streams first to find only affected titles
+   * @param {string} providerId - Provider ID to remove
+   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number}>}
+   */
+  async removeProviderFromTitles(providerId) {
+    try {
+      // 1. Get all title_streams for this provider
+      const streams = await this.db.collection('title_streams')
+        .find({ provider_id: providerId })
+        .toArray();
+      
+      if (streams.length === 0) {
+        return { titlesUpdated: 0, streamsRemoved: 0 };
+      }
+      
+      // 2. Extract unique title_key values
+      const titleKeys = [...new Set(streams.map(s => s.title_key))];
+      
+      // 3. Fetch only affected titles
+      const titles = await this.db.collection('titles')
+        .find({ title_key: { $in: titleKeys } })
+        .toArray();
+      
+      if (titles.length === 0) {
+        return { titlesUpdated: 0, streamsRemoved: 0 };
+      }
+      
+      let titlesUpdated = 0;
+      let streamsRemoved = 0;
+      const bulkOps = [];
+      
+      // 4. Process each title
+      for (const title of titles) {
+        const streamsObj = title.streams || {};
+        let titleModified = false;
+        const updatedStreams = { ...streamsObj };
+        
+        // Process each stream entry in the streams object
+        for (const [streamKey, streamValue] of Object.entries(streamsObj)) {
+          // Both movies and TV shows use the same structure: { sources: [...] }
+          // TV shows have additional metadata fields (air_date, name, overview, still_path)
+          if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
+            const originalLength = streamValue.sources.length;
+            const filteredSources = streamValue.sources.filter(id => id !== providerId);
+            
+            if (filteredSources.length !== originalLength) {
+              if (filteredSources.length > 0) {
+                // Keep the stream entry with filtered sources (preserve metadata for TV shows)
+                updatedStreams[streamKey] = {
+                  ...streamValue,
+                  sources: filteredSources
+                };
+              } else {
+                // Remove stream entry if no sources left
+                updatedStreams[streamKey] = undefined;
+              }
+              streamsRemoved += (originalLength - filteredSources.length);
+              titleModified = true;
+            }
+          }
+        }
+        
+        // Remove undefined entries (streams with no sources left)
+        for (const key in updatedStreams) {
+          if (updatedStreams[key] === undefined) {
+            delete updatedStreams[key];
+          }
+        }
+        
+        // 5. Prepare update operation
+        if (titleModified) {
+          titlesUpdated++;
+          bulkOps.push({
+            updateOne: {
+              filter: { title_key: title.title_key },
+              update: {
+                $set: {
+                  streams: updatedStreams,
+                  lastUpdated: new Date()
+                }
+              }
+            }
+          });
+        }
+      }
+      
+      // 6. Execute bulk update
+      if (bulkOps.length > 0) {
+        const collection = this.db.collection('titles');
+        // Process in batches of 1000
+        for (let i = 0; i < bulkOps.length; i += 1000) {
+          const batch = bulkOps.slice(i, i + 1000);
+          await collection.bulkWrite(batch, { ordered: false });
+        }
+        
+        // Invalidate cache
+        this.invalidateCollectionCache('titles');
+      }
+      
+      return { titlesUpdated, streamsRemoved };
+    } catch (error) {
+      logger.error(`Error removing provider ${providerId} from titles: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all title_streams documents for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<number>} Number of documents deleted
+   */
+  async deleteProviderTitleStreams(providerId) {
+    try {
+      const result = await this.db.collection('title_streams')
+        .deleteMany({ provider_id: providerId });
+      
+      // Invalidate cache
+      this.invalidateCollectionCache('titles-streams');
+      
+      return result.deletedCount;
+    } catch (error) {
+      logger.error(`Error deleting title streams for provider ${providerId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all provider_titles documents for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<number>} Number of documents deleted
+   */
+  async deleteProviderTitles(providerId) {
+    try {
+      const result = await this.db.collection('provider_titles')
+        .deleteMany({ provider_id: providerId });
+      
+      // Invalidate cache for provider titles
+      this.invalidateCollectionCache(`${providerId}.titles`);
+      
+      return result.deletedCount;
+    } catch (error) {
+      logger.error(`Error deleting provider titles for provider ${providerId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Initialize database (connect and create indices)
    * @returns {Promise<void>}
    */

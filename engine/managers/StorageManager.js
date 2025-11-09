@@ -404,5 +404,26 @@ export class StorageManager {
       this.logger.error(`Error clearing cache: ${error.message}`);
     }
   }
+
+  /**
+   * Remove all cache for a specific provider
+   * @param {string} providerId - Provider identifier
+   * @returns {Promise<void>}
+   */
+  async removeProviderCache(providerId) {
+    try {
+      const cacheDir = path.join(this.storageDir, providerId);
+      
+      if (fs.existsSync(cacheDir)) {
+        await fs.remove(cacheDir);
+        this.logger.info(`Removed cache directory for provider: ${providerId}`);
+      } else {
+        this.logger.debug(`No cache directory found for provider: ${providerId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error removing cache for provider ${providerId}: ${error.message}`);
+      throw error;
+    }
+  }
 }
 
