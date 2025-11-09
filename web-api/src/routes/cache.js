@@ -9,15 +9,13 @@ const logger = createLogger('CacheRouter');
 class CacheRouter {
   /**
    * @param {CacheService} cacheService - Cache service instance
-   * @param {FileStorageService} fileStorage - File storage service instance
    * @param {TitlesManager} titlesManager - Titles manager instance
    * @param {StatsManager} statsManager - Stats manager instance
    * @param {CategoriesManager} categoriesManager - Categories manager instance
-   * @param {DatabaseService} database - Database service instance
+   * @param {MongoDatabaseService} database - Database service instance
    */
-  constructor(cacheService, fileStorage, titlesManager, statsManager, categoriesManager, database) {
+  constructor(cacheService, titlesManager, statsManager, categoriesManager, database) {
     this._cacheService = cacheService;
-    this._fileStorage = fileStorage;
     this._titlesManager = titlesManager;
     this._statsManager = statsManager;
     this._categoriesManager = categoriesManager;

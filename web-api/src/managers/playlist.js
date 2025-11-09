@@ -23,6 +23,7 @@ class PlaylistManager {
 
   /**
    * Get relevant titles and their unique streams for user watchlist filtered by media type
+   * Optimized to query MongoDB directly for only watchlist titles
    * @private
    * @param {string} mediaType - Media type ('movies' or 'tvshows')
    * @param {Object} user - User object with watchlist
@@ -34,25 +35,36 @@ class PlaylistManager {
       return [];
     }
 
-    const watchlistTitleKeys = user.watchlist;
-
-    // Get titles from database
-    const titlesData = await this._database.getDataList('titles');
-    if (!titlesData) {
+    const watchlistTitleKeys = user.watchlist.filter(key => key.startsWith(`${mediaType}-`));
+    
+    if (watchlistTitleKeys.length === 0) {
       return [];
+    }
+
+    // Query MongoDB directly for only the watchlist titles
+    const collection = this._database.getCollection('titles');
+    const titles = await collection.find({
+      title_key: { $in: watchlistTitleKeys }
+    }).toArray();
+
+    if (!titles || titles.length === 0) {
+      return [];
+    }
+
+    // Create a Map for quick lookup
+    const titlesMap = new Map();
+    for (const title of titles) {
+      if (title.title_key) {
+        titlesMap.set(title.title_key, title);
+      }
     }
 
     // Retrieve unique streams for watchlist titles
     const relevantStreams = [];
 
     for (const titleKey of watchlistTitleKeys) {
-      // Filter by media type from title key prefix
-      if (!titleKey.startsWith(`${mediaType}-`)) {
-        continue;
-      }
-
-      // Get title from titles data
-      const title = titlesData.get(titleKey);
+      // Get title from titles map
+      const title = titlesMap.get(titleKey);
       if (!title || !title.streams) {
         continue;
       }

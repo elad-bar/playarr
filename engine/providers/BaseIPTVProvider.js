@@ -33,15 +33,25 @@ export class BaseIPTVProvider extends BaseProvider {
    * @param {Object} providerData - Provider configuration data
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @param {number} [metadataBatchSize=100] - Batch size for processing metadata (default: 100)
    */
-  constructor(providerData, cache, data, metadataBatchSize = 100) {
+  constructor(providerData, cache, data, mongoData, metadataBatchSize = 100) {
     super(providerData, cache, data);
+    
+    if (!mongoData) {
+      throw new Error('MongoDataService is required');
+    }
+    this.mongoData = mongoData;
     
     // In-memory cache for titles and ignored titles
     // Loaded once at the start of job execution and kept in memory
     this._titlesCache = null;
     this._ignoredCache = null;
+    
+    // Accumulated ignored titles by type for batch saving
+    // Format: { 'movies': { titleId: reason }, 'tvshows': { titleId: reason } }
+    this._accumulatedIgnoredTitles = {};
     
     /**
      * Batch size for processing metadata
@@ -113,6 +123,27 @@ export class BaseIPTVProvider extends BaseProvider {
           processedTitles.length = 0; // Clear after saving
         } catch (error) {
           this.logger.error(`Error saving accumulated titles for ${type}: ${error.message}`);
+        }
+      }
+      
+      // Also save accumulated ignored titles for this type
+      if (this._accumulatedIgnoredTitles[type] && Object.keys(this._accumulatedIgnoredTitles[type]).length > 0) {
+        try {
+          // Convert title_id to title_key format and save directly
+          const ignoredByTitleKey = Object.fromEntries(
+            Object.entries(this._accumulatedIgnoredTitles[type]).map(([titleId, reason]) => [
+              generateTitleKey(type, titleId),
+              reason
+            ])
+          );
+          
+          await this.saveAllIgnoredTitles(ignoredByTitleKey);
+          
+          const count = Object.keys(this._accumulatedIgnoredTitles[type]).length;
+          this.logger.debug(`${type}: Saved ${count} accumulated ignored title(s) via progress callback`);
+          this._accumulatedIgnoredTitles[type] = {}; // Clear after saving
+        } catch (error) {
+          this.logger.error(`Error saving accumulated ignored titles for ${type}: ${error.message}`);
         }
       }
     };
@@ -235,29 +266,29 @@ export class BaseIPTVProvider extends BaseProvider {
   }
 
   /**
-   * Save categories for a provider by type
+   * Save categories for a provider by type to MongoDB
    * Merges with existing categories, preserving enabled status
-   * Saves to consolidated file: data/categories/{providerId}.categories.json
    * @param {string} type - Category type ('movies' or 'tvshows')
    * @param {Array<{category_id: number|string, category_name: string}>} categories - Array of category data objects
-   * @returns {Object} Saved category data object
+   * @returns {Promise<Object>} Saved category data object
    */
   async saveCategories(type, categories) {
-    this.logger.debug(`Saving ${categories.length} categories for ${type}`);
+    if (!categories || categories.length === 0) {
+      return { saved: 0, inserted: 0, updated: 0 };
+    }
 
-    const now = new Date().toISOString();
-    const categoriesCacheKey = ['categories', `${this.providerId}.categories.json`];
+    this.logger.debug(`Saving ${categories.length} categories for ${type} to MongoDB`);
 
-    // Load existing consolidated categories file (contains all types as array)
-    const existingCategories = this.data.get(...categoriesCacheKey) || [];
+    // Load existing categories to preserve enabled status
+    const existingCategories = await this.mongoData.getProviderCategories(this.providerId, type);
     const existingCategoryMap = new Map();
     existingCategories.forEach(cat => {
       const categoryKey = cat.category_key || generateCategoryKey(cat.type, cat.category_id);
       existingCategoryMap.set(categoryKey, cat);
     });
 
-    // Merge new categories with existing ones, adding type and category_key
-    const mergedCategories = categories.map(cat => {
+    // Prepare categories with type and category_key
+    const processedCategories = categories.map(cat => {
       if (!cat.category_id) return null;
 
       // Ensure type and category_key are set
@@ -272,82 +303,74 @@ export class BaseIPTVProvider extends BaseProvider {
         type: categoryType,
         category_key: categoryKey,
         enabled: existingCategory ? existingCategory.enabled : false, // Preserve enabled status or default to false
-        createdAt: existingCategory?.createdAt || now,
-        lastUpdated: now
       };
     }).filter(Boolean);
 
-    // Combine with existing categories that weren't updated
-    const updatedCategoryKeys = new Set(mergedCategories.map(c => c.category_key));
-    const unchangedCategories = existingCategories.filter(c => {
-      const categoryKey = c.category_key || generateCategoryKey(c.type, c.category_id);
-      return !updatedCategoryKeys.has(categoryKey);
-    });
-
-    const allCategories = [...unchangedCategories, ...mergedCategories];
+    if (processedCategories.length === 0) {
+      return { saved: 0, inserted: 0, updated: 0 };
+    }
 
     try {
-      // Save as plain array (no wrapper object)
-      this.data.set(allCategories, ...categoriesCacheKey);
-      this.logger.info(`Saved ${mergedCategories.length} categories for ${type}`);
+      // Save to MongoDB using bulk operations
+      const result = await this.mongoData.saveProviderCategories(this.providerId, processedCategories);
+      
+      const totalSaved = result.inserted + result.updated;
+      this.logger.info(`Saved ${totalSaved} categories for ${type} to MongoDB (${result.inserted} inserted, ${result.updated} updated)`);
       
       // Refresh API cache
       await this.refreshAPICache(`${this.providerId}.categories`);
       
-      return { saved: mergedCategories.length };
+      return { saved: totalSaved, inserted: result.inserted, updated: result.updated };
     } catch (error) {
-      this.logger.error(`Error saving categories for ${type}: ${error.message}`);
+      this.logger.error(`Error saving categories for ${type} to MongoDB: ${error.message}`);
       throw error;
     }
   }
 
   /**
-   * Load categories for a provider by type
-   * Loads from consolidated file: data/categories/{providerId}.categories.json
+   * Load categories for a provider by type from MongoDB
    * @param {string} type - Category type ('movies' or 'tvshows')
-   * @returns {Array<{category_id: number, category_name: string, enabled: boolean, type: string, category_key: string}>} Array of category data objects
+   * @returns {Promise<Array<{category_id: number, category_name: string, enabled: boolean, type: string, category_key: string}>>} Array of category data objects
    */
-  loadCategories(type) {
-    const categoryData = this.data.get('categories', `${this.providerId}.categories.json`);
-    if (Array.isArray(categoryData)) {
-      // Filter by type
-      return categoryData.filter(cat => {
-        const catType = cat.type || (cat.category_key && cat.category_key.startsWith('movies-') ? 'movies' : 'tvshows');
-        return catType === type;
-      });
+  async loadCategories(type) {
+    try {
+      const categories = await this.mongoData.getProviderCategories(this.providerId, type);
+      return categories;
+    } catch (error) {
+      this.logger.error(`Error loading categories from MongoDB: ${error.message}`);
+      return [];
     }
-    
-    return [];
   }
 
   /**
    * Get category enabled status by ID and type
    * @param {string} type - Category type ('movies' or 'tvshows')
    * @param {number} categoryId - Category ID
-   * @returns {boolean} True if category is enabled, false otherwise (defaults to false if not found)
+   * @returns {Promise<boolean>} True if category is enabled, false otherwise (defaults to false if not found)
    */
-  isCategoryEnabled(type, categoryId) {
-    const categories = this.loadCategories(type);
+  async isCategoryEnabled(type, categoryId) {
+    const categories = await this.loadCategories(type);
     const category = categories.find(cat => cat.category_id === categoryId);
     return category ? category.enabled : false;
   }
 
   /**
-   * Load all titles from disk into memory cache
+   * Load provider titles from MongoDB (incremental)
    * Should be called once at the start of job execution
-   * @returns {TitleData[]} Array of all title data objects
+   * @param {Date} [since=null] - Only load titles updated since this date
+   * @returns {Promise<TitleData[]>} Array of all title data objects
    */
-  loadAllTitles() {
+  async loadProviderTitles(since = null) {
     try {
-      const allTitles = this.data.get('titles', `${this.providerId}.titles.json`);
-      if (!Array.isArray(allTitles)) {
-        this._titlesCache = [];
-        return [];
-      }
-      this._titlesCache = allTitles;
-      return allTitles;
+      const titles = await this.mongoData.getProviderTitles(this.providerId, {
+        since: since,
+        ignored: false // Only non-ignored titles
+      });
+      
+      this._titlesCache = titles;
+      return titles;
     } catch (error) {
-      this.logger.debug(`No titles file found: ${error.message}`);
+      this.logger.error(`Error loading provider titles from MongoDB: ${error.message}`);
       this._titlesCache = [];
       return [];
     }
@@ -355,12 +378,15 @@ export class BaseIPTVProvider extends BaseProvider {
 
   /**
    * Get all titles from memory cache
-   * If cache is not loaded, loads from disk first
+   * If cache is not loaded, loads from MongoDB first
    * @returns {TitleData[]} Array of all title data objects
    */
   getAllTitles() {
     if (this._titlesCache === null) {
-      return this.loadAllTitles();
+      // Synchronous fallback - should not happen if loadProviderTitles is called first
+      this.logger.warn('Titles cache not loaded. Call loadProviderTitles() first.');
+      this._titlesCache = [];
+      return [];
     }
     return this._titlesCache;
   }
@@ -428,30 +454,24 @@ export class BaseIPTVProvider extends BaseProvider {
   }
 
   /**
-   * Save titles metadata to a consolidated file per provider
-   * Saves all titles to: data/titles/{providerId}.titles.json
+   * Save titles metadata to MongoDB
+   * Called periodically (every 30 seconds) or at end of process
    * Adds type and title_key properties to each title
    * @param {string} [type] - Optional title type ('movies' or 'tvshows') - if not provided, extracted from each title
    * @param {TitleData[]} titles - Array of title data objects to save
-   * @returns {Promise<{saved: number}>} Number of titles saved
+   * @returns {Promise<{saved: number, inserted: number, updated: number}>} Number of titles saved
    */
   async saveTitles(type, titles) {
-    // If type is not provided, extract from titles (for backward compatibility)
-    if (!type && titles.length > 0 && titles[0].type) {
-      // Type will be extracted from each title individually
+    if (!titles || titles.length === 0) {
+      return { saved: 0, inserted: 0, updated: 0 };
     }
 
-    this.logger.debug(`Saving ${titles.length} titles`);
+    this.logger.debug(`Saving ${titles.length} titles to MongoDB`);
 
     const now = new Date().toISOString();
-    const titlesCacheKey = ['titles', `${this.providerId}.titles.json`];
     
-    // Load existing consolidated titles file (contains all types)
-    const existingTitles = this.data.get(...titlesCacheKey) || [];
-    const existingTitleMap = new Map(existingTitles.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t]));
-
-    // Merge new titles with existing ones, adding type and title_key
-    const mergedTitles = titles.map(title => {
+    // Ensure type and title_key are set for each title
+    const processedTitles = titles.map(title => {
       if (!title.title_id) return null;
 
       // Ensure type and title_key are set - extract type from title or use provided type
@@ -462,63 +482,96 @@ export class BaseIPTVProvider extends BaseProvider {
       }
       const titleKey = title.title_key || generateTitleKey(titleType, title.title_id);
       
-      const existingTitle = existingTitleMap.get(titleKey);
-      
       return {
         ...title,
         type: titleType,
         title_key: titleKey,
-        createdAt: existingTitle?.createdAt || now,
         lastUpdated: now
       };
     }).filter(Boolean);
 
-    // Combine with existing titles that weren't updated
-    const updatedTitleKeys = new Set(mergedTitles.map(t => t.title_key));
-    const unchangedTitles = existingTitles.filter(t => {
-      const titleKey = t.title_key || generateTitleKey(t.type, t.title_id);
-      return !updatedTitleKeys.has(titleKey);
-    });
-
-    const allTitles = [...unchangedTitles, ...mergedTitles];
+    if (processedTitles.length === 0) {
+      return { saved: 0, inserted: 0, updated: 0 };
+    }
 
     try {
-      this.data.set(allTitles, ...titlesCacheKey);
-      // Update in-memory cache to keep it in sync with disk
-      this._titlesCache = allTitles;
-      this.logger.info(`Saved ${mergedTitles.length} titles`);
+      // Save to MongoDB using bulk operations
+      const result = await this.mongoData.saveProviderTitles(this.providerId, processedTitles);
+      
+      // Update in-memory cache - merge with existing cache
+      if (this._titlesCache === null) {
+        this._titlesCache = [];
+      }
+      
+      // Update cache with saved titles
+      const titleKeyMap = new Map(this._titlesCache.map(t => [t.title_key, t]));
+      for (const title of processedTitles) {
+        titleKeyMap.set(title.title_key, title);
+      }
+      this._titlesCache = Array.from(titleKeyMap.values());
+      
+      const totalSaved = result.inserted + result.updated;
+      this.logger.info(`Saved ${totalSaved} titles to MongoDB (${result.inserted} inserted, ${result.updated} updated)`);
       
       // Refresh API cache
       await this.refreshAPICache(`${this.providerId}.titles`);
       
-      return { saved: mergedTitles.length };
+      return { saved: totalSaved, inserted: result.inserted, updated: result.updated };
     } catch (error) {
-      this.logger.error(`Error saving titles: ${error.message}`);
+      this.logger.error(`Error saving titles to MongoDB: ${error.message}`);
       throw error;
     }    
   }
 
   /**
    * Get all ignored titles from memory cache
-   * If cache is not loaded, loads from disk first
+   * If cache is not loaded, returns empty object (should call loadProviderTitles or _loadIgnoredFromMongoDB first)
    * @returns {Object<string, string>} Object mapping title_key to reason for ignoring
    */
   getAllIgnored() {
     if (this._ignoredCache === null) {
-      try {
-        const allIgnored = this.data.get('titles', `${this.providerId}.ignored.json`) || {};
-        if (!allIgnored || typeof allIgnored !== 'object' || Array.isArray(allIgnored)) {
-          this._ignoredCache = {};
-          return {};
-        }
-        this._ignoredCache = allIgnored;
-        return allIgnored;
-      } catch (error) {
-        this._ignoredCache = {};
-        return {};
-      }
+      // Cache not loaded - return empty object
+      // Should be loaded via loadProviderTitles or explicitly via _loadIgnoredFromMongoDB
+      this._ignoredCache = {};
+      return {};
     }
     return this._ignoredCache;
+  }
+
+  /**
+   * Load ignored titles from MongoDB (async)
+   * Should be called to initialize ignored cache
+   * @returns {Promise<Object<string, string>>} Object mapping title_key to reason for ignoring
+   */
+  async loadIgnoredTitlesFromMongoDB() {
+    await this._loadIgnoredFromMongoDB();
+    return this._ignoredCache;
+  }
+
+  /**
+   * Load ignored titles from MongoDB
+   * @private
+   * @returns {Promise<void>}
+   */
+  async _loadIgnoredFromMongoDB() {
+    try {
+      const ignoredTitles = await this.mongoData.getProviderTitles(this.providerId, {
+        ignored: true
+      });
+      
+      // Convert to object format: { title_key: ignored_reason }
+      const ignoredMap = {};
+      for (const title of ignoredTitles) {
+        if (title.title_key && title.ignored_reason) {
+          ignoredMap[title.title_key] = title.ignored_reason;
+        }
+      }
+      
+      this._ignoredCache = ignoredMap;
+    } catch (error) {
+      this.logger.error(`Error loading ignored titles from MongoDB: ${error.message}`);
+      this._ignoredCache = {};
+    }
   }
 
   /**
@@ -545,74 +598,92 @@ export class BaseIPTVProvider extends BaseProvider {
   }
 
   /**
-   * Save ignored titles to consolidated JSON file
-   * Saves to: data/titles/{providerId}.ignored.json
-   * Converts title_id keys to title_key format
-   * @param {string} type - Media type ('movies' or 'tvshows')
-   * @param {Object<string, string>} ignoredTitles - Object mapping title_id to reason for ignoring
-   */
-  async saveIgnoredTitles(type, ignoredTitles) {
-    try {
-      // Load existing consolidated ignored titles
-      const allIgnored = this.data.get('titles', `${this.providerId}.ignored.json`) || {};
-      const existingIgnored = typeof allIgnored === 'object' && !Array.isArray(allIgnored) ? allIgnored : {};
-      
-      // Remove old entries for this type
-      const filteredIgnored = {};
-      for (const [titleKey, reason] of Object.entries(existingIgnored)) {
-        if (!titleKey.startsWith(`${type}-`)) {
-          filteredIgnored[titleKey] = reason;
-        }
-      }
-      
-      // Add new entries with title_key format
-      for (const [titleId, reason] of Object.entries(ignoredTitles)) {
-        const titleKey = generateTitleKey(type, titleId);
-        filteredIgnored[titleKey] = reason;
-      }
-      
-      this.data.set(filteredIgnored, 'titles', `${this.providerId}.ignored.json`);
-      const count = Object.keys(ignoredTitles).length;
-      this.logger.info(`Saved ${count} ignored ${type} titles`);
-      
-      // Refresh API cache
-      await this.refreshAPICache(`${this.providerId}.ignored`);
-    } catch (error) {
-      this.logger.error(`Error saving ignored titles for ${type}: ${error.message}`);
-    }
-  }
-
-  /**
-   * Save all ignored titles to consolidated JSON file at once
-   * Saves to: data/titles/{providerId}.ignored.json
-   * Accepts the full ignored object with title_key format (no type separation)
+   * Save all ignored titles to MongoDB
+   * Updates provider_titles collection to set ignored: true for specified titles
+   * Groups titles by reason and uses updateMany for bulk operations
    * @param {Object<string, string>} allIgnored - Object mapping title_key to reason for ignoring
    */
   async saveAllIgnoredTitles(allIgnored) {
     try {
-      this.data.set(allIgnored, 'titles', `${this.providerId}.ignored.json`);
-      // Update in-memory cache to keep it in sync with disk
+      const collection = this.mongoData.db.collection('provider_titles');
+      const now = new Date();
+      
+      // Group titles by reason for bulk updates
+      const titlesByReason = {};
+      for (const [titleKey, reason] of Object.entries(allIgnored)) {
+        if (!titlesByReason[reason]) {
+          titlesByReason[reason] = [];
+        }
+        titlesByReason[reason].push(titleKey);
+      }
+      
+      // Build bulk operations: one updateMany per reason group
+      const operations = [];
+      for (const [reason, titleKeys] of Object.entries(titlesByReason)) {
+        // Process in batches if a single reason has too many titles (MongoDB $in limit)
+        const batchSize = 1000; // MongoDB $in operator limit is much higher, but 1000 is safe
+        for (let i = 0; i < titleKeys.length; i += batchSize) {
+          const titleKeysBatch = titleKeys.slice(i, i + batchSize);
+          operations.push({
+            updateMany: {
+              filter: {
+                provider_id: this.providerId,
+                title_key: { $in: titleKeysBatch }
+              },
+              update: {
+                $set: {
+                  ignored: true,
+                  ignored_reason: reason,
+                  lastUpdated: now
+                }
+              }
+            }
+          });
+        }
+      }
+
+      if (operations.length > 0) {
+        // Process all operations in batches of 1000
+        for (let i = 0; i < operations.length; i += 1000) {
+          const batch = operations.slice(i, i + 1000);
+          await collection.bulkWrite(batch, { ordered: false });
+        }
+      }
+      
+      // Update in-memory cache to keep it in sync
       this._ignoredCache = { ...allIgnored };
       const count = Object.keys(allIgnored).length;
-      this.logger.info(`Saved ${count} ignored titles`);
+      const reasonGroups = Object.keys(titlesByReason).length;
+      this.logger.info(`Saved ${count} ignored titles to MongoDB (${reasonGroups} reason groups)`);
       
       // Refresh API cache
       await this.refreshAPICache(`${this.providerId}.ignored`);
     } catch (error) {
-      this.logger.error(`Error saving ignored titles: ${error.message}`);
+      this.logger.error(`Error saving ignored titles to MongoDB: ${error.message}`);
+      throw error;
     }
   }
 
   /**
    * Add a title to the ignored list with a reason
+   * Accumulates in memory for batch saving (saved every 30 seconds or at end of process)
    * @param {string} type - Media type ('movies' or 'tvshows')
    * @param {string} titleId - Title ID to ignore
    * @param {string} reason - Reason for ignoring (e.g., "Extended info fetch failed", "TMDB matching failed")
    */
-  async addIgnoredTitle(type, titleId, reason) {
-    const ignoredTitles = this.loadIgnoredTitles(type);
-    ignoredTitles[titleId] = reason;
-    await this.saveIgnoredTitles(type, ignoredTitles);
+  addIgnoredTitle(type, titleId, reason) {
+    // Accumulate in memory instead of saving immediately
+    if (!this._accumulatedIgnoredTitles[type]) {
+      this._accumulatedIgnoredTitles[type] = {};
+    }
+    this._accumulatedIgnoredTitles[type][titleId] = reason;
+    
+    // Also update in-memory ignored cache for immediate checking during processing
+    const titleKey = generateTitleKey(type, titleId);
+    if (this._ignoredCache === null) {
+      this._ignoredCache = {};
+    }
+    this._ignoredCache[titleKey] = reason;
   }
 
   /**

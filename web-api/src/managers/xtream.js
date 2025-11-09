@@ -21,6 +21,7 @@ class XtreamManager {
 
   /**
    * Get watchlist titles for a specific media type
+   * Optimized to query MongoDB directly for only watchlist titles
    * @private
    * @param {Object} user - Authenticated user object
    * @param {string} mediaType - Media type ('movies' or 'tvshows')
@@ -32,28 +33,28 @@ class XtreamManager {
       return new Map();
     }
 
-    const watchlistTitleKeys = user.watchlist;
-    const titlesData = await this._titlesManager.getTitlesData();
+    const watchlistTitleKeys = user.watchlist.filter(key => key.startsWith(`${mediaType}-`));
     
-    if (!titlesData) {
+    if (watchlistTitleKeys.length === 0) {
       return new Map();
     }
 
+    // Query MongoDB directly for only the watchlist titles
+    const collection = this._database.getCollection('titles');
+    const titles = await collection.find({
+      title_key: { $in: watchlistTitleKeys }
+    }).toArray();
+
+    if (!titles || titles.length === 0) {
+      return new Map();
+    }
+
+    // Create a Map for quick lookup
     const watchlistTitles = new Map();
-
-    for (const titleKey of watchlistTitleKeys) {
-      // Filter by media type from title key prefix
-      if (!titleKey.startsWith(`${mediaType}-`)) {
-        continue;
+    for (const title of titles) {
+      if (title.title_key) {
+        watchlistTitles.set(title.title_key, title);
       }
-
-      // Get title from titles data
-      const title = titlesData.get(titleKey);
-      if (!title) {
-        continue;
-      }
-
-      watchlistTitles.set(titleKey, title);
     }
 
     return watchlistTitles;

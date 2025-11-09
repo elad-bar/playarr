@@ -40,38 +40,6 @@ class CategoriesManager {
   }
 
   /**
-   * Get categories for a specific provider
-   * Matches Python's CategoriesService.get_categories()
-   */
-  async getCategories(providerId) {
-    try {
-      // Validate provider exists
-      const provider = await this._getProviderById(providerId);
-      if (!provider) {
-        return {
-          response: { error: 'Provider not found' },
-          statusCode: 404,
-        };
-      }
-
-      // Load categories from engine file format
-      // Database service handles caching internally
-      const categoriesList = await this._loadCategoriesFromFiles(providerId);
-
-      return {
-        response: categoriesList,
-        statusCode: 200,
-      };
-    } catch (error) {
-      logger.error('Error getting categories:', error);
-      return {
-        response: { error: 'Failed to get categories' },
-        statusCode: 500,
-      };
-    }
-  }
-
-  /**
    * Transform category from engine format to API format
    * @private
    */

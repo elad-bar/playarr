@@ -20,9 +20,10 @@ export class TMDBProvider extends BaseProvider {
    * Get or create the singleton instance of TMDBProvider
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @returns {TMDBProvider} Singleton instance
    */
-  static getInstance(cache, data) {
+  static getInstance(cache, data, mongoData) {
     if (!TMDBProvider.instance) {
       const settingsPath = path.join(__dirname, '../../data/settings/settings.json');
       let settings = {};
@@ -44,7 +45,7 @@ export class TMDBProvider extends BaseProvider {
         token: settings.tmdb_token
       };
 
-      TMDBProvider.instance = new TMDBProvider(providerData, cache, data);
+      TMDBProvider.instance = new TMDBProvider(providerData, cache, data, mongoData);
     }
     return TMDBProvider.instance;
   }
@@ -54,9 +55,14 @@ export class TMDBProvider extends BaseProvider {
    * @param {Object} providerData - Provider configuration data
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    */
-  constructor(providerData, cache, data) {
+  constructor(providerData, cache, data, mongoData) {
     super(providerData, cache, data, 'TMDB');
+    if (!mongoData) {
+      throw new Error('MongoDataService is required');
+    }
+    this.mongoData = mongoData;
     this.apiBaseUrl = 'https://api.themoviedb.org/3';
     this.apiToken = providerData.token;
     
@@ -341,17 +347,18 @@ export class TMDBProvider extends BaseProvider {
   }
 
   /**
-   * Load all main titles from disk into memory cache
+   * Load all main titles from MongoDB into memory cache
    * Should be called once at the start of job execution
-   * @returns {Array<Object>} Array of all main title objects
+   * @param {Object} [query={}] - Optional MongoDB query to filter titles
+   * @returns {Promise<Array<Object>>} Array of all main title objects
    */
-  loadMainTitles() {
+  async loadMainTitles(query = {}) {
     try {
-      const allMainTitles = this.data.get('titles', 'main.json') || [];
+      const allMainTitles = await this.mongoData.getMainTitles(query);
       this._mainTitlesCache = allMainTitles;
       return allMainTitles;
     } catch (error) {
-      this.logger.debug(`No main titles file found: ${error.message}`);
+      this.logger.error(`Error loading main titles from MongoDB: ${error.message}`);
       this._mainTitlesCache = [];
       return [];
     }
@@ -359,14 +366,30 @@ export class TMDBProvider extends BaseProvider {
 
   /**
    * Get all main titles from memory cache
-   * If cache is not loaded, loads from disk first
+   * If cache is not loaded, returns empty array (should call loadMainTitles first)
    * @returns {Array<Object>} Array of all main title objects
    */
   getMainTitles() {
     if (this._mainTitlesCache === null) {
-      return this.loadMainTitles();
+      this.logger.warn('Main titles cache not loaded. Call loadMainTitles() first.');
+      this._mainTitlesCache = [];
+      return [];
     }
     return this._mainTitlesCache;
+  }
+
+  /**
+   * Get main titles by title_key array (efficient lookup)
+   * @param {Array<string>} titleKeys - Array of title_key values
+   * @returns {Promise<Array<Object>>} Array of main title objects
+   */
+  async getMainTitlesByKeys(titleKeys) {
+    try {
+      return await this.mongoData.getMainTitlesByKeys(titleKeys);
+    } catch (error) {
+      this.logger.error(`Error loading main titles by keys from MongoDB: ${error.message}`);
+      return [];
+    }
   }
 
   /**
@@ -691,13 +714,11 @@ export class TMDBProvider extends BaseProvider {
     this.logger.info(`Generating ${titlesToProcess.length} main titles (${skippedCount} skipped)...`);
 
     const mainTitles = [];
-    const allStreamsDict = {};
     let processedCount = 0;
     const processedCountByType = { movies: 0, tvShows: 0 };
 
-    // Load existing streams to merge with new ones
-    const existingStreamsPath = ['titles', 'main-titles-streams.json'];
-    const existingStreamsDict = this.data.get(...existingStreamsPath) || {};
+    // Accumulate streams as array of stream documents
+    const allStreams = [];
 
     // Track remaining titles for progress
     let totalRemaining = titlesToProcess.length;
@@ -715,15 +736,13 @@ export class TMDBProvider extends BaseProvider {
         }
       }
       
-      // Save streams dictionary (merge with existing)
-      if (Object.keys(allStreamsDict).length > 0) {
+      // Save streams to MongoDB
+      if (allStreams.length > 0) {
         try {
-          const mergedStreamsDict = { ...existingStreamsDict, ...allStreamsDict };
-          const outputPath = ['titles', 'main-titles-streams.json'];
-          this.data.set(mergedStreamsDict, ...outputPath);
-          this.logger.debug(`Saved ${Object.keys(allStreamsDict).length} accumulated stream entries via progress callback`);
-          // Update existingStreamsDict to include newly saved streams for next merge
-          Object.assign(existingStreamsDict, allStreamsDict);
+          const result = await this.mongoData.saveTitleStreams(allStreams);
+          this.logger.debug(`Saved ${result.inserted + result.updated} accumulated stream entries via progress callback (${result.inserted} inserted, ${result.updated} updated)`);
+          // Clear saved streams
+          allStreams.length = 0;
         } catch (error) {
           this.logger.error(`Error saving accumulated streams: ${error.message}`);
         }
@@ -762,9 +781,10 @@ export class TMDBProvider extends BaseProvider {
             
             mainTitles.push(mainTitle);
             
-            // Accumulate streams dictionary
+            // Convert streams dictionary to stream documents and accumulate
             if (result.streamsDict) {
-              Object.assign(allStreamsDict, result.streamsDict);
+              const streamDocs = this._convertStreamsDictToDocuments(result.streamsDict);
+              allStreams.push(...streamDocs);
             }
             
             processedCount++;
@@ -798,18 +818,60 @@ export class TMDBProvider extends BaseProvider {
       await this._saveMainTitles(mainTitles, existingMainTitleMap);
     }
 
-    // Final save of streams dictionary (merge with existing)
-    if (Object.keys(allStreamsDict).length > 0) {
-      const mergedStreamsDict = { ...existingStreamsDict, ...allStreamsDict };
-      const outputPath = ['titles', 'main-titles-streams.json'];
-      this.data.set(mergedStreamsDict, ...outputPath);
-      this.logger.info(`Saved ${Object.keys(allStreamsDict).length} stream entries to main-titles-streams.json`);
+    // Final save of streams to MongoDB
+    if (allStreams.length > 0) {
+      try {
+        const result = await this.mongoData.saveTitleStreams(allStreams);
+        this.logger.info(`Saved ${result.inserted + result.updated} stream entries to MongoDB (${result.inserted} inserted, ${result.updated} updated)`);
+      } catch (error) {
+        this.logger.error(`Error saving streams to MongoDB: ${error.message}`);
+      }
     }
 
     // Refresh API cache after both titles and streams are saved
     await this.refreshAPICache('titles');
 
     return processedCountByType;
+  }
+
+  /**
+   * Convert streams dictionary to MongoDB stream documents
+   * Dictionary format: { "movies-12345-main-providerId": streamObj, ... }
+   * @private
+   * @param {Object} streamsDict - Dictionary of stream entries
+   * @returns {Array<Object>} Array of stream documents for MongoDB
+   */
+  _convertStreamsDictToDocuments(streamsDict) {
+    const streamDocs = [];
+    
+    for (const [streamKey, streamObj] of Object.entries(streamsDict)) {
+      // Parse streamKey: "type-tmdb_id-stream_id-provider_id"
+      const parts = streamKey.split('-');
+      if (parts.length < 4) {
+        this.logger.warn(`Invalid stream key format: ${streamKey}`);
+        continue;
+      }
+      
+      const type = parts[0]; // 'movies' or 'tvshows'
+      const tmdbId = parts[1];
+      const streamId = parts[2];
+      const providerId = parts.slice(3).join('-'); // Handle provider IDs with dashes
+      
+      // Generate title_key
+      const titleKey = generateTitleKey(type, tmdbId);
+      
+      // Create stream document
+      const streamDoc = {
+        title_key: titleKey,
+        stream_id: streamId,
+        provider_id: providerId,
+        ...streamObj
+      };
+      
+      streamDocs.push(streamDoc);
+    }
+    
+    return streamDocs;
   }
 
   /**
@@ -934,64 +996,43 @@ export class TMDBProvider extends BaseProvider {
   }
 
   /**
-   * Save main titles to consolidated data directory
+   * Save main titles to MongoDB
+   * Called periodically (every 30 seconds) or at end of process
    * @private
    * @param {Array<Object>} newMainTitles - Array of new main titles to save (can be mixed types)
-   * @param {Map<string, Object>} existingMainTitleMap - Map of existing main titles by title_key
+   * @param {Map<string, Object>} existingMainTitleMap - Map of existing main titles by title_key (unused, kept for compatibility)
    * @returns {Promise<Array<Object>>} Updated titles array
    */
   async _saveMainTitles(newMainTitles, existingMainTitleMap) {
-    const cacheKey = ['titles', 'main.json'];
-    // Use cached main titles if available, otherwise load from disk
-    const allExistingTitles = this._mainTitlesCache || this.data.get(...cacheKey) || [];
+    if (!newMainTitles || newMainTitles.length === 0) {
+      return this._mainTitlesCache || [];
+    }
 
     // Ensure all new titles have title_key
-    newMainTitles = newMainTitles.map(t => {
+    const processedTitles = newMainTitles.map(t => {
       if (!t.title_key && t.type && t.title_id) {
         t.title_key = generateTitleKey(t.type, t.title_id);
       }
       return t;
-    });
+    }).filter(t => t.title_key);
 
-    // Create map of new titles by title_key
-    const newTitleMap = new Map(newMainTitles.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t]));
-
-    // Merge: update existing titles that are in newTitles, keep others unchanged
-    const updatedTitles = allExistingTitles.map(existing => {
-      const titleKey = existing.title_key || generateTitleKey(existing.type, existing.title_id);
-      const newTitle = newTitleMap.get(titleKey);
-      if (newTitle) {
-        // Preserve createdAt if it exists
-        // Preserve lastUpdated from newTitle if set, otherwise keep existing lastUpdated
-        return {
-          ...newTitle,
-          createdAt: existing.createdAt || newTitle.createdAt || new Date().toISOString(),
-          lastUpdated: newTitle.lastUpdated || existing.lastUpdated || new Date().toISOString()
-        };
-      }
-      return existing;
-    });
-
-    // Add any new titles that don't exist yet
-    for (const newTitle of newMainTitles) {
-      const titleKey = newTitle.title_key || generateTitleKey(newTitle.type, newTitle.title_id);
-      if (!existingMainTitleMap.has(titleKey)) {
-        updatedTitles.push({
-          ...newTitle,
-          createdAt: newTitle.createdAt || new Date().toISOString()
-        });
-      }
+    if (processedTitles.length === 0) {
+      return this._mainTitlesCache || [];
     }
 
     try {
-      this.data.set(updatedTitles, ...cacheKey);
-      // Update in-memory cache to keep it in sync with disk
-      this._mainTitlesCache = updatedTitles;
-      this.logger.info(`Saved ${newMainTitles.length} main titles (total: ${updatedTitles.length} titles)`);
+      // Save to MongoDB using bulk operations
+      const result = await this.mongoData.saveMainTitles(processedTitles);
       
-      return updatedTitles;
+      // Reload from MongoDB to get updated cache (includes all titles, not just new ones)
+      const allTitles = await this.mongoData.getMainTitles();
+      this._mainTitlesCache = allTitles;
+      
+      this.logger.info(`Saved ${result.inserted + result.updated} main titles to MongoDB (${result.inserted} inserted, ${result.updated} updated, total: ${allTitles.length} titles)`);
+      
+      return allTitles;
     } catch (error) {
-      this.logger.error(`Error saving main titles: ${error.message}`);
+      this.logger.error(`Error saving main titles to MongoDB: ${error.message}`);
       throw error;
     }
   }

@@ -82,6 +82,8 @@ export function buildStreamsSummary(streamsData) {
 
 /**
  * Transform main title - preserve streams summary, ensure title_key
+ * For TV shows, preserves episode metadata (air_date, name, overview, still_path) from main.json
+ * and merges provider lists from streamsSummary into the sources array
  * @param {Object} title - Title object from main.json
  * @param {Object} streamsSummary - Optional streams summary object: { stream_id: [provider_ids] }
  * @returns {Object} Transformed title document
@@ -89,8 +91,64 @@ export function buildStreamsSummary(streamsData) {
 export function transformTitle(title, streamsSummary = {}) {
   const transformed = { ...title };
   
-  // Set streams field from summary (or empty object if not provided)
-  transformed.streams = streamsSummary || {};
+  // Handle streams field - preserve existing structure, especially for TV shows with episode metadata
+  if (transformed.type === 'tvshows' && transformed.streams && typeof transformed.streams === 'object') {
+    // For TV shows, preserve episode metadata from main.json and merge provider list from summary
+    const mergedStreams = { ...transformed.streams };
+    
+    for (const [streamId, summaryProviders] of Object.entries(streamsSummary)) {
+      if (Array.isArray(summaryProviders) && summaryProviders.length > 0) {
+        if (mergedStreams[streamId]) {
+          // Stream exists in both main.json and summary
+          if (typeof mergedStreams[streamId] === 'object' && !Array.isArray(mergedStreams[streamId])) {
+            // Has episode metadata structure - merge providers into sources array
+            if (mergedStreams[streamId].sources && Array.isArray(mergedStreams[streamId].sources)) {
+              // Merge and deduplicate providers
+              mergedStreams[streamId].sources = [...new Set([...mergedStreams[streamId].sources, ...summaryProviders])];
+            } else {
+              // Initialize sources array with providers from summary
+              mergedStreams[streamId].sources = [...summaryProviders];
+            }
+          } else if (Array.isArray(mergedStreams[streamId])) {
+            // Existing is array format - merge arrays (shouldn't happen for TV shows with metadata, but handle it)
+            mergedStreams[streamId] = [...new Set([...mergedStreams[streamId], ...summaryProviders])];
+          }
+        } else {
+          // Stream only in summary - use array format (no episode metadata available)
+          mergedStreams[streamId] = [...summaryProviders];
+        }
+      }
+    }
+    
+    transformed.streams = mergedStreams;
+  } else {
+    // For movies or if no existing streams, merge summary with existing streams
+    if (transformed.streams && typeof transformed.streams === 'object') {
+      const mergedStreams = { ...transformed.streams };
+      for (const [streamId, summaryProviders] of Object.entries(streamsSummary)) {
+        if (Array.isArray(summaryProviders)) {
+          if (Array.isArray(mergedStreams[streamId])) {
+            // Both are arrays - merge and deduplicate
+            mergedStreams[streamId] = [...new Set([...mergedStreams[streamId], ...summaryProviders])];
+          } else if (typeof mergedStreams[streamId] === 'object' && mergedStreams[streamId] !== null) {
+            // Existing is object - check if it has sources array
+            if (mergedStreams[streamId].sources && Array.isArray(mergedStreams[streamId].sources)) {
+              mergedStreams[streamId].sources = [...new Set([...mergedStreams[streamId].sources, ...summaryProviders])];
+            } else {
+              mergedStreams[streamId].sources = [...summaryProviders];
+            }
+          } else {
+            // Existing is not array or object - replace with summary
+            mergedStreams[streamId] = [...summaryProviders];
+          }
+        }
+      }
+      transformed.streams = mergedStreams;
+    } else {
+      // No existing streams - use summary directly
+      transformed.streams = streamsSummary || {};
+    }
+  }
   
   // Ensure title_key is present
   if (!transformed.title_key && transformed.type && transformed.title_id !== undefined) {

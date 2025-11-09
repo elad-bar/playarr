@@ -38,9 +38,9 @@ Main titles collection containing TMDB movie and TV show metadata.
   genres: Array,                     // Array of genre objects: [{ id: Number, name: String }]
   runtime: Number,                   // Runtime in minutes (movies only, optional)
   similar_titles: Array,             // Array of title_key strings for similar titles
-  streams: Object,                   // Embedded streams summary: { stream_id: [provider_ids] }
-                                     // Example: { "main": ["agtv", "digitalizard"] } for movies
-                                     // Example: { "S01-E01": ["agtv"], "S01-E02": ["digitalizard"] } for TV shows
+  streams: Object,                   // Embedded streams summary
+                                     // Movies: { "main": ["agtv", "digitalizard"] }
+                                     // TV shows: { "S01-E01": { air_date: "1999-02-09", name: "Episode Name", overview: "...", still_path: "/path.jpg", sources: ["agtv"] } }
   createdAt: ISODate,                // Document creation timestamp
   lastUpdated: ISODate               // Last update timestamp
 }
@@ -541,7 +541,7 @@ provider_categories (1) ──< (many) provider_titles
 
 ### Key Design Decisions
 
-1. **Embedded Streams Summary**: The `titles.streams` field contains a lightweight summary (`{ stream_id: [provider_ids] }`) to avoid joins for common queries. Full stream details are in `title_streams`.
+1. **Embedded Streams Summary**: The `titles.streams` field contains a lightweight summary to avoid joins for common queries. For movies: `{ stream_id: [provider_ids] }`. For TV shows: `{ stream_id: { air_date, name, overview, still_path, sources: [provider_ids] } }` (preserves episode metadata). Full stream details are in `title_streams`.
 
 2. **One Document Per Key**: `settings` and `cache_policy` use one document per key-value pair for efficient individual key lookups.
 

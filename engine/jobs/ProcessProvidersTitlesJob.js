@@ -9,28 +9,66 @@ export class ProcessProvidersTitlesJob extends BaseJob {
   /**
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @param {Map<string, import('../providers/BaseIPTVProvider.js').BaseIPTVProvider>} providers - Map of providerId -> provider instance (already initialized)
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider singleton instance
    */
-  constructor(cache, data, providers, tmdbProvider) {
-    super('ProcessProvidersTitlesJob', cache, data, providers, tmdbProvider);
+  constructor(cache, data, mongoData, providers, tmdbProvider) {
+    super('ProcessProvidersTitlesJob', cache, data, mongoData, providers, tmdbProvider);
   }
 
   /**
-   * Execute the job - fetch categories and metadata from all IPTV providers
+   * Execute the job - fetch categories and metadata from all IPTV providers (incremental)
    * @returns {Promise<Array<{providerId: string, providerName: string, movies?: number, tvShows?: number, error?: string}>>} Array of fetch results
    */
   async execute() {
     this._validateDependencies();
 
+    const jobName = 'ProcessProvidersTitlesJob';
+    let lastExecution = null;
+
     try {
+      // Get last execution time from job history
+      const jobHistory = await this.mongoData.getJobHistory(jobName);
+      if (jobHistory && jobHistory.last_execution) {
+        lastExecution = new Date(jobHistory.last_execution);
+        this.logger.info(`Last execution: ${lastExecution.toISOString()}. Processing incremental update.`);
+      } else {
+        this.logger.info('No previous execution found. Processing full update.');
+      }
+
+      // Load provider titles incrementally (only updated since last execution)
+      for (const [providerId, providerInstance] of this.providers) {
+        try {
+          await providerInstance.loadProviderTitles(lastExecution);
+          await providerInstance.loadIgnoredTitlesFromMongoDB();
+        } catch (error) {
+          this.logger.warn(`[${providerId}] Error loading titles from MongoDB: ${error.message}`);
+        }
+      }
+
       // Fetch categories from all providers first
       await this.fetchAllCategories();
 
       // Then fetch metadata from all providers
       const results = await this.fetchAllMetadata();
 
+      // Update job history
+      await this.mongoData.updateJobHistory(jobName, {
+        providers_processed: this.providers.size,
+        results: results
+      });
+
       return results;
+    } catch (error) {
+      this.logger.error(`Job execution failed: ${error.message}`);
+      // Still update job history with error
+      await this.mongoData.updateJobHistory(jobName, {
+        error: error.message
+      }).catch(err => {
+        this.logger.error(`Failed to update job history: ${err.message}`);
+      });
+      throw error;
     } finally {
       // Unload titles from memory to free resources
       // Note: fetchMetadata() updates _titlesCache via saveTitles(), so cleanup is needed

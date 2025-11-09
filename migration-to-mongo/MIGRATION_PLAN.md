@@ -42,7 +42,9 @@ Main titles collection (consolidated from main.json)
   genres: Array,
   runtime: Number,          // Movies only
   similar_titles: Array,    // Array of title_key strings
-  streams: Object,          // Embedded summary: { "main": ["provider1", "provider2"] } or { "S01-E01": ["provider1"] }
+  streams: Object,          // Embedded summary: 
+                             //   Movies: { "main": ["provider1", "provider2"] }
+                             //   TV shows: { "S01-E01": { air_date, name, overview, still_path, sources: ["provider1"] } }
   createdAt: ISODate,
   lastUpdated: ISODate
 }
@@ -61,7 +63,9 @@ Main titles collection (consolidated from main.json)
 
 **Transformation:**
 - Streams summary is built from `main-titles-streams.json` by grouping streams by `title_key` and `stream_id`
-- Format: `{ stream_id: [provider_ids] }` - e.g., `{ "main": ["provider1", "provider2"] }` for movies, `{ "S01-E01": ["provider1"] }` for TV shows
+- For movies: Format is `{ stream_id: [provider_ids] }` - e.g., `{ "main": ["provider1", "provider2"] }`
+- For TV shows: Format preserves episode metadata from `main.json`: `{ "S01-E01": { air_date, name, overview, still_path, sources: ["provider1"] } }`
+- Episode metadata (air_date, name, overview, still_path) is preserved from `main.json` and provider lists are merged from `main-titles-streams.json`
 - Full stream details (with URLs) are stored in the separate `title_streams` collection
 - The embedded summary enables efficient queries without joining the `title_streams` collection
 

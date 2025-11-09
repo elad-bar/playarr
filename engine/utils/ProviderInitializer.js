@@ -4,6 +4,8 @@ import { AGTVProvider } from '../providers/AGTVProvider.js';
 import { XtreamProvider } from '../providers/XtreamProvider.js';
 import { TMDBProvider } from '../providers/TMDBProvider.js';
 import { createLogger } from '../utils/logger.js';
+import MongoClientUtil from '../utils/mongo-client.js';
+import { MongoDataService } from '../services/MongoDataService.js';
 
 /**
  * Static Provider Initializer
@@ -15,6 +17,8 @@ export class ProviderInitializer {
   static instance = null;
   static cache = null;
   static data = null;
+  static mongoClient = null;
+  static mongoData = null;
   static providers = null; // Map<string, BaseIPTVProvider>
   static tmdbProvider = null;
   static logger = createLogger('ProviderInitializer');
@@ -35,14 +39,29 @@ export class ProviderInitializer {
 
     ProviderInitializer.logger.info('Initializing providers...');
 
-    // Initialize storage managers
+    // Initialize MongoDB connection
+    const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+    const dbName = process.env.MONGODB_DB_NAME || 'playarr';
+    
+    try {
+      ProviderInitializer.mongoClient = new MongoClientUtil(mongoUri, dbName);
+      await ProviderInitializer.mongoClient.connect();
+      ProviderInitializer.mongoData = new MongoDataService(ProviderInitializer.mongoClient);
+      ProviderInitializer.logger.info('✓ MongoDB connection initialized');
+    } catch (error) {
+      ProviderInitializer.logger.error(`✗ Failed to connect to MongoDB: ${error.message}`);
+      ProviderInitializer.logger.error('MongoDB is required. Please ensure MongoDB is running and MONGODB_URI is configured correctly.');
+      throw new Error(`MongoDB connection failed: ${error.message}`);
+    }
+
+    // Initialize storage managers (cache directory remains file-based)
     ProviderInitializer.cache = new StorageManager(cacheDir, false);
     ProviderInitializer.data = new StorageManager(dataDir, false);
     ProviderInitializer.logger.info('✓ Storage managers initialized');
 
     // Initialize IPTV providers
     ProviderInitializer.providers = new Map();
-    const providerConfigs = await BaseProvider.loadProviders();
+    const providerConfigs = await BaseProvider.loadProviders(ProviderInitializer.mongoData);
     ProviderInitializer.logger.info(`Found ${providerConfigs.length} enabled provider(s)`);
 
     for (const providerData of providerConfigs) {
@@ -62,7 +81,8 @@ export class ProviderInitializer {
     // Initialize TMDB provider (singleton)
     ProviderInitializer.tmdbProvider = TMDBProvider.getInstance(
       ProviderInitializer.cache,
-      ProviderInitializer.data
+      ProviderInitializer.data,
+      ProviderInitializer.mongoData
     );
     ProviderInitializer.logger.info('✓ TMDB provider initialized');
 
@@ -119,12 +139,26 @@ export class ProviderInitializer {
   }
 
   /**
+   * Get initialized MongoDB data service
+   * @returns {import('../services/MongoDataService.js').MongoDataService} MongoDB data service
+   * @throws {Error} If not initialized
+   */
+  static getMongoData() {
+    if (!ProviderInitializer.initialized || !ProviderInitializer.mongoData) {
+      throw new Error('MongoDB data service not initialized. Call initialize() first.');
+    }
+    return ProviderInitializer.mongoData;
+  }
+
+  /**
    * Reset initialization state (useful for testing)
    * @private
    */
   static _reset() {
     ProviderInitializer.cache = null;
     ProviderInitializer.data = null;
+    ProviderInitializer.mongoClient = null;
+    ProviderInitializer.mongoData = null;
     ProviderInitializer.providers = null;
     ProviderInitializer.tmdbProvider = null;
     ProviderInitializer.initialized = false;
@@ -138,9 +172,9 @@ export class ProviderInitializer {
    */
   static _createProviderInstance(providerData) {
     if (providerData.type === 'agtv') {
-      return new AGTVProvider(providerData, ProviderInitializer.cache, ProviderInitializer.data);
+      return new AGTVProvider(providerData, ProviderInitializer.cache, ProviderInitializer.data, ProviderInitializer.mongoData);
     } else if (providerData.type === 'xtream') {
-      return new XtreamProvider(providerData, ProviderInitializer.cache, ProviderInitializer.data);
+      return new XtreamProvider(providerData, ProviderInitializer.cache, ProviderInitializer.data, ProviderInitializer.mongoData);
     } else {
       throw new Error(`Unknown provider type: ${providerData.type}`);
     }

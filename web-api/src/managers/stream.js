@@ -113,14 +113,21 @@ class StreamManager {
         streamIdSuffix = `${seasonNum}-${episodeNum}`;
       }
       
-      // Get streams from database
-      const streamsData = await this._database.getDataObject('titles-streams') || {};
-      if (!streamsData || Object.keys(streamsData).length === 0) {
-        logger.warn('Streams data not available');
+      // Build title_key for MongoDB query
+      const titleKey = `${mediaType}-${titleId}`;
+      
+      // Query MongoDB title_streams collection directly
+      const streams = await this._database.getDataList('title_streams', {
+        title_key: titleKey,
+        stream_id: streamIdSuffix
+      });
+      
+      if (!streams || streams.length === 0) {
+        logger.warn(`No streams found for title ${titleKey}, stream ${streamIdSuffix}`);
         return [];
       }
 
-      logger.debug(`Streams data contains ${Object.keys(streamsData).length} entries`);
+      logger.debug(`Found ${streams.length} stream(s) for title ${titleKey}, stream ${streamIdSuffix}`);
 
       // Get providers data to access streams_urls for base URL concatenation
       // Filter to only enabled providers
@@ -131,25 +138,17 @@ class StreamManager {
 
       logger.debug(`Loaded ${providers.length} enabled provider(s) out of ${allProviders.length} total`);
 
-      // Find all streams matching this title and stream ID
-      // Stream key format: {type}-{tmdbId}-{streamId}-{providerId}
-      const streamPrefix = `${titlePrefix}${streamIdSuffix}-`;
-      logger.debug(`Looking for streams with prefix: ${streamPrefix}`);
       const sources = [];
       
-      for (const [streamKey, streamEntry] of Object.entries(streamsData)) {
-        if (streamKey.startsWith(streamPrefix)) {
-          logger.debug(`Found matching stream key: ${streamKey}`);
-          const proxyUrl = streamEntry.proxy_url;
-          if (!proxyUrl) {
-            logger.debug(`Stream key ${streamKey} has no proxy_url, skipping`);
-            continue;
-          }
+      for (const streamEntry of streams) {
+        const proxyUrl = streamEntry.proxy_url;
+        if (!proxyUrl) {
+          logger.debug(`Stream for provider ${streamEntry.provider_id} has no proxy_url, skipping`);
+          continue;
+        }
 
-          // Extract providerId from stream key (last part after final dash)
-          const parts = streamKey.split('-');
-          const providerId = parts[parts.length - 1];
-          const provider = providersMap.get(providerId);
+        const providerId = streamEntry.provider_id;
+        const provider = providersMap.get(providerId);
 
           // Skip if provider is not found (disabled or deleted)
           if (!provider) {
@@ -188,10 +187,9 @@ class StreamManager {
             }
           } else {
             // Neither absolute nor relative (unexpected format), use as-is
-            logger.warn(`Unexpected stream URL format for ${streamKey}: ${proxyUrl}`);
+            logger.warn(`Unexpected stream URL format for ${providerId}: ${proxyUrl}`);
             sources.push({ url: proxyUrl, providerType });
           }
-        }
       }
 
       logger.debug(`Found ${sources.length} source URL(s) for title ${titleId}`);

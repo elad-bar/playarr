@@ -15,11 +15,12 @@ export class CachePurgeJob extends BaseJob {
   /**
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance (not used, but required by BaseJob)
    * @param {Map<string, import('../providers/BaseIPTVProvider.js').BaseIPTVProvider>} providers - Map of providerId -> provider instance (not used, but required by BaseJob)
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider singleton instance (not used, but required by BaseJob)
    */
-  constructor(cache, data, providers, tmdbProvider) {
-    super('CachePurgeJob', cache, data, providers, tmdbProvider);
+  constructor(cache, data, mongoData, providers, tmdbProvider) {
+    super('CachePurgeJob', cache, data, mongoData, providers, tmdbProvider);
     this.cachePolicyPath = path.join(__dirname, '../../data/settings/cache-policy.json');
     // Check environment variable for actual deletion (default: false = dry-run mode)
     this.enableDeletion = process.env.CACHE_PURGE_ENABLED === 'true';

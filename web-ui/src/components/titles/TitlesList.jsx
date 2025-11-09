@@ -278,23 +278,25 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 0.5 }}>
                             <Tooltip title="Clear all filters">
-                                <IconButton
-                                    size="small"
-                                    onClick={handleClearFilters}
-                                    aria-label="clear filters"
-                                    disabled={activeFilterCount === 0}
-                                    sx={{ 
-                                        color: 'text.secondary',
-                                        '&:hover': {
-                                            backgroundColor: 'action.hover'
-                                        },
-                                        '&:disabled': {
-                                            opacity: 0.3
-                                        }
-                                    }}
-                                >
-                                    <Clear />
-                                </IconButton>
+                                <span>
+                                    <IconButton
+                                        size="small"
+                                        onClick={handleClearFilters}
+                                        aria-label="clear filters"
+                                        disabled={activeFilterCount === 0}
+                                        sx={{ 
+                                            color: 'text.secondary',
+                                            '&:hover': {
+                                                backgroundColor: 'action.hover'
+                                            },
+                                            '&:disabled': {
+                                                opacity: 0.3
+                                            }
+                                        }}
+                                    >
+                                        <Clear />
+                                    </IconButton>
+                                </span>
                             </Tooltip>
                             <IconButton
                                 size="small"

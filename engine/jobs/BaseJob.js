@@ -10,10 +10,11 @@ export class BaseJob {
    * @param {string} jobName - Name identifier for this job (used in logging)
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @param {Map<string, import('../providers/BaseIPTVProvider.js').BaseIPTVProvider>} providers - Map of providerId -> provider instance (already initialized)
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider singleton instance
    */
-  constructor(jobName, cache, data, providers, tmdbProvider) {
+  constructor(jobName, cache, data, mongoData, providers, tmdbProvider) {
     if (this.constructor === BaseJob) {
       throw new Error('BaseJob is an abstract class and cannot be instantiated directly');
     }
@@ -21,6 +22,7 @@ export class BaseJob {
     this.jobName = jobName;
     this.cache = cache;
     this.data = data;
+    this.mongoData = mongoData;
     this.providers = providers; // Map<string, BaseIPTVProvider>
     this.tmdbProvider = tmdbProvider;
     this.logger = createLogger(jobName);
@@ -47,6 +49,9 @@ export class BaseJob {
     }
     if (!this.data) {
       throw new Error('Data storage manager is required');
+    }
+    if (!this.mongoData) {
+      throw new Error('MongoDB data service is required');
     }
     if (!this.providers || this.providers.size === 0) {
       throw new Error('At least one IPTV provider is required');

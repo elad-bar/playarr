@@ -49,6 +49,9 @@ const INDEX_DEFINITIONS = {
     { keys: { enabled: 1 }, options: { name: 'enabled' } },
     { keys: { priority: 1 }, options: { name: 'priority' } },
   ],
+  job_history: [
+    { keys: { job_name: 1, provider_id: 1 }, options: { name: 'job_name_provider_id' } },
+  ],
   // settings, cache_policy: _id is automatically indexed (key is the _id)
   // stats: single document collection, no additional indexes needed
 };

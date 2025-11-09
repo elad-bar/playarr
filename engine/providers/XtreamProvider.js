@@ -359,8 +359,8 @@ export class XtreamProvider extends BaseIPTVProvider {
       // Merge with data directory to get enabled status
       await this.saveCategories(type, normalizedCategories);
       
-      // Load merged categories with enabled status from data directory
-      const categoriesWithStatus = this.loadCategories(type);
+      // Load merged categories with enabled status from MongoDB
+      const categoriesWithStatus = await this.loadCategories(type);
       
       return categoriesWithStatus;
     } catch (error) {
@@ -442,7 +442,7 @@ export class XtreamProvider extends BaseIPTVProvider {
       : new Set(existingTitles.map(t => t.title_id));
 
     // Load categories for filtering
-    const categories = this.loadCategories(type);
+    const categories = await this.loadCategories(type);
     const categoryMap = new Map(categories.map(cat => [cat.category_id, cat.enabled]));
 
     // Filter titles using existing shouldSkip function and ignore list
@@ -515,7 +515,7 @@ export class XtreamProvider extends BaseIPTVProvider {
       this.logger.warn(`Failed to fetch extended info for ${type} ${titleId}: ${errorMessage}`);
       
       // Add to ignored list since extended info fetch failure indicates content issue
-      await this.addIgnoredTitle(type, titleId, `Extended info fetch failed: ${errorMessage}`);
+      this.addIgnoredTitle(type, titleId, `Extended info fetch failed: ${errorMessage}`);
       
       return null;
     }        

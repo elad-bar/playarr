@@ -11,10 +11,11 @@ export class AGTVProvider extends BaseIPTVProvider {
    * @param {Object} providerData - Provider configuration data
    * @param {import('../managers/StorageManager.js').StorageManager} cache - Storage manager instance for temporary cache
    * @param {import('../managers/StorageManager.js').StorageManager} data - Storage manager instance for persistent data storage
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    */
-  constructor(providerData, cache, data) {
+  constructor(providerData, cache, data, mongoData) {
     // AGTV uses 10k batch size since everything is in-memory and extremely fast
-    super(providerData, cache, data, 10000);
+    super(providerData, cache, data, mongoData, 10000);
         
     /**
      * Configuration for each media type

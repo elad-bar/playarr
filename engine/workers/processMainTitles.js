@@ -19,10 +19,11 @@ async function processMainTitlesWorker() {
   // Get initialized providers
   const cache = ProviderInitializer.getCache();
   const data = ProviderInitializer.getData();
+  const mongoData = ProviderInitializer.getMongoData();
   const providers = ProviderInitializer.getProviders();
   const tmdbProvider = ProviderInitializer.getTMDBProvider();
 
-  const job = new ProcessMainTitlesJob(cache, data, providers, tmdbProvider);
+  const job = new ProcessMainTitlesJob(cache, data, mongoData, providers, tmdbProvider);
   const results = await job.execute();
 
   return results;

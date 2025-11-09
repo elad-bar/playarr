@@ -15,46 +15,42 @@ const __dirname = path.dirname(__filename);
  */
 export class BaseProvider {
   /**
-   * Load all enabled provider configurations from JSON file
+   * Load all enabled provider configurations from MongoDB
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @returns {Promise<Object[]>} Array of provider configuration objects, sorted by priority
    */
-  static async loadProviders() {
-    const providersFile = path.join(__dirname, '../../data/settings/iptv-providers.json');
-    
-    let providers = [];
-    
-    if (await fs.pathExists(providersFile)) {
-      try {
-        const providersData = await fs.readJson(providersFile);
-        // Handle both array format and legacy object format
-        if (Array.isArray(providersData)) {
-          providers = providersData;
-        } else {
-          // Legacy format: convert object to array
-          providers = Object.values(providersData);
-        }
-      } catch (error) {
-        const logger = createLogger('BaseProvider');
-        logger.error(`Error loading providers from ${providersFile}:`, error);
-        return [];
-      }
+  static async loadProviders(mongoData) {
+    if (!mongoData) {
+      const logger = createLogger('BaseProvider');
+      logger.error('MongoDataService is required to load providers');
+      throw new Error('MongoDataService is required');
     }
-    
-    // Only load enabled providers
-    providers = providers.filter(p => p.enabled !== false);
-    
-    // Sort by priority (lower number = higher priority)
-    return providers.sort((a, b) => (a.priority || 999) - (b.priority || 999));
+
+    try {
+      // Query enabled providers from MongoDB, sorted by priority
+      const providers = await mongoData.getIPTVProviders();
+      
+      // Filter enabled providers (should already be filtered by getIPTVProviders, but double-check)
+      const enabledProviders = providers.filter(p => p.enabled !== false);
+      
+      // Sort by priority (lower number = higher priority)
+      return enabledProviders.sort((a, b) => (a.priority || 999) - (b.priority || 999));
+    } catch (error) {
+      const logger = createLogger('BaseProvider');
+      logger.error(`Error loading providers from MongoDB: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
    * Load a specific provider configuration by ID
+   * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service instance
    * @param {string} providerId - Provider identifier
    * @returns {Promise<Object>} Provider configuration object
    * @throws {Error} If provider is not found
    */
-  static async loadProvider(providerId) {
-    const providers = await this.loadProviders();
+  static async loadProvider(mongoData, providerId) {
+    const providers = await this.loadProviders(mongoData);
     const provider = providers.find(p => p.id === providerId);
     
     if (provider) {

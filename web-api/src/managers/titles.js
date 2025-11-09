@@ -57,7 +57,7 @@ class TitlesManager {
   /**
    * Get titles from database
    * Returns Map<titleKey, MainTitle>
-   * FileStorageService (via databaseService) handles file-level caching
+   * MongoDatabaseService handles MongoDB operations and caching
    * Data is automatically mapped to Map format via storage mapping
    * @returns {Promise<Map<string, MainTitle>>} Map of title_key to MainTitle object
    */
@@ -376,7 +376,70 @@ class TitlesManager {
   }
 
   /**
+   * Build MongoDB query for filtering titles
+   * @private
+   * @param {Object} filters - Filter options
+   * @returns {Object} MongoDB query object
+   */
+  _buildTitlesQuery({ mediaType, searchQuery, yearConfig, startsWith }) {
+    const query = {};
+
+    // Media type filter
+    if (mediaType) {
+      query.type = mediaType;
+    }
+
+    // Search query filter (case-insensitive regex)
+    if (searchQuery) {
+      query.title = { $regex: searchQuery, $options: 'i' };
+    }
+
+    // Year filter
+    if (yearConfig) {
+      const { type, years } = yearConfig;
+      if (type === 'range') {
+        // Range: match years between start and end
+        const startYear = `${years[0]}-01-01`;
+        const endYear = `${years[1]}-12-31`;
+        query.release_date = {
+          $gte: startYear,
+          $lte: endYear
+        };
+      } else if (type === 'list') {
+        // List: match any of the years
+        const yearRegex = years.map(y => `^${y}-`).join('|');
+        query.release_date = { $regex: yearRegex };
+      } else if (type === 'single') {
+        // Single year
+        const yearRegex = `^${years[0]}-`;
+        query.release_date = { $regex: yearRegex };
+      }
+    }
+
+    // Starts with filter
+    if (startsWith) {
+      if (startsWith === 'special') {
+        // Special characters: not starting with A-Z or 0-9
+        query.title = {
+          ...(query.title || {}),
+          $not: { $regex: '^[A-Z0-9]', $options: 'i' }
+        };
+      } else {
+        // Specific letter
+        query.title = {
+          ...(query.title || {}),
+          $regex: `^${startsWith}`,
+          $options: 'i'
+        };
+      }
+    }
+
+    return query;
+  }
+
+  /**
    * Get paginated list of titles with filtering
+   * Optimized to use MongoDB queries instead of loading all titles into memory
    */
   async getTitles({
     user = null,
@@ -400,24 +463,6 @@ class TitlesManager {
       // Parse year filter
       const yearConfig = this._parseYearFilter(yearFilter);
 
-      // Get titles data
-      const titlesData = await this.getTitlesData();
-
-      if (!titlesData || titlesData.size === 0) {
-        return {
-          response: {
-            items: [],
-            pagination: {
-              page: 1,
-              per_page: perPage,
-              total: 0,
-              total_pages: 0,
-            },
-          },
-          statusCode: 200,
-        };
-      }
-
       // Get user watchlist if needed
       let userWatchlist = new Set();
       if (user || watchlist !== null) {
@@ -429,54 +474,67 @@ class TitlesManager {
         }
       }
 
-      // Filter titles
-      const filteredTitles = [];
-
-      // Get enabled providers once for all titles
+      // Get enabled providers once
       const enabledProviders = await this._getEnabledProviders();
 
-      for (const [titleKey, titleData] of titlesData.entries()) {
+      // Build MongoDB query
+      const mongoQuery = this._buildTitlesQuery({ mediaType, searchQuery, yearConfig, startsWith });
+
+      // Get MongoDB collection directly for efficient querying
+      const collection = this._database.getCollection('titles');
+
+      // Get total count for pagination (before watchlist filter, as watchlist is applied in memory)
+      let totalCount = await collection.countDocuments(mongoQuery);
+
+      // Fetch all matching titles (we need to filter by watchlist in memory)
+      // But limit to a reasonable maximum to avoid memory issues
+      // For watchlist filtering, we'll need to load titles, but we can still use MongoDB for other filters
+      const MAX_TITLES_FOR_WATCHLIST_FILTER = 10000;
+      const shouldLimitForWatchlist = watchlist !== null && totalCount > MAX_TITLES_FOR_WATCHLIST_FILTER;
+      
+      let titlesCursor = collection.find(mongoQuery).sort({ title: 1 });
+      
+      // If watchlist filter is active and we have too many results, we need to load more
+      // Otherwise, we can paginate at MongoDB level
+      if (watchlist === null && !shouldLimitForWatchlist) {
+        // No watchlist filter - use MongoDB pagination
+        const skip = (page - 1) * perPage;
+        titlesCursor = titlesCursor.skip(skip).limit(perPage);
+      } else {
+        // Watchlist filter active - need to load all matching titles to filter
+        // But limit to prevent memory issues
+        if (totalCount > MAX_TITLES_FOR_WATCHLIST_FILTER) {
+          logger.warn(`Too many titles (${totalCount}) for watchlist filtering. Limiting to ${MAX_TITLES_FOR_WATCHLIST_FILTER}`);
+          titlesCursor = titlesCursor.limit(MAX_TITLES_FOR_WATCHLIST_FILTER);
+          totalCount = MAX_TITLES_FOR_WATCHLIST_FILTER;
+        }
+      }
+
+      const titlesData = await titlesCursor.toArray();
+
+      // Filter by watchlist if needed
+      let filteredTitles = titlesData;
+      if (watchlist !== null) {
+        filteredTitles = titlesData.filter(title => {
+          const titleKey = title.title_key || `${title.type}-${title.title_id}`;
+          const isInWatchlist = userWatchlist.has(titleKey);
+          return watchlist === isInWatchlist;
+        });
+        totalCount = filteredTitles.length;
+      }
+
+      // Process titles and build response
+      const items = [];
+      const startIdx = watchlist === null ? 0 : (page - 1) * perPage;
+      const endIdx = watchlist === null ? filteredTitles.length : startIdx + perPage;
+      const titlesToProcess = filteredTitles.slice(startIdx, endIdx);
+
+      for (const titleData of titlesToProcess) {
+        const titleKey = titleData.title_key || `${titleData.type}-${titleData.title_id}`;
         const titleName = titleData.title || '';
         const titleType = titleData.type || '';
         const titleId = titleData.title_id || '';
         const releaseDate = titleData.release_date || '';
-
-        // Apply media type filter
-        if (mediaType && titleType !== mediaType) {
-          continue;
-        }
-
-        // Apply search filter
-        if (searchQuery && !titleName.toLowerCase().includes(searchQuery.toLowerCase())) {
-          continue;
-        }
-
-        // Apply year filter
-        if (yearConfig && !this._matchesYearFilter(releaseDate, yearConfig)) {
-          continue;
-        }
-
-        // Apply watchlist filter
-        if (watchlist !== null) {
-          const isInWatchlist = userWatchlist.has(titleKey);
-          if (watchlist !== isInWatchlist) {
-            continue;
-          }
-        }
-
-        // Apply starts_with filter
-        if (startsWith) {
-          const firstChar = titleName[0]?.toUpperCase() || '';
-          if (startsWith === 'special') {
-            if (firstChar && firstChar.match(/[A-Z0-9]/)) {
-              continue;
-            }
-          } else {
-            if (firstChar !== startsWith.toUpperCase()) {
-              continue;
-            }
-          }
-        }
 
         // Count streams - handle both array and object formats
         const streams = titleData.streams || {};
@@ -523,24 +581,12 @@ class TitlesManager {
           titleResponse.number_of_episodes = episodes;
         }
 
-        filteredTitles.push(titleResponse);
+        items.push(titleResponse);
       }
 
-      // Note: Python doesn't sort after filtering - it relies on the sorted order from database
-      // Since we load titles sorted by name from database, filteredTitles should already be sorted
-      // No need to sort again here
-
       // Calculate pagination
-      const total = filteredTitles.length;
-      const totalPages = Math.max(1, Math.ceil(total / perPage));
-
-      // Ensure page is within valid range
+      const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
       const validPage = Math.max(1, Math.min(page, totalPages));
-
-      // Get paginated items
-      const startIdx = (validPage - 1) * perPage;
-      const endIdx = Math.min(startIdx + perPage, total);
-      const items = filteredTitles.slice(startIdx, endIdx);
 
       return {
         response: {
@@ -548,7 +594,7 @@ class TitlesManager {
           pagination: {
             page: validPage,
             per_page: perPage,
-            total,
+            total: totalCount,
             total_pages: totalPages,
           },
         },
@@ -565,11 +611,13 @@ class TitlesManager {
 
   /**
    * Get detailed information for a specific title
+   * Optimized to query MongoDB directly for just the requested title
    */
   async getTitleDetails(titleKey, user = null) {
     try {
-      const titlesData = await this.getTitlesData();
-      const titleData = titlesData.get(titleKey);
+      // Query MongoDB directly for just this title
+      const collection = this._database.getCollection('titles');
+      const titleData = await collection.findOne({ title_key: titleKey });
 
       if (!titleData) {
         return {
@@ -649,31 +697,34 @@ class TitlesManager {
         flatStreams.push(episodeDetails);
       }
 
-      // Build similar titles
+      // Build similar titles - query only the similar titles we need
       const similarKeys = titleData.similar_titles || [];
-      const seenKeys = new Set();
       const expandedSimilarTitles = [];
 
-      for (const key of similarKeys) {
-        if (!key || seenKeys.has(key)) {
-          continue;
+      if (similarKeys.length > 0) {
+        // Query MongoDB for only the similar titles
+        const similarTitles = await collection.find({
+          title_key: { $in: similarKeys }
+        }).toArray();
+
+        const seenKeys = new Set();
+        for (const similarTitle of similarTitles) {
+          const key = similarTitle.title_key;
+          if (!key || seenKeys.has(key)) {
+            continue;
+          }
+
+          seenKeys.add(key);
+          const similarPosterPath = similarTitle.poster_path || null;
+
+          expandedSimilarTitles.push({
+            key,
+            name: similarTitle.title || '',
+            poster_path: this._getPosterPath(similarPosterPath),
+            release_date: similarTitle.release_date,
+            type: similarTitle.type,
+          });
         }
-
-        const similarTitle = titlesData.get(key);
-        if (!similarTitle) {
-          continue;
-        }
-
-        seenKeys.add(key);
-        const similarPosterPath = similarTitle.poster_path || null;
-
-        expandedSimilarTitles.push({
-          key,
-          name: similarTitle.title || '',
-          poster_path: this._getPosterPath(similarPosterPath),
-          release_date: similarTitle.release_date,
-          type: similarTitle.type,
-        });
       }
 
       const details = {
@@ -719,6 +770,7 @@ class TitlesManager {
 
   /**
    * Update watchlist status for multiple titles
+   * Optimized to query MongoDB directly for only the titles we need to verify
    */
   async updateWatchlistBulk(user, titles) {
     try {
@@ -729,10 +781,26 @@ class TitlesManager {
         };
       }
 
-      const titlesData = await this.getTitlesData();
-      const updatedCount = 0;
-      const notFound = [];
+      // Extract all title keys to verify
+      const titleKeys = titles.map(t => t.key).filter(Boolean);
+      
+      if (titleKeys.length === 0) {
+        return {
+          response: { error: 'No title keys provided' },
+          statusCode: 400,
+        };
+      }
 
+      // Query MongoDB directly for only the titles we need to verify
+      const collection = this._database.getCollection('titles');
+      const existingTitles = await collection.find({
+        title_key: { $in: titleKeys }
+      }).project({ title_key: 1, _id: 0 }).toArray(); // Only need title_key for existence check
+
+      // Create a Set of existing title keys for quick lookup
+      const existingKeys = new Set(existingTitles.map(t => t.title_key));
+
+      const notFound = [];
       const titlesToWatchlist = [];
       const titlesToUnwatchlist = [];
 
@@ -741,7 +809,7 @@ class TitlesManager {
         const watchlist = titleUpdate.watchlist;
 
         // Verify title exists
-        if (!titlesData.has(titleKey)) {
+        if (!existingKeys.has(titleKey)) {
           notFound.push(titleKey);
           continue;
         }
@@ -830,6 +898,7 @@ class TitlesManager {
 
       let titlesUpdated = 0;
       let streamsRemoved = 0;
+      const modifiedTitles = [];
 
       // Iterate through main titles and remove provider from streams
       for (const [titleKey, titleData] of mainTitles.entries()) {
@@ -865,12 +934,37 @@ class TitlesManager {
           titlesUpdated++;
           // Update lastUpdated timestamp
           titleData.lastUpdated = new Date().toISOString();
+          modifiedTitles.push({ titleKey, titleData });
         }
       }
 
-      // Save updated titles to disk
+      // Save updated titles directly to MongoDB
       if (titlesUpdated > 0) {
-        await this._saveTitlesData(mainTitles);
+        const collection = this._database.getCollection('titles');
+        const now = new Date();
+        
+        // Prepare bulk write operations for modified titles only
+        const operations = modifiedTitles.map(({ titleKey, titleData }) => ({
+          updateOne: {
+            filter: { title_key: titleKey },
+            update: {
+              $set: {
+                ...titleData,
+                lastUpdated: now
+              }
+            }
+          }
+        }));
+
+        // Process in batches of 1000
+        for (let i = 0; i < operations.length; i += 1000) {
+          const batch = operations.slice(i, i + 1000);
+          await collection.bulkWrite(batch, { ordered: false });
+        }
+        
+        // Invalidate cache
+        this._database.invalidateCollectionCache(this._titlesCollection);
+        
         logger.info(`Removed provider ${providerId} from ${streamsRemoved} streams across ${titlesUpdated} titles`);
       }
 
@@ -908,8 +1002,8 @@ class TitlesManager {
   }
 
   /**
-   * Save main titles Map to disk
-   * Converts Map to sorted array and writes to main.json
+   * Save main titles Map to MongoDB
+   * Updates titles collection using bulkWrite operations
    * @private
    * @param {Map<string, MainTitle>} titlesMap - Map of title_key to MainTitle
    * @returns {Promise<void>}
@@ -919,24 +1013,40 @@ class TitlesManager {
       // Convert Map to array
       const titlesArray = Array.from(titlesMap.values());
       
-      // Sort by title (alphabetically ascending) for consistency
-      titlesArray.sort((a, b) => {
-        const titleA = (a.title || '').toLowerCase();
-        const titleB = (b.title || '').toLowerCase();
-        if (titleA < titleB) return -1;
-        if (titleA > titleB) return 1;
-        return 0;
-      });
+      if (titlesArray.length === 0) {
+        return;
+      }
 
-      // Get file path for titles collection
-      const filePath = this._database._fileStorage.getCollectionPath(this._titlesCollection);
+      // Get MongoDB collection
+      const collection = this._database.getCollection('titles');
+      const now = new Date();
       
-      // Write to disk (cache invalidation handled automatically by writeJsonFile)
-      await this._database._fileStorage.writeJsonFile(filePath, titlesArray);
+      // Prepare bulk write operations
+      const operations = titlesArray.map(title => ({
+        updateOne: {
+          filter: { title_key: title.title_key },
+          update: {
+            $set: {
+              ...title,
+              lastUpdated: now
+            }
+          },
+          upsert: true
+        }
+      }));
+
+      // Process in batches of 1000
+      for (let i = 0; i < operations.length; i += 1000) {
+        const batch = operations.slice(i, i + 1000);
+        await collection.bulkWrite(batch, { ordered: false });
+      }
       
-      logger.info(`Saved ${titlesArray.length} titles to disk`);
+      // Invalidate cache
+      this._database.invalidateCollectionCache(this._titlesCollection);
+      
+      logger.info(`Saved ${titlesArray.length} titles to MongoDB`);
     } catch (error) {
-      logger.error('Error saving titles to disk:', error);
+      logger.error('Error saving titles to MongoDB:', error);
       throw error;
     }
   }

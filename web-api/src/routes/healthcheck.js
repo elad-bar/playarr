@@ -1,7 +1,6 @@
 import express from 'express';
 import os from 'os';
 import checkDiskSpace from 'check-disk-space';
-import fs from 'fs-extra';
 
 // Track server start time for uptime calculation
 const START_TIME = Date.now() / 1000; // Unix timestamp in seconds
@@ -11,11 +10,11 @@ const START_TIME = Date.now() / 1000; // Unix timestamp in seconds
  */
 class HealthcheckRouter {
   /**
-   * @param {FileStorageService} fileStorage - File storage service instance
+   * @param {MongoDatabaseService} database - Database service instance
    * @param {SettingsManager} settingsManager - Settings manager instance
    */
-  constructor(fileStorage, settingsManager) {
-    this._fileStorage = fileStorage;
+  constructor(database, settingsManager) {
+    this._database = database;
     this._settingsManager = settingsManager;
     this.router = express.Router();
     this._setupRoutes();
@@ -32,14 +31,13 @@ class HealthcheckRouter {
      */
     this.router.get('/', async (req, res) => {
       try {
-        // Check database connectivity (file system access)
+        // Check MongoDB connectivity
         let dbStatus = false;
         let dbMessage = 'Not connected';
         try {
-          const dataDir = this._fileStorage.dataDir;
-          
-          // Check if data directory is accessible
-          await fs.access(dataDir, fs.constants.R_OK | fs.constants.W_OK);
+          // Test MongoDB connection with a simple query
+          const collection = this._database.getCollection('settings');
+          await collection.findOne({});
           dbStatus = true;
           dbMessage = 'Connected';
         } catch (error) {
