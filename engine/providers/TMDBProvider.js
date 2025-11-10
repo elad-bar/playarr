@@ -828,8 +828,7 @@ export class TMDBProvider extends BaseProvider {
             
             // Convert streams dictionary to stream documents and accumulate
             if (result.streamsDict) {
-              const streamDocs = this._convertStreamsDictToDocuments(result.streamsDict);
-              allStreams.push(...streamDocs);
+              allStreams.push(...Object.values(result.streamsDict));
             }
             
             processedCount++;
@@ -877,46 +876,6 @@ export class TMDBProvider extends BaseProvider {
   }
 
   /**
-   * Convert streams dictionary to MongoDB stream documents
-   * Dictionary format: { "movies-12345-main-providerId": streamObj, ... }
-   * @private
-   * @param {Object} streamsDict - Dictionary of stream entries
-   * @returns {Array<Object>} Array of stream documents for MongoDB
-   */
-  _convertStreamsDictToDocuments(streamsDict) {
-    const streamDocs = [];
-    
-    for (const [streamKey, streamObj] of Object.entries(streamsDict)) {
-      // Parse streamKey: "type-tmdb_id-stream_id-provider_id"
-      const parts = streamKey.split('-');
-      if (parts.length < 4) {
-        this.logger.warn(`Invalid stream key format: ${streamKey}`);
-        continue;
-      }
-      
-      const type = parts[0]; // 'movies' or 'tvshows'
-      const tmdbId = parts[1];
-      const streamId = parts[2];
-      const providerId = parts.slice(3).join('-'); // Handle provider IDs with dashes
-      
-      // Generate title_key
-      const titleKey = generateTitleKey(type, tmdbId);
-      
-      // Create stream document
-      const streamDoc = {
-        title_key: titleKey,
-        stream_id: streamId,
-        provider_id: providerId,
-        ...streamObj
-      };
-      
-      streamDocs.push(streamDoc);
-    }
-    
-    return streamDocs;
-  }
-
-  /**
    * Extract streams dictionary entries for a single main title
    * @private
    * @param {Object} mainTitle - Main title object
@@ -957,8 +916,7 @@ export class TMDBProvider extends BaseProvider {
       }
 
       // Extract season/episode for TV shows
-      let seasonNumber = null;
-      let episodeNumber = null;
+      const titleKey = generateTitleKey(type, title_id);
       let tvgId = `tmdb-${title_id}`;
       let tvgName = titleWithYear;
       const tvgType = this._typeConfig[type].tvgType;
@@ -983,8 +941,8 @@ export class TMDBProvider extends BaseProvider {
           streamSeasonEpisode.episodeNumber = parseInt(match[2], 10);
           streamSeasonEpisode.cleanStreamId = streamId.replace("-", "");
           
-          tvgId = `tmdb-${title_id}-S${streamSeasonEpisode.cleanStreamId}`;
-          tvgName = `${titleWithYear} S${streamSeasonEpisode.cleanStreamId}`;
+          tvgId = `tmdb-${title_id}-${streamSeasonEpisode.cleanStreamId}`;
+          tvgName = `${titleWithYear} ${streamSeasonEpisode.cleanStreamId}`;
 
           tvShowStreamObj['tvg-season-num'] = streamSeasonEpisode.seasonNumber;
           tvShowStreamObj['tvg-episode-num'] = streamSeasonEpisode.episodeNumber;
@@ -1006,7 +964,7 @@ export class TMDBProvider extends BaseProvider {
         
         // Generate key: type-tmdb_id-stream_id-provider
         const streamKey = `${type}-${title_id}-${streamId}-${providerId}`;
-        
+
         // Generate proxy_path
         let proxyPath = '';
         if (type === 'movies') {
@@ -1014,12 +972,14 @@ export class TMDBProvider extends BaseProvider {
         } else {
           // TV show
           const seasonStr = `Season ${streamSeasonEpisode.season}`;
-          const episodeStr =`S${streamSeasonEpisode.episode}`;
           proxyPath = `${type}/${title} (${year}) [tmdb=${title_id}]/${seasonStr}/${title} (${year}) ${streamId}.strm`;
         }
 
         // Build stream object
         const streamObj = {
+          title_key: titleKey,
+          stream_id: streamId,
+          provider_id: providerId,
           'tvg-id': tvgId,
           'tvg-name': tvgName,
           'tvg-type': tvgType,
