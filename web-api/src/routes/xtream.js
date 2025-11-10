@@ -188,18 +188,25 @@ class XtreamRouter extends BaseRouter {
           return this.returnErrorResponse(res, 401, 'Unauthorized');
         }
 
+        this.logger.info(`Movie stream request: username=${username}, streamId=${streamId}`);
+
         // Parse stream ID to extract title ID
         const titleId = this._parseMovieStreamId(streamId);
         if (!titleId) {
           return this.returnErrorResponse(res, 400, 'Invalid stream ID format');
         }
 
+        this.logger.debug(`Parsed movie stream: streamId=${streamId}, titleId=${titleId}`);
+
         // Get best source for the movie
         const streamUrl = await this._streamManager.getBestSource(titleId, 'movies');
 
         if (!streamUrl) {
+          this.logger.warn(`No stream available: username=${username}, titleId=${titleId}`);
           return this.returnErrorResponse(res, 503, 'No available providers');
         }
+
+        this.logger.info(`Movie stream found: username=${username}, titleId=${titleId}, redirecting to provider stream`);
 
         // Redirect to the actual stream URL
         return res.redirect(streamUrl);
@@ -223,6 +230,8 @@ class XtreamRouter extends BaseRouter {
           return this.returnErrorResponse(res, 401, 'Unauthorized');
         }
 
+        this.logger.info(`Series stream request: username=${username}, streamId=${streamId}`);
+
         // Parse stream ID to extract title ID, season, and episode
         const parsed = this._parseSeriesStreamId(streamId);
         if (!parsed) {
@@ -230,6 +239,8 @@ class XtreamRouter extends BaseRouter {
         }
 
         const { title_id, season, episode } = parsed;
+
+        this.logger.debug(`Parsed series stream: streamId=${streamId}, titleId=${title_id}, season=${season}, episode=${episode}`);
 
         // Get best source for the TV show episode
         const streamUrl = await this._streamManager.getBestSource(
@@ -240,8 +251,11 @@ class XtreamRouter extends BaseRouter {
         );
 
         if (!streamUrl) {
+          this.logger.warn(`No stream available: username=${username}, titleId=${title_id}, season=${season}, episode=${episode}`);
           return this.returnErrorResponse(res, 503, 'No available providers');
         }
+
+        this.logger.info(`Series stream found: username=${username}, titleId=${title_id}, season=${season}, episode=${episode}, redirecting to provider stream`);
 
         // Redirect to the actual stream URL
         return res.redirect(streamUrl);
