@@ -38,6 +38,30 @@ function getBaseUrl(req) {
 }
 
 /**
+ * Build server_info object for Xtream Codes API compliance
+ * @param {Object} req - Express request object
+ * @returns {Object} server_info object with url, port, https_port, server_protocol, timezone, timestamp_now
+ */
+function buildServerInfo(req) {
+  const baseUrl = getBaseUrl(req);
+  const urlObj = new URL(baseUrl);
+  const scheme = urlObj.protocol.replace(':', '');
+  const hostname = urlObj.hostname;
+  const port = urlObj.port ? parseInt(urlObj.port, 10) : (scheme === 'https' ? 443 : 80);
+  const httpsPort = scheme === 'https' ? port : 443;
+  const httpPort = scheme === 'http' ? port : 80;
+  
+  return {
+    url: hostname,
+    port: httpPort,
+    https_port: httpsPort,
+    server_protocol: scheme,
+    timezone: 'UTC',
+    timestamp_now: Math.floor(Date.now() / 1000)
+  };
+}
+
+/**
  * Xtream Code API router
  * Exposes movies and TV shows in Xtream Code API format
  * Authentication: username and API key (password parameter)
@@ -77,6 +101,9 @@ class XtreamRouter extends BaseRouter {
      */
     this.router.get('/', async (req, res) => {
       try {
+        // Set UTF-8 charset header for all JSON responses
+        res.setHeader('Content-Type', 'application/json; charset=UTF-8');
+        
         const { username, password, action } = req.query;
 
         // Validate required parameters
@@ -84,13 +111,8 @@ class XtreamRouter extends BaseRouter {
           return res.status(401).json({ 
             user_info: { 
               auth: 0,
-              status: 'Unauthorized',
-              exp_date: null,
-              is_trial: 0,
-              active_cons: 0,
-              created_at: null,
-              max_connections: 0,
-              allowed_output_formats: []
+              status: 'Blocked',
+              message: 'Username or password incorrect'
             }
           });
         }
@@ -101,13 +123,8 @@ class XtreamRouter extends BaseRouter {
           return res.status(401).json({ 
             user_info: { 
               auth: 0,
-              status: 'Unauthorized',
-              exp_date: null,
-              is_trial: 0,
-              active_cons: 0,
-              created_at: null,
-              max_connections: 0,
-              allowed_output_formats: []
+              status: 'Blocked',
+              message: 'Username or password incorrect'
             }
           });
         }
@@ -137,15 +154,19 @@ class XtreamRouter extends BaseRouter {
         // Default: return user info if no action or unknown action
         return res.status(200).json({
           user_info: {
+            username: username,
+            password: password,
+            message: 'Active',
             auth: 1,
             status: 'Active',
-            exp_date: null,
+            exp_date: 'Unlimited',
             is_trial: 0,
             active_cons: 0,
             created_at: user.createdAt || null,
             max_connections: 1,
             allowed_output_formats: ['m3u8', 'ts']
-          }
+          },
+          server_info: buildServerInfo(req)
         });
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Internal server error', `Xtream API error: ${error.message}`);
