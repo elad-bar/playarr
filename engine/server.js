@@ -77,8 +77,8 @@ class EngineServer {
 
         // Trigger the job with optional providerId parameter
         try {
-          // For processMainTitles, pass providerId in workerData if provided
-          const workerData = providerId && jobName === 'processMainTitles' 
+          // Pass providerId in workerData if provided (for any job)
+          const workerData = providerId 
             ? { providerId }
             : undefined;
           

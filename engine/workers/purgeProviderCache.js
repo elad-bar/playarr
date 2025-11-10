@@ -11,6 +11,7 @@ import { PurgeProviderCacheJob } from '../jobs/PurgeProviderCacheJob.js';
  */
 async function purgeProviderCacheWorker() {
   const cacheDir = workerData.cacheDir;
+  const providerId = workerData.providerId || null; // Optional provider ID
 
   // Initialize providers once (singleton pattern)
   await ProviderInitializer.initialize(cacheDir);

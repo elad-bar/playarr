@@ -25,7 +25,8 @@ export class JobsManager {
         description: job.description,
         schedule: job.schedule,
         interval: job.interval,
-        skipIfOtherInProgress: job.skipIfOtherInProgress || []
+        skipIfOtherInProgress: job.skipIfOtherInProgress || [],
+        postExecute: job.postExecute || []
       };
     });
   }

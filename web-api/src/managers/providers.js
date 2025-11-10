@@ -413,16 +413,13 @@ class ProvidersManager extends BaseManager {
         action: 'deleted'
       });
 
-      // Trigger processMainTitles and purgeProviderCache
-      // Pass providerId to processMainTitles to process all titles for that provider
+      // Trigger purgeProviderCache with providerId
+      // The postExecute will automatically trigger processMainTitles
       try {
-        this.logger.info(`Provider ${providerId} deleted. Triggering processMainTitles (provider: ${providerId}) and purgeProviderCache...`);
-        await Promise.all([
-          this._jobsManager.triggerJob('processMainTitles', { providerId }),
-          this._jobsManager.triggerJob('purgeProviderCache')
-        ]);
+        this.logger.info(`Provider ${providerId} deleted. Triggering purgeProviderCache (provider: ${providerId})...`);
+        await this._jobsManager.triggerJob('purgeProviderCache', { providerId });
       } catch (error) {
-        this.logger.error(`Failed to trigger jobs after provider deletion: ${error.message}`);
+        this.logger.error(`Failed to trigger purgeProviderCache after provider deletion: ${error.message}`);
         // Don't fail the provider deletion if triggering fails
       }
 

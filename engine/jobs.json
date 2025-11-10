@@ -6,7 +6,8 @@
       "interval": "1h",
       "timeout": "10s",
       "description": "Fetch metadata from IPTV providers and match TMDB IDs",
-      "schedule": "Every 1 hour"
+      "schedule": "Every 1 hour",
+      "postExecute": ["processMainTitles"]
     },
     {
       "name": "processMainTitles",
@@ -19,7 +20,8 @@
       "name": "purgeProviderCache",
       "jobHistoryName": "PurgeProviderCacheJob",
       "description": "Purge cache for deleted providers",
-      "schedule": "Manual trigger only"
+      "schedule": "Manual trigger only",
+      "postExecute": ["processMainTitles"]
     }
   ]
 }

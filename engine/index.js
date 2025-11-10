@@ -109,6 +109,9 @@ async function main() {
   // Initialize JobsManager with MongoDB, jobs config, and Bree instance
   jobsManager = new JobsManager(mongoData, jobsConfig, bree);
 
+  // Store workerData for each running job to pass through to postExecute jobs
+  const jobWorkerDataMap = new Map();
+
   // Override the run method to prevent any job from running if it's already running
   // Uses MongoDB job_history as single source of truth
   const originalRun = bree.run.bind(bree);
@@ -128,19 +131,27 @@ async function main() {
         if (jobConfig && jobConfig.worker && jobConfig.worker.workerData) {
           workerData = { ...jobConfig.worker.workerData, ...workerData };
         }
+      } else {
+        const jobConfig = bree.config.jobs.find(j => j.name === name);
+        if (jobConfig && jobConfig.worker && jobConfig.worker.workerData) {
+          workerData = { ...jobConfig.worker.workerData };
+        }
+      }
+      
+      // Store workerData for this job (excluding cacheDir as it's always present)
+      if (workerData) {
+        const { cacheDir, ...dataToStore } = workerData;
+        if (Object.keys(dataToStore).length > 0) {
+          jobWorkerDataMap.set(name, dataToStore);
+        }
       }
       
       // Log job start with workerData
       const workerDataStr = workerData ? JSON.stringify(workerData) : 'none';
       logger.info(`Starting job '${name}' with workerData: ${workerDataStr}`);
-      const startTime = Date.now();
       
       const result = await originalRun(name, workerData);
-      
-      // Log job completion with duration
-      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      logger.info(`Job '${name}' completed successfully after ${duration} seconds`);
-      
+            
       return result;
     } catch (error) {
       // If Bree throws "already running" error, throw a custom error that can be handled upstream
@@ -158,6 +169,8 @@ async function main() {
   bree.on('worker message', async (name, message) => {
     if (message.success) {
       logger.info(`Job ${name} completed successfully`);
+      
+      // Handle job-specific result logging
       if (name === 'processProvidersTitles' && Array.isArray(message.result)) {
         logger.debug('=== Fetch Results ===');
         message.result.forEach(result => {
@@ -171,8 +184,38 @@ async function main() {
         logger.debug('=== Process Results ===');
         logger.info(`Generated: ${message.result.movies} movies, ${message.result.tvShows} TV shows`);
       }
+
+      logger.info(`Job '${name}' completed successfully`);
+      
+      // Generic postExecute handler - trigger jobs listed in postExecute array
+      const jobConfig = jobsManager.getJobMetadata(name);
+      if (jobConfig && jobConfig.postExecute && jobConfig.postExecute.length > 0) {
+        // Get stored workerData for this job to pass through to post-execute jobs
+        const workerDataToPass = jobWorkerDataMap.get(name);
+        
+        for (const postJobName of jobConfig.postExecute) {
+          try {
+            const logMsg = `Job '${name}' completed. Triggering post-execute job '${postJobName}'`;
+            const logMsgWithProvider = workerDataToPass?.providerId 
+              ? `${logMsg} with providerId: ${workerDataToPass.providerId}`
+              : logMsg;
+            logger.info(`${logMsgWithProvider}...`);
+            await bree.run(postJobName, workerDataToPass);
+          } catch (error) {
+            logger.error(`Failed to trigger post-execute job '${postJobName}' after '${name}': ${error.message}`);
+          }
+        }
+        
+        // Clean up stored workerData after postExecute jobs are triggered
+        jobWorkerDataMap.delete(name);
+      } else {
+        // Clean up stored workerData if no postExecute jobs
+        jobWorkerDataMap.delete(name);
+      }
     } else {
       logger.error(`Job ${name} failed: ${message.error}`);
+      // Clean up stored workerData on failure
+      jobWorkerDataMap.delete(name);
     }
   });
 
