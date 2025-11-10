@@ -5,9 +5,31 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
 import dotenv from 'dotenv';
+import fsExtra from 'fs-extra';
 
 // Load environment variables
 dotenv.config();
+
+// Rotate log file on startup using the log file's creation date (before logger is created)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const logsDir = process.env.LOGS_DIR || path.join(__dirname, '../../../logs');
+const apiLogPath = path.join(logsDir, 'api.log');
+if (fsExtra.existsSync(apiLogPath)) {
+  const stats = fsExtra.statSync(apiLogPath);
+  const creationDate = stats.birthtime || stats.mtime; // Use birthtime if available, fallback to mtime
+  const timestamp = creationDate.toISOString().replace(/[:.]/g, '-').slice(0, -5);
+  let rotatedLogPath = path.join(logsDir, `api-${timestamp}.log`);
+  
+  // If destination already exists, append a counter to make it unique
+  let counter = 1;
+  while (fsExtra.existsSync(rotatedLogPath)) {
+    rotatedLogPath = path.join(logsDir, `api-${timestamp}-${counter}.log`);
+    counter++;
+  }
+  
+  fsExtra.moveSync(apiLogPath, rotatedLogPath);
+}
 
 // Import logger
 import { createLogger } from './utils/logger.js';
@@ -45,9 +67,6 @@ import TMDBRouter from './routes/tmdb.js';
 import HealthcheckRouter from './routes/healthcheck.js';
 import XtreamRouter from './routes/xtream.js';
 import JobsRouter from './routes/jobs.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -113,13 +132,13 @@ async function initialize() {
     const titlesManager = new TitlesManager(database, userManager);
     const settingsManager = new SettingsManager(database);
     const statsManager = new StatsManager(database);
-    const providersManager = new ProvidersManager(database, webSocketService, titlesManager);
+    const jobsManager = new JobsManager(database);
+    const providersManager = new ProvidersManager(database, webSocketService, titlesManager, jobsManager);
     const categoriesManager = new CategoriesManager(database, providersManager);
     const streamManager = new StreamManager(database);
     const playlistManager = new PlaylistManager(database);
-    const tmdbManager = new TMDBManager(settingsManager);
+    const tmdbManager = new TMDBManager(database, settingsManager);
     const xtreamManager = new XtreamManager(database, titlesManager);
-    const jobsManager = new JobsManager(database);
 
     // Initialize user manager (creates default admin user)
     await userManager.initialize();
@@ -141,6 +160,22 @@ async function initialize() {
     const xtreamRouter = new XtreamRouter(xtreamManager, database, streamManager);
     const jobsRouter = new JobsRouter(jobsManager, database);
 
+    // Initialize all routers
+    authRouter.initialize();
+    usersRouter.initialize();
+    profileRouter.initialize();
+    settingsRouter.initialize();
+    statsRouter.initialize();
+    titlesRouter.initialize();
+    categoriesRouter.initialize();
+    providersRouter.initialize();
+    streamRouter.initialize();
+    playlistRouter.initialize();
+    tmdbRouter.initialize();
+    healthcheckRouter.initialize();
+    xtreamRouter.initialize();
+    jobsRouter.initialize();
+
     // Step 4: Register routes
     app.use('/api/auth', authRouter.router);
     app.use('/api/users', usersRouter.router);
@@ -156,6 +191,11 @@ async function initialize() {
     app.use('/api/tmdb', tmdbRouter.router);
     app.use('/api/healthcheck', healthcheckRouter.router);
     app.use('/player_api.php', xtreamRouter.router); // Xtream Code API at specific path
+    
+    // Add direct stream routes (Xtream Code API standard format)
+    // These must come before the React Router fallback
+    app.use('/movie', xtreamRouter.router);
+    app.use('/series', xtreamRouter.router);
 
     // Static file serving for React app
     // Serve static files from React build directory
@@ -164,8 +204,11 @@ async function initialize() {
 
     // React Router fallback - serve index.html for non-API routes
     app.get('*', (req, res) => {
-      // Don't serve index.html for API routes
-      if (req.path.startsWith('/api')) {
+      // Don't serve index.html for API routes or stream routes
+      if (req.path.startsWith('/api') || 
+          req.path.startsWith('/movie') || 
+          req.path.startsWith('/series') ||
+          req.path.startsWith('/player_api.php')) {
         return res.status(404).json({ error: 'Not found' });
       }
       

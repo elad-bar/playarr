@@ -1,21 +1,19 @@
+import { BaseManager } from './BaseManager.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import { createJWTToken } from '../utils/jwt.js';
-import { createLogger } from '../utils/logger.js';
 import crypto from 'crypto';
-
-const logger = createLogger('UserManager');
 
 /**
  * User manager for handling user operations
  * Matches Python's UserService and AuthenticationManager functionality
  */
-class UserManager {
+class UserManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    */
   constructor(database) {
-    this._database = database;
+    super('UserManager', database);
     this._usersCollection = toCollectionName(DatabaseCollections.USERS);
   }
 
@@ -25,7 +23,7 @@ class UserManager {
    */
   async initialize() {
     try {
-      logger.info('Initializing user manager...');
+      this.logger.info('Initializing user manager...');
 
       // Create database indices
       await this._database.createIndices();
@@ -33,9 +31,9 @@ class UserManager {
       // Ensure default admin user exists
       await this._ensureDefaultAdminUser();
 
-      logger.info('User manager initialized');
+      this.logger.info('User manager initialized');
     } catch (error) {
-      logger.error('Failed initializing user manager:', error);
+      this.logger.error('Failed initializing user manager:', error);
       throw error;
     }
   }
@@ -50,19 +48,19 @@ class UserManager {
       const defaultPassword = process.env.DEFAULT_ADMIN_PASSWORD;
 
       if (!defaultPassword) {
-        logger.warn('DEFAULT_ADMIN_PASSWORD not set, skipping default admin user creation');
+        this.logger.warn('DEFAULT_ADMIN_PASSWORD not set, skipping default admin user creation');
         return;
       }
 
       // Check if admin user already exists
       const existingUser = await this.getUserByUsername(defaultUsername);
       if (existingUser) {
-        logger.info(`Default admin user '${defaultUsername}' already exists`);
+        this.logger.info(`Default admin user '${defaultUsername}' already exists`);
         return;
       }
 
       // Create default admin user with isDefaultAdmin flag
-      logger.info(`Creating default admin user '${defaultUsername}'`);
+      this.logger.info(`Creating default admin user '${defaultUsername}'`);
       const user = await this.createUser(
         defaultUsername,
         'Admin',
@@ -78,9 +76,9 @@ class UserManager {
         { isDefaultAdmin: true },
         { username: defaultUsername }
       );
-      logger.info(`Default admin user '${defaultUsername}' created successfully`);
+      this.logger.info(`Default admin user '${defaultUsername}' created successfully`);
     } catch (error) {
-      logger.error('Failed ensuring default admin user:', error);
+      this.logger.error('Failed ensuring default admin user:', error);
       throw error;
     }
   }
@@ -206,7 +204,7 @@ class UserManager {
         return user;
       }
     } catch (error) {
-      logger.error(`Failed getting user by username ${username}:`, error);
+      this.logger.error(`Failed getting user by username ${username}:`, error);
     }
 
     return null;
@@ -235,7 +233,7 @@ class UserManager {
         }
       }
     } catch (error) {
-      logger.error('Failed getting user by API key:', error);
+      this.logger.error('Failed getting user by API key:', error);
     }
 
     return null;
@@ -267,7 +265,7 @@ class UserManager {
       
       return { response: { users: usersPublic }, statusCode: 200 };
     } catch (error) {
-      logger.error('Failed getting all users:', error);
+      this.logger.error('Failed getting all users:', error);
       return { response: { error: 'Failed to get users' }, statusCode: 500 };
     }
   }
@@ -286,7 +284,7 @@ class UserManager {
       const userPublic = this._userToPublic(user);
       return { response: userPublic, statusCode: 200 };
     } catch (error) {
-      logger.error(`Failed getting user ${username}:`, error);
+      this.logger.error(`Failed getting user ${username}:`, error);
       return { response: { error: 'Failed to get user' }, statusCode: 500 };
     }
   }
@@ -306,7 +304,7 @@ class UserManager {
       const result = await this.updateUser(username, { status: 'inactive' });
       return result;
     } catch (error) {
-      logger.error(`Failed deleting user ${username}:`, error);
+      this.logger.error(`Failed deleting user ${username}:`, error);
       return { response: { error: 'Failed to delete user' }, statusCode: 500 };
     }
   }
@@ -374,7 +372,7 @@ class UserManager {
 
       return user;
     } catch (error) {
-      logger.error('Failed creating user:', error);
+      this.logger.error('Failed creating user:', error);
       throw error;
     }
   }
@@ -436,7 +434,7 @@ class UserManager {
       const userPublic = this._userToPublic(user);
       return { response: userPublic, statusCode: 200 };
     } catch (error) {
-      logger.error(`Failed updating user ${username}:`, error);
+      this.logger.error(`Failed updating user ${username}:`, error);
       return { response: { error: 'Failed to update user' }, statusCode: 500 };
     }
   }
@@ -457,7 +455,7 @@ class UserManager {
       if (error.message.includes('already exists')) {
         return { response: { error: error.message }, statusCode: 400 };
       }
-      logger.error('Failed creating user:', error);
+      this.logger.error('Failed creating user:', error);
       return { response: { error: 'Failed to create user' }, statusCode: 500 };
     }
   }
@@ -488,7 +486,7 @@ class UserManager {
 
       return { response: { success: true }, statusCode: 200 };
     } catch (error) {
-      logger.error(`Failed resetting password for user ${username}:`, error);
+      this.logger.error(`Failed resetting password for user ${username}:`, error);
       return { response: { error: 'Failed to reset password' }, statusCode: 500 };
     }
   }
@@ -523,7 +521,7 @@ class UserManager {
 
       return { response: { api_key: newApiKey }, statusCode: 200 };
     } catch (error) {
-      logger.error(`Failed regenerating API key for user ${username}:`, error);
+      this.logger.error(`Failed regenerating API key for user ${username}:`, error);
       return { response: { error: 'Failed to regenerate API key' }, statusCode: 500 };
     }
   }
@@ -542,7 +540,7 @@ class UserManager {
       const userPublic = this._userToPublic(user);
       return { response: userPublic, statusCode: 200 };
     } catch (error) {
-      logger.error(`Failed getting profile for ${username}:`, error);
+      this.logger.error(`Failed getting profile for ${username}:`, error);
       return { response: { error: 'Failed to get profile' }, statusCode: 500 };
     }
   }
@@ -563,7 +561,7 @@ class UserManager {
 
       return await this.updateUser(username, updateData);
     } catch (error) {
-      logger.error(`Failed updating profile for ${username}:`, error);
+      this.logger.error(`Failed updating profile for ${username}:`, error);
       return { response: { error: 'Failed to update profile' }, statusCode: 500 };
     }
   }
@@ -587,7 +585,7 @@ class UserManager {
 
       return { response: { success: true, message: 'Password changed successfully' }, statusCode: 200 };
     } catch (error) {
-      logger.error(`Failed changing password for ${username}:`, error);
+      this.logger.error(`Failed changing password for ${username}:`, error);
       return { response: { error: 'Failed to change password' }, statusCode: 500 };
     }
   }
@@ -677,7 +675,7 @@ class UserManager {
 
       return true;
     } catch (error) {
-      logger.error(`Failed updating watchlist for user ${username}:`, error);
+      this.logger.error(`Failed updating watchlist for user ${username}:`, error);
       return false;
     }
   }

@@ -1,19 +1,17 @@
-import { createLogger } from '../utils/logger.js';
+import { BaseManager } from './BaseManager.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
-
-const logger = createLogger('SettingsManager');
 
 /**
  * Settings manager for managing application settings
  * Matches Python's SettingsService
  * Uses DatabaseService collection-based methods for all data access
  */
-class SettingsManager {
+class SettingsManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    */
   constructor(database) {
-    this._database = database;
+    super('SettingsManager', database);
     this._settingsCollection = toCollectionName(DatabaseCollections.SETTINGS);
   }
 
@@ -30,7 +28,7 @@ class SettingsManager {
       const settings = await this._database.getDataObject(this._settingsCollection);
       return settings || {};
     } catch (error) {
-      logger.error(`Error reading settings: ${error.message}`);
+      this.logger.error(`Error reading settings: ${error.message}`);
       return {};
     }
   }
@@ -47,7 +45,7 @@ class SettingsManager {
       // Settings are stored as an object, write directly
       await this._database.updateDataObject(this._settingsCollection, settings);
     } catch (error) {
-      logger.error(`Error writing settings: ${error.message}`);
+      this.logger.error(`Error writing settings: ${error.message}`);
       throw error;
     }
   }
@@ -62,7 +60,7 @@ class SettingsManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error(`Error getting setting ${key}:`, error);
+      this.logger.error(`Error getting setting ${key}:`, error);
       return {
         response: { error: `Failed to get setting ${key}` },
         statusCode: 500,
@@ -90,7 +88,7 @@ class SettingsManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error(`Error setting ${key}:`, error);
+      this.logger.error(`Error setting ${key}:`, error);
       return {
         response: { error: `Failed to set ${key}` },
         statusCode: 500,
@@ -117,7 +115,7 @@ class SettingsManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error(`Error deleting ${key}:`, error);
+      this.logger.error(`Error deleting ${key}:`, error);
       return {
         response: { error: `Failed to delete ${key}` },
         statusCode: 500,

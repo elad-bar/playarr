@@ -1,29 +1,22 @@
-import express from 'express';
-import { createRequireAuth } from '../middleware/auth.js';
-import { createRequireAdmin } from '../middleware/admin.js';
+import BaseRouter from './BaseRouter.js';
 
 /**
  * Providers router for handling IPTV provider endpoints
  */
-class ProvidersRouter {
+class ProvidersRouter extends BaseRouter {
   /**
    * @param {ProvidersManager} providersManager - Providers manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(providersManager, database) {
+    super(database, 'ProvidersRouter');
     this._providersManager = providersManager;
-    this._database = database;
-    this._requireAuth = createRequireAuth(database);
-    this._requireAdmin = createRequireAdmin(this._requireAuth);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * GET /api/iptv/providers
      * Get all IPTV providers
@@ -33,8 +26,7 @@ class ProvidersRouter {
         const result = await this._providersManager.getProviders();
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get providers error:', error);
-        return res.status(500).json({ error: 'Failed to get providers' });
+        return this.returnErrorResponse(res, 500, 'Failed to get providers', `Get providers error: ${error.message}`);
       }
     });
 
@@ -47,14 +39,13 @@ class ProvidersRouter {
         const providerData = req.body;
 
         if (!providerData || Object.keys(providerData).length === 0) {
-          return res.status(400).json({ error: 'Request body is required' });
+          return this.returnErrorResponse(res, 400, 'Request body is required');
         }
 
         const result = await this._providersManager.createProvider(providerData);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Create provider error:', error);
-        return res.status(500).json({ error: 'Failed to create provider' });
+        return this.returnErrorResponse(res, 500, 'Failed to create provider', `Create provider error: ${error.message}`);
       }
     });
 
@@ -67,8 +58,7 @@ class ProvidersRouter {
         const result = await this._providersManager.getProviderPriorities();
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get provider priorities error:', error);
-        return res.status(500).json({ error: 'Failed to get provider priorities' });
+        return this.returnErrorResponse(res, 500, 'Failed to get provider priorities', `Get provider priorities error: ${error.message}`);
       }
     });
 
@@ -81,14 +71,13 @@ class ProvidersRouter {
         const prioritiesData = req.body;
 
         if (!prioritiesData || !prioritiesData.providers) {
-          return res.status(400).json({ error: 'Request body must contain providers array' });
+          return this.returnErrorResponse(res, 400, 'Request body must contain providers array');
         }
 
         const result = await this._providersManager.updateProviderPriorities(prioritiesData);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Update provider priorities error:', error);
-        return res.status(500).json({ error: 'Failed to update provider priorities' });
+        return this.returnErrorResponse(res, 500, 'Failed to update provider priorities', `Update provider priorities error: ${error.message}`);
       }
     });
 
@@ -102,8 +91,7 @@ class ProvidersRouter {
         const result = await this._providersManager.getProvider(provider_id);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get provider error:', error);
-        return res.status(500).json({ error: 'Failed to get provider' });
+        return this.returnErrorResponse(res, 500, 'Failed to get provider', `Get provider error: ${error.message}`);
       }
     });
 
@@ -117,14 +105,13 @@ class ProvidersRouter {
         const providerData = req.body;
 
         if (!providerData || Object.keys(providerData).length === 0) {
-          return res.status(400).json({ error: 'Request body is required' });
+          return this.returnErrorResponse(res, 400, 'Request body is required');
         }
 
         const result = await this._providersManager.updateProvider(provider_id, providerData);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Update provider error:', error);
-        return res.status(500).json({ error: 'Failed to update provider' });
+        return this.returnErrorResponse(res, 500, 'Failed to update provider', `Update provider error: ${error.message}`);
       }
     });
 
@@ -144,8 +131,7 @@ class ProvidersRouter {
         
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Delete provider error:', error);
-        return res.status(500).json({ error: 'Failed to delete provider' });
+        return this.returnErrorResponse(res, 500, 'Failed to delete provider', `Delete provider error: ${error.message}`);
       }
     });
 
@@ -159,8 +145,7 @@ class ProvidersRouter {
         const result = await this._providersManager.getIgnoredTitles(provider_id);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get ignored titles error:', error);
-        return res.status(500).json({ error: 'Failed to get ignored titles' });
+        return this.returnErrorResponse(res, 500, 'Failed to get ignored titles', `Get ignored titles error: ${error.message}`);
       }
     });
   }

@@ -1,29 +1,22 @@
-import express from 'express';
-import { createRequireAuth } from '../middleware/auth.js';
-import { createRequireAdmin } from '../middleware/admin.js';
+import BaseRouter from './BaseRouter.js';
 
 /**
  * Categories router for handling category endpoints
  */
-class CategoriesRouter {
+class CategoriesRouter extends BaseRouter {
   /**
    * @param {CategoriesManager} categoriesManager - Categories manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(categoriesManager, database) {
+    super(database, 'CategoriesRouter');
     this._categoriesManager = categoriesManager;
-    this._database = database;
-    this._requireAuth = createRequireAuth(database);
-    this._requireAdmin = createRequireAdmin(this._requireAuth);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * GET /api/iptv/providers/:provider_id/categories
      * Get categories for a specific IPTV provider
@@ -34,8 +27,7 @@ class CategoriesRouter {
         const result = await this._categoriesManager.getCategories(provider_id);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get provider categories error:', error);
-        return res.status(500).json({ error: 'Failed to get categories' });
+        return this.returnErrorResponse(res, 500, 'Failed to get categories', `Get provider categories error: ${error.message}`);
       }
     });
 
@@ -49,14 +41,13 @@ class CategoriesRouter {
         const categoryData = req.body;
 
         if (!categoryData || Object.keys(categoryData).length === 0) {
-          return res.status(400).json({ error: 'Request body is required' });
+          return this.returnErrorResponse(res, 400, 'Request body is required');
         }
 
         const result = await this._categoriesManager.updateCategory(provider_id, category_key, categoryData);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Update provider category error:', error);
-        return res.status(500).json({ error: 'Failed to update category' });
+        return this.returnErrorResponse(res, 500, 'Failed to update category', `Update provider category error: ${error.message}`);
       }
     });
   }

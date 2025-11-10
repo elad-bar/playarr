@@ -1,28 +1,23 @@
-import express from 'express';
+import BaseRouter from './BaseRouter.js';
 import { getTokenExpireDays } from '../utils/jwt.js';
-import { createRequireAuth } from '../middleware/auth.js';
 
 /**
  * Auth router for handling authentication endpoints
  */
-class AuthRouter {
+class AuthRouter extends BaseRouter {
   /**
    * @param {UserManager} userManager - User manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(userManager, database) {
+    super(database, 'AuthRouter');
     this._userManager = userManager;
-    this._database = database;
-    this._requireAuth = createRequireAuth(database);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * POST /api/auth/login
      * Authenticate user and set JWT cookie
@@ -32,7 +27,7 @@ class AuthRouter {
         const { username, password } = req.body;
 
         if (!username || !password) {
-          return res.status(400).json({ error: 'Username and password required' });
+          return this.returnErrorResponse(res, 400, 'Username and password required');
         }
 
         const result = await this._userManager.login(username, password);
@@ -52,8 +47,7 @@ class AuthRouter {
 
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Login error:', error);
-        return res.status(500).json({ error: 'Login failed' });
+        return this.returnErrorResponse(res, 500, 'Login failed', `Login error: ${error.message}`);
       }
     });
 
@@ -75,8 +69,7 @@ class AuthRouter {
 
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Logout error:', error);
-        return res.status(500).json({ error: 'Logout failed' });
+        return this.returnErrorResponse(res, 500, 'Logout failed', `Logout error: ${error.message}`);
       }
     });
 
@@ -92,8 +85,7 @@ class AuthRouter {
 
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Verify auth error:', error);
-        return res.status(500).json({ error: 'Verification failed' });
+        return this.returnErrorResponse(res, 500, 'Verification failed', `Verify auth error: ${error.message}`);
       }
     });
   }

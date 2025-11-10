@@ -1,182 +1,80 @@
-import dotenv from 'dotenv';
-import Bree from 'bree';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-import { createLogger } from './utils/logger.js';
-import { EngineServer } from './server.js';
-import MongoClientUtil from './utils/mongo-client.js';
-import { MongoDataService } from './services/MongoDataService.js';
-import { JobsManager } from './managers/JobsManager.js';
+import dotenv from "dotenv";
+import path from "path";
+import fsExtra from "fs-extra";
+import { fileURLToPath } from "url";
+import { createLogger } from "./utils/logger.js";
+import { EngineServer } from "./engineServer.js";
+import { ApplicationContext } from "./context/ApplicationContext.js";
+import { EngineScheduler } from "./EngineScheduler.js";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, '../cache');
-const logger = createLogger('Main');
+const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "../cache");
 
-// Load jobs configuration
-const jobsConfigPath = path.join(__dirname, 'jobs.json');
-const jobsConfig = JSON.parse(fs.readFileSync(jobsConfigPath, 'utf8'));
+// Rotate log file on startup - rename previous log to engine-previous.log
+const logsDir = process.env.LOGS_DIR || path.join(__dirname, "../logs");
+const engineLogPath = path.join(logsDir, "engine.log");
+const previousLogPath = path.join(logsDir, "engine-previous.log");
 
-// MongoDB connection for job validation
-let mongoClient = null;
-let mongoData = null;
-let jobsManager = null;
-
-/**
- * Initialize MongoDB connection for job history checks
- * @returns {Promise<void>}
- */
-async function initializeMongoDB() {
-  if (mongoClient && mongoClient.isConnected()) {
-    return; // Already connected
+if (fsExtra.existsSync(engineLogPath)) {
+  // Remove previous log if it exists (will be overwritten)
+  if (fsExtra.existsSync(previousLogPath)) {
+    fsExtra.removeSync(previousLogPath);
   }
-
-  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-  const dbName = process.env.MONGODB_DB_NAME || 'playarr';
-  
-  try {
-    mongoClient = new MongoClientUtil(mongoUri, dbName);
-    await mongoClient.connect();
-    mongoData = new MongoDataService(mongoClient);
-    logger.debug('MongoDB connection initialized for job validation');
-    
-    // Initialize JobsManager with MongoDB and jobs config
-    jobsManager = new JobsManager(mongoData, jobsConfig);
-  } catch (error) {
-    logger.error(`Failed to connect to MongoDB: ${error.message}`);
-    logger.warn('Job validation will not work without MongoDB connection');
-    throw error;
-  }
+  // Move current log to previous log
+  fsExtra.moveSync(engineLogPath, previousLogPath);
 }
+
+const logger = createLogger("Main");
 
 /**
  * Main application entry point
- * Uses Bree.js to schedule and run jobs automatically
+ * Initializes and runs both the job scheduler and HTTP server
  */
 async function main() {
-  logger.info('Starting Playarr Engine with Bree.js job scheduler...');
-
-  // Initialize MongoDB connection for job validation
-  await initializeMongoDB();
-
-  // Configure Bree.js jobs with schedules
-  const bree = new Bree({
-    root: path.join(__dirname, 'workers'),
-    defaultExtension: 'js',
-    jobs: jobsConfig.jobs.map(job => {
-      const jobConfig = {
-        name: job.name,
-        path: path.join(__dirname, 'workers', `${job.name}.js`),
-        interval: job.interval,
-        worker: {
-          workerData: {
-            cacheDir: CACHE_DIR
-          }
-        }
-      };
-      
-      // Only include timeout if it's a valid non-zero value
-      // Bree.js doesn't accept "0" as a timeout value
-      if (job.timeout && job.timeout !== '0' && job.timeout !== 0) {
-        jobConfig.timeout = job.timeout;
-      }
-      
-      return jobConfig;
-    })
-  });
-
-  // Override the run method to prevent any job from running if it's already running
-  // Uses MongoDB job_history as single source of truth
-  const originalRun = bree.run.bind(bree);
-  bree.run = async function(name) {
-    // Validate if job can run using JobsManager
-    const validation = await jobsManager.canRunJob(name);
-    
-    if (!validation.canRun) {
-      logger.debug(`Skipping ${name} - ${validation.reason}`);
-      return;
-    }
-    
-    try {
-      return await originalRun(name);
-    } catch (error) {
-      // If Bree throws "already running" error, ignore it (MongoDB is source of truth)
-      if (error.message && error.message.includes('already running')) {
-        logger.debug(`Skipping ${name} - Bree detected it is already running`);
-        return;
-      }
-      throw error;
-    }
-  };
-
-  bree.on('worker message', async (name, message) => {
-    if (message.success) {
-      logger.info(`Job ${name} completed successfully`);
-      if (name === 'processProvidersTitles' && Array.isArray(message.result)) {
-        logger.debug('=== Fetch Results ===');
-        message.result.forEach(result => {
-          if (result.error) {
-            logger.error(`${result.providerName}: ${result.error}`);
-          } else {
-            logger.info(`${result.providerName}: ${result.movies} movies, ${result.tvShows} TV shows`);
-          }
-        });
-      } else if (name === 'processMainTitles' && message.result) {
-        logger.debug('=== Process Results ===');
-        logger.info(`Generated: ${message.result.movies} movies, ${message.result.tvShows} TV shows`);
-      }
-    } else {
-      logger.error(`Job ${name} failed: ${message.error}`);
-    }
-  });
+  logger.info("Starting Playarr Engine...");
 
   try {
-    // Start Bree.js scheduler
-    await bree.start();
+    // Initialize ApplicationContext (MongoDB, Cache, TMDBProvider, IPTV Providers)
+    await ApplicationContext.initialize(CACHE_DIR);
+    const context = ApplicationContext.getInstance();
+    const mongoData = context.getMongoData();
 
-    logger.info('Job scheduler started. Jobs will run according to schedule.');
-    jobsConfig.jobs.forEach(job => {
-      logger.info(`- ${job.name}: ${job.schedule}`);
-    });
-    
+    // Create and initialize EngineScheduler
+    const engineScheduler = new EngineScheduler(mongoData);
+    await engineScheduler.initialize();
+
+    // Get JobsManager instance
+    const jobsManager = engineScheduler.getJobsManager();
+
     // Create and start HTTP server for job control API
-    let engineServer = null;
-    try {
-      engineServer = new EngineServer(bree, jobsManager);
-      await engineServer.start();
-      logger.info('Engine HTTP API server is ready');
-    } catch (serverError) {
-      logger.error('Server error details:', serverError);
-      process.exit(1);
-    }
-    
+    const engineServer = new EngineServer(engineScheduler, jobsManager);
+    await engineServer.start();
+    logger.info("Engine HTTP API server is ready");
+
     // Graceful shutdown handler
     const shutdown = async (signal) => {
       logger.info(`Received ${signal}, shutting down gracefully...`);
-      
+
       if (engineServer && engineServer._server) {
         engineServer._server.close(() => {
-          logger.info('HTTP server closed');
+          logger.info("HTTP server closed");
         });
       }
-      
-      await bree.stop();
-      logger.info('Job scheduler stopped');
+
+      await engineScheduler.stop();
       process.exit(0);
     };
-    
+
     // Keep the process running
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
   } catch (error) {
-    logger.error(`Error starting job scheduler: ${error.message}`);
+    logger.error(`Error starting engine: ${error.message}`);
     logger.error(error.stack);
-    await bree.stop();
     process.exit(1);
   }
 }

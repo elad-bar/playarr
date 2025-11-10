@@ -1,29 +1,22 @@
-import express from 'express';
-import { createRequireAuth } from '../middleware/auth.js';
-import { createRequireAdmin } from '../middleware/admin.js';
+import BaseRouter from './BaseRouter.js';
 
 /**
  * TMDB router for handling TMDB API endpoints
  */
-class TMDBRouter {
+class TMDBRouter extends BaseRouter {
   /**
    * @param {TMDBManager} tmdbManager - TMDB manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(tmdbManager, database) {
+    super(database, 'TMDBRouter');
     this._tmdbManager = tmdbManager;
-    this._database = database;
-    this._requireAuth = createRequireAuth(database);
-    this._requireAdmin = createRequireAdmin(this._requireAuth);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * GET /api/tmdb/api-key
      * Get the TMDB API key
@@ -33,8 +26,7 @@ class TMDBRouter {
         const result = await this._tmdbManager.getApiKey();
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get TMDB API key error:', error);
-        return res.status(500).json({ error: 'Failed to get TMDB API key' });
+        return this.returnErrorResponse(res, 500, 'Failed to get TMDB API key', `Get TMDB API key error: ${error.message}`);
       }
     });
 
@@ -47,14 +39,13 @@ class TMDBRouter {
         const { api_key } = req.body;
 
         if (!api_key) {
-          return res.status(400).json({ error: 'Missing api_key field' });
+          return this.returnErrorResponse(res, 400, 'Missing api_key field');
         }
 
         const result = await this._tmdbManager.setApiKey(api_key);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Set TMDB API key error:', error);
-        return res.status(500).json({ error: 'Failed to set TMDB API key' });
+        return this.returnErrorResponse(res, 500, 'Failed to set TMDB API key', `Set TMDB API key error: ${error.message}`);
       }
     });
 
@@ -73,8 +64,7 @@ class TMDBRouter {
         
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Delete TMDB API key error:', error);
-        return res.status(500).json({ error: 'Failed to delete TMDB API key' });
+        return this.returnErrorResponse(res, 500, 'Failed to delete TMDB API key', `Delete TMDB API key error: ${error.message}`);
       }
     });
 
@@ -96,7 +86,7 @@ class TMDBRouter {
         const result = await this._tmdbManager.verifyApiKey(api_key);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Verify TMDB API key error:', error);
+        this.logger.error('Verify TMDB API key error:', error);
         return res.status(500).json({ 
           valid: false, 
           message: `Error verifying API key: ${error.message}` 
@@ -113,14 +103,13 @@ class TMDBRouter {
         const { api_key } = req.body;
 
         if (!api_key) {
-          return res.status(400).json({ error: 'API key is required' });
+          return this.returnErrorResponse(res, 400, 'API key is required');
         }
 
         const result = await this._tmdbManager.getLists(api_key);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get TMDB lists error:', error);
-        return res.status(500).json({ error: 'Failed to get TMDB lists' });
+        return this.returnErrorResponse(res, 500, 'Failed to get TMDB lists', `Get TMDB lists error: ${error.message}`);
       }
     });
 
@@ -134,14 +123,13 @@ class TMDBRouter {
         const { api_key } = req.body;
 
         if (!api_key) {
-          return res.status(400).json({ error: 'API key is required' });
+          return this.returnErrorResponse(res, 400, 'API key is required');
         }
 
         const result = await this._tmdbManager.getListItems(api_key, list_id);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get TMDB list items error:', error);
-        return res.status(500).json({ error: 'Failed to get TMDB list items' });
+        return this.returnErrorResponse(res, 500, 'Failed to get TMDB list items', `Get TMDB list items error: ${error.message}`);
       }
     });
 
@@ -155,8 +143,7 @@ class TMDBRouter {
         const result = await this._tmdbManager.getMovieStream(tmdb_id);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get TMDB movie stream error:', error);
-        return res.status(500).json({ error: 'Failed to get TMDB movie stream' });
+        return this.returnErrorResponse(res, 500, 'Failed to get TMDB movie stream', `Get TMDB movie stream error: ${error.message}`);
       }
     });
   }

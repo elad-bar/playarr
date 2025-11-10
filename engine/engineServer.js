@@ -8,11 +8,11 @@ const logger = createLogger('EngineServer');
  */
 class EngineServer {
   /**
-   * @param {import('bree').default} bree - Bree instance for job control
+   * @param {import('./EngineScheduler.js').EngineScheduler} scheduler - Job scheduler instance
    * @param {import('./managers/JobsManager.js').JobsManager} jobsManager - Jobs manager for validation
    */
-  constructor(bree, jobsManager) {
-    this._bree = bree;
+  constructor(scheduler, jobsManager) {
+    this._scheduler = scheduler;
     this._jobsManager = jobsManager;
     this._app = null;
     this._server = null;
@@ -46,11 +46,13 @@ class EngineServer {
 
     /**
      * POST /api/jobs/:jobName/trigger
-     * Triggers a job manually via bree.run()
+     * Triggers a job manually via scheduler.runJob()
+     * Body parameter: { providerId: "provider-id" } to process all titles for a specific provider
      */
     this._app.post('/api/jobs/:jobName/trigger', async (req, res) => {
       try {
         const { jobName } = req.params;
+        const providerId = req.body?.providerId || req.query?.providerId || null;
 
         // Validate job name
         const jobConfig = this._jobsManager.getJobMetadata(jobName);
@@ -58,7 +60,7 @@ class EngineServer {
           return res.status(404).json({ error: `Job '${jobName}' not found` });
         }
 
-        logger.info(`Manual trigger requested for job: ${jobName}`);
+        logger.info(`Manual trigger requested for job: ${jobName}${providerId ? ` (providerId: ${providerId})` : ''}`);
 
         // Validate if job can run using JobsManager
         const validation = await this._jobsManager.canRunJob(jobName);
@@ -73,18 +75,28 @@ class EngineServer {
           });
         }
 
-        // Trigger the job
+        // Trigger the job with optional providerId parameter
         try {
-          await this._bree.run(jobName);
-          logger.info(`Job '${jobName}' triggered successfully`);
+          // Pass providerId in workerData if provided (for any job)
+          const workerData = providerId 
+            ? { providerId }
+            : undefined;
+          
+          await this._scheduler.runJob(jobName, workerData);
+          logger.info(`Job '${jobName}' triggered successfully${providerId ? ` for provider ${providerId}` : ''}`);
           res.json({ 
             success: true, 
             message: `Job '${jobName}' triggered successfully`,
-            jobName 
+            jobName,
+            ...(providerId ? { providerId } : {})
           });
         } catch (error) {
-          // Handle "already running" error from Bree (fallback)
-          if (error.message && error.message.includes('already running')) {
+          // Handle "already running" error (fallback for race conditions)
+          // Check for both the custom error code and the error message
+          if (error.code === 'JOB_ALREADY_RUNNING' || 
+              error.isAlreadyRunning || 
+              (error.message && error.message.includes('already running'))) {
+            logger.debug(`Job '${jobName}' is already running`);
             return res.status(409).json({ 
               error: `Job '${jobName}' is already running`,
               status: 'running'
@@ -93,6 +105,25 @@ class EngineServer {
           throw error;
         }
       } catch (error) {
+        // Handle "already running" errors that might have slipped through
+        if (error.code === 'JOB_ALREADY_RUNNING' || 
+            error.isAlreadyRunning || 
+            (error.message && error.message.includes('already running'))) {
+          logger.debug(`Job '${jobName}' is already running`);
+          return res.status(409).json({ 
+            error: `Job '${jobName}' is already running`,
+            status: 'running'
+          });
+        }
+        // Handle "cannot run" errors (blocked by other jobs)
+        if (error.code === 'JOB_CANNOT_RUN') {
+          return res.status(409).json({ 
+            error: error.message,
+            status: 'blocked',
+            blockingJobs: error.blockingJobs || []
+          });
+        }
+        // Log and return 500 for unexpected errors
         logger.error(`Error triggering job '${req.params.jobName}':`, error);
         res.status(500).json({ 
           error: `Failed to trigger job: ${error.message}` 

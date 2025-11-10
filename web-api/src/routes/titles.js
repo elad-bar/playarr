@@ -1,27 +1,22 @@
-import express from 'express';
-import { createRequireAuth } from '../middleware/auth.js';
+import BaseRouter from './BaseRouter.js';
 
 /**
  * Titles router for handling titles endpoints
  */
-class TitlesRouter {
+class TitlesRouter extends BaseRouter {
   /**
    * @param {TitlesManager} titlesManager - Titles manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(titlesManager, database) {
+    super(database, 'TitlesRouter');
     this._titlesManager = titlesManager;
-    this._database = database;
-    this._requireAuth = createRequireAuth(database);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * GET /api/titles
      * Get paginated list of titles with filtering
@@ -51,8 +46,7 @@ class TitlesRouter {
 
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get titles error:', error);
-        return res.status(500).json({ error: 'Failed to get titles' });
+        return this.returnErrorResponse(res, 500, 'Failed to get titles', `Get titles error: ${error.message}`);
       }
     });
 
@@ -66,8 +60,7 @@ class TitlesRouter {
         const result = await this._titlesManager.getTitleDetails(title_key, req.user);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get title details error:', error);
-        return res.status(500).json({ error: 'Failed to get title details' });
+        return this.returnErrorResponse(res, 500, 'Failed to get title details', `Get title details error: ${error.message}`);
       }
     });
 
@@ -81,14 +74,13 @@ class TitlesRouter {
         const { watchlist } = req.body;
 
         if (typeof watchlist !== 'boolean') {
-          return res.status(400).json({ error: 'watchlist must be a boolean' });
+          return this.returnErrorResponse(res, 400, 'watchlist must be a boolean');
         }
 
         const result = await this._titlesManager.updateWatchlist(req.user, title_key, watchlist);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Update watchlist error:', error);
-        return res.status(500).json({ error: 'Failed to update watchlist' });
+        return this.returnErrorResponse(res, 500, 'Failed to update watchlist', `Update watchlist error: ${error.message}`);
       }
     });
 
@@ -101,23 +93,20 @@ class TitlesRouter {
         const { titles } = req.body;
 
         if (!Array.isArray(titles)) {
-          return res.status(400).json({ error: 'titles must be an array' });
+          return this.returnErrorResponse(res, 400, 'titles must be an array');
         }
 
         // Validate each title object
         for (const title of titles) {
           if (!title.key || typeof title.watchlist !== 'boolean') {
-            return res.status(400).json({ 
-              error: 'Each title must have "key" (string) and "watchlist" (boolean) fields' 
-            });
+            return this.returnErrorResponse(res, 400, 'Each title must have "key" (string) and "watchlist" (boolean) fields');
           }
         }
 
         const result = await this._titlesManager.updateWatchlistBulk(req.user, titles);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Bulk update watchlist error:', error);
-        return res.status(500).json({ error: 'Failed to update watchlist' });
+        return this.returnErrorResponse(res, 500, 'Failed to update watchlist', `Bulk update watchlist error: ${error.message}`);
       }
     });
   }

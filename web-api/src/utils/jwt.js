@@ -1,7 +1,10 @@
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
+import { createLogger } from './logger.js';
 
 dotenv.config();
+
+const logger = createLogger('JWT');
 
 const JWT_SECRET = process.env.JWT_SECRET_KEY;
 const TOKEN_EXPIRE_DAYS = parseInt(process.env.ACCESS_TOKEN_EXPIRE_DAYS || '7', 10);
@@ -56,7 +59,7 @@ export function verifyJWTToken(token) {
       return null;
     }
     // Other errors
-    console.error('JWT verification error:', error);
+    logger.error('JWT verification error:', error);
     return null;
   }
 }

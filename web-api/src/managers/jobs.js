@@ -1,18 +1,16 @@
-import { createLogger } from '../utils/logger.js';
+import { BaseManager } from './BaseManager.js';
 import axios from 'axios';
-
-const logger = createLogger('JobsManager');
 
 /**
  * Jobs manager for managing engine jobs
  * Reads job history from MongoDB and triggers jobs via engine HTTP API
  */
-class JobsManager {
+class JobsManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    */
   constructor(database) {
-    this._database = database;
+    super('JobsManager', database);
     
     // Engine API configuration - static localhost port, no API key needed
     // Engine is always on localhost:3002 in Docker, not configurable
@@ -30,7 +28,7 @@ class JobsManager {
       const jobHistory = await collection.findOne({ job_name: jobName });
       return jobHistory;
     } catch (error) {
-      logger.error(`Error getting job history for ${jobName}:`, error);
+      this.logger.error(`Error getting job history for ${jobName}:`, error);
       return null;
     }
   }
@@ -91,7 +89,7 @@ class JobsManager {
         });
         engineJobs = response.data.jobs || [];
       } catch (error) {
-        logger.error('Error fetching jobs from engine API, error:', error);
+        this.logger.error('Error fetching jobs from engine API, error:', error);
         // Return jobs with "engine unreachable" status
         return {
           response: {
@@ -120,7 +118,7 @@ class JobsManager {
         statusCode: 200
       };
     } catch (error) {
-      logger.error('Error getting all jobs:', error);
+      this.logger.error('Error getting all jobs:', error);
       return {
         response: { error: 'Failed to get jobs' },
         statusCode: 500
@@ -131,14 +129,17 @@ class JobsManager {
   /**
    * Trigger a job via engine API
    * @param {string} jobName - Job name (e.g., "processProvidersTitles")
+   * @param {Object} [options] - Optional parameters
+   * @param {string} [options.providerId] - Provider ID to process all titles for (for processMainTitles)
    * @returns {Promise<{response: object, statusCode: number}>}
    */
-  async triggerJob(jobName) {
+  async triggerJob(jobName, options = {}) {
     try {
+      const { providerId } = options;
       const engineApiUrl = `${this._engineApiUrl}/api/jobs/${jobName}/trigger`;
 
       try {
-        const response = await axios.post(engineApiUrl, {}, { 
+        const response = await axios.post(engineApiUrl, { providerId: providerId || null }, { 
           timeout: 10000 
         });
         
@@ -146,7 +147,8 @@ class JobsManager {
           response: {
             success: true,
             message: response.data.message || `Job '${jobName}' triggered successfully`,
-            jobName: response.data.jobName || jobName
+            jobName: response.data.jobName || jobName,
+            ...(response.data.providerId ? { providerId: response.data.providerId } : {})
           },
           statusCode: 200
         };
@@ -179,7 +181,7 @@ class JobsManager {
         }
         
         // Network or other errors
-        logger.error(`Error triggering job ${jobName}:`, error.message);
+        this.logger.error(`Error triggering job ${jobName}:`, error.message);
         return {
           response: {
             success: false,
@@ -190,7 +192,7 @@ class JobsManager {
         };
       }
     } catch (error) {
-      logger.error(`Error triggering job ${jobName}:`, error);
+      this.logger.error(`Error triggering job ${jobName}:`, error);
       return {
         response: { 
           success: false,

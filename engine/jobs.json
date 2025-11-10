@@ -4,26 +4,24 @@
       "name": "processProvidersTitles",
       "jobHistoryName": "ProcessProvidersTitlesJob",
       "interval": "1h",
-      "timeout": "10s",
-      "description": "Fetch metadata from IPTV providers",
-      "schedule": "Every 1 hour"
+      "timeout": "1s",
+      "description": "Fetch metadata from IPTV providers and match TMDB IDs",
+      "schedule": "Every 1 hour",
+      "postExecute": ["processMainTitles"]
     },
     {
       "name": "processMainTitles",
       "jobHistoryName": "ProcessMainTitlesJob",
-      "interval": "5m",
-      "timeout": "1m",
-      "description": "Match TMDB IDs and generate main titles",
-      "schedule": "Every 5 minutes",
+      "description": "Generate main titles from provider titles",
+      "schedule": "Manual trigger only",
       "skipIfOtherInProgress": ["processProvidersTitles"]
     },
     {
       "name": "purgeProviderCache",
       "jobHistoryName": "PurgeProviderCacheJob",
-      "interval": "6h",
-      "timeout": "1h",
       "description": "Purge cache for deleted providers",
-      "schedule": "Every 6 hours"
+      "schedule": "Manual trigger only",
+      "postExecute": ["processMainTitles"]
     }
   ]
 }

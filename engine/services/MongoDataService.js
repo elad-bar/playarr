@@ -590,6 +590,28 @@ export class MongoDataService {
   }
 
   /**
+   * Reset all in-progress jobs to cancelled status
+   * Called on engine startup to handle jobs that were interrupted by a crash/restart
+   * @returns {Promise<number>} Number of jobs reset
+   */
+  async resetInProgressJobs() {
+    const collection = this.db.collection('job_history');
+    const now = new Date();
+    
+    const result = await collection.updateMany(
+      { status: 'running' },
+      {
+        $set: {
+          status: 'cancelled',
+          lastUpdated: now
+        }
+      }
+    );
+    
+    return result.modifiedCount;
+  }
+
+  /**
    * Update job history in MongoDB
    * @param {string} jobName - Job name (e.g., "ProcessProvidersTitlesJob")
    * @param {Object} result - Execution result object

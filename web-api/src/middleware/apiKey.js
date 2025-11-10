@@ -1,4 +1,7 @@
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('ApiKeyMiddleware');
 
 /**
  * Create middleware to require API key authentication (for streaming/playlist endpoints)
@@ -41,7 +44,7 @@ export function createRequireApiKey(database) {
 
       next();
     } catch (error) {
-      console.error('API key middleware error:', error);
+      logger.error('API key middleware error:', error);
       return res.status(401).json({ error: 'API key verification failed' });
     }
   };

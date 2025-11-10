@@ -1,5 +1,8 @@
 import { verifyJWTToken } from '../utils/jwt.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('AuthMiddleware');
 
 /**
  * Create middleware to require JWT authentication via httpOnly cookie
@@ -49,7 +52,7 @@ export function createRequireAuth(database) {
 
       next();
     } catch (error) {
-      console.error('Auth middleware error:', error);
+      logger.error('Auth middleware error:', error);
       return res.status(401).json({ error: 'Authentication failed' });
     }
   };

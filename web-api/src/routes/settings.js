@@ -1,5 +1,4 @@
-import express from 'express';
-import { createRequireAuth } from '../middleware/auth.js';
+import BaseRouter from './BaseRouter.js';
 
 // TMDB token key constant matching Python
 const TMDB_TOKEN_KEY = 'tmdb_token';
@@ -7,24 +6,20 @@ const TMDB_TOKEN_KEY = 'tmdb_token';
 /**
  * Settings router for handling settings endpoints
  */
-class SettingsRouter {
+class SettingsRouter extends BaseRouter {
   /**
    * @param {SettingsManager} settingsManager - Settings manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(settingsManager, database) {
+    super(database, 'SettingsRouter');
     this._settingsManager = settingsManager;
-    this._database = database;
-    this._requireAuth = createRequireAuth(database);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * GET /api/settings/tmdb_token
      * Get TMDB token setting
@@ -34,8 +29,7 @@ class SettingsRouter {
         const result = await this._settingsManager.getSetting(TMDB_TOKEN_KEY);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get TMDB token error:', error);
-        return res.status(500).json({ error: 'Failed to get TMDB token' });
+        return this.returnErrorResponse(res, 500, 'Failed to get TMDB token', `Get TMDB token error: ${error.message}`);
       }
     });
 
@@ -48,14 +42,13 @@ class SettingsRouter {
         const { value } = req.body;
 
         if (value === undefined) {
-          return res.status(400).json({ error: 'value is required' });
+          return this.returnErrorResponse(res, 400, 'value is required');
         }
 
         const result = await this._settingsManager.setSetting(TMDB_TOKEN_KEY, value);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Set TMDB token error:', error);
-        return res.status(500).json({ error: 'Failed to set TMDB token' });
+        return this.returnErrorResponse(res, 500, 'Failed to set TMDB token', `Set TMDB token error: ${error.message}`);
       }
     });
 
@@ -68,8 +61,7 @@ class SettingsRouter {
         const result = await this._settingsManager.deleteSetting(TMDB_TOKEN_KEY);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Delete TMDB token error:', error);
-        return res.status(500).json({ error: 'Failed to delete TMDB token' });
+        return this.returnErrorResponse(res, 500, 'Failed to delete TMDB token', `Delete TMDB token error: ${error.message}`);
       }
     });
   }

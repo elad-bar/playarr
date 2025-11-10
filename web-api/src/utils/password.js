@@ -1,5 +1,8 @@
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
+import { createLogger } from './logger.js';
+
+const logger = createLogger('Password');
 
 /**
  * Hash a password using SHA-256 pre-hash + bcrypt
@@ -47,7 +50,7 @@ export async function verifyPassword(plainPassword, hashedPassword) {
     
     return result;
   } catch (error) {
-    console.error('Error verifying password:', error);
+    logger.error('Error verifying password:', error);
     return false;
   }
 }

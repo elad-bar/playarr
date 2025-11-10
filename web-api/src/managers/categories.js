@@ -1,20 +1,18 @@
+import { BaseManager } from './BaseManager.js';
 import { DatabaseCollections, toCollectionName, getCollectionKey } from '../config/collections.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('CategoriesManager');
 
 /**
  * Categories manager for handling IPTV provider categories
  * Matches Python's CategoriesService
  * Uses DatabaseService collection-based methods for all data access
  */
-class CategoriesManager {
+class CategoriesManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    * @param {import('./providers.js').ProvidersManager} providersManager - Providers manager instance
    */
   constructor(database, providersManager) {
-    this._database = database;
+    super('CategoriesManager', database);
     this._providersManager = providersManager;
   }
 
@@ -26,7 +24,7 @@ class CategoriesManager {
       const result = await this._providersManager.getProvider(providerId);
       return result.statusCode === 200 ? result.response : null;
     } catch (error) {
-      logger.error(`Error getting provider ${providerId}:`, error);
+      this.logger.error(`Error getting provider ${providerId}:`, error);
       return null;
     }
   }
@@ -88,7 +86,7 @@ class CategoriesManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error getting categories:', error);
+      this.logger.error('Error getting categories:', error);
       return {
         response: { error: 'Failed to get categories' },
         statusCode: 500,
@@ -209,7 +207,7 @@ class CategoriesManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error updating category:', error);
+      this.logger.error('Error updating category:', error);
       return {
         response: { error: 'Failed to update category' },
         statusCode: 500,

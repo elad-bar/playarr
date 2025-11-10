@@ -1,29 +1,22 @@
-import express from 'express';
-import { createRequireAuth } from '../middleware/auth.js';
-import { createRequireAdmin } from '../middleware/admin.js';
+import BaseRouter from './BaseRouter.js';
 
 /**
  * Users router for handling user management endpoints
  */
-class UsersRouter {
+class UsersRouter extends BaseRouter {
   /**
    * @param {UserManager} userManager - User manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(userManager, database) {
+    super(database, 'UsersRouter');
     this._userManager = userManager;
-    this._database = database;
-    this._requireAuth = createRequireAuth(database);
-    this._requireAdmin = createRequireAdmin(this._requireAuth);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * GET /api/users
      * List all users (admin only)
@@ -33,8 +26,7 @@ class UsersRouter {
         const result = await this._userManager.getAllUsers();
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get all users error:', error);
-        return res.status(500).json({ error: 'Failed to get users' });
+        return this.returnErrorResponse(res, 500, 'Failed to get users', `Get all users error: ${error.message}`);
       }
     });
 
@@ -47,9 +39,7 @@ class UsersRouter {
         const { username, first_name, last_name, password, role } = req.body;
 
         if (!username || !first_name || !last_name || !password) {
-          return res.status(400).json({
-            error: 'Username, first_name, last_name, and password are required',
-          });
+          return this.returnErrorResponse(res, 400, 'Username, first_name, last_name, and password are required');
         }
 
         const result = await this._userManager.createUserWithResponse(
@@ -62,8 +52,7 @@ class UsersRouter {
 
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Create user error:', error);
-        return res.status(500).json({ error: 'Failed to create user' });
+        return this.returnErrorResponse(res, 500, 'Failed to create user', `Create user error: ${error.message}`);
       }
     });
 
@@ -77,8 +66,7 @@ class UsersRouter {
         const result = await this._userManager.getUser(username);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get user error:', error);
-        return res.status(500).json({ error: 'Failed to get user' });
+        return this.returnErrorResponse(res, 500, 'Failed to get user', `Get user error: ${error.message}`);
       }
     });
 
@@ -100,8 +88,7 @@ class UsersRouter {
         const result = await this._userManager.updateUser(username, updates);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Update user error:', error);
-        return res.status(500).json({ error: 'Failed to update user' });
+        return this.returnErrorResponse(res, 500, 'Failed to update user', `Update user error: ${error.message}`);
       }
     });
 
@@ -115,8 +102,7 @@ class UsersRouter {
         const result = await this._userManager.deleteUser(username);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Delete user error:', error);
-        return res.status(500).json({ error: 'Failed to delete user' });
+        return this.returnErrorResponse(res, 500, 'Failed to delete user', `Delete user error: ${error.message}`);
       }
     });
 
@@ -130,14 +116,13 @@ class UsersRouter {
         const { password } = req.body;
 
         if (!password) {
-          return res.status(400).json({ error: 'Password is required' });
+          return this.returnErrorResponse(res, 400, 'Password is required');
         }
 
         const result = await this._userManager.resetPassword(username, password);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Reset password error:', error);
-        return res.status(500).json({ error: 'Failed to reset password' });
+        return this.returnErrorResponse(res, 500, 'Failed to reset password', `Reset password error: ${error.message}`);
       }
     });
   }

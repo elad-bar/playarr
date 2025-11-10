@@ -1,6 +1,4 @@
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('TMDBManager');
+import { BaseManager } from './BaseManager.js';
 
 const TMDB_API_URL = 'https://api.themoviedb.org/3';
 const TMDB_AUTH_URL = `${TMDB_API_URL}/authentication`;
@@ -11,11 +9,13 @@ const API_REQUEST_TIMEOUT = 5000; // 5 seconds
  * TMDB manager for handling TMDB API operations
  * Matches Python's TMDB services
  */
-class TMDBManager {
+class TMDBManager extends BaseManager {
   /**
+   * @param {import('../services/database.js').DatabaseService} database - Database service instance
    * @param {import('./settings.js').SettingsManager} settingsManager - Settings manager instance
    */
-  constructor(settingsManager) {
+  constructor(database, settingsManager) {
+    super('TMDBManager', database);
     this._settingsManager = settingsManager;
     this._tmdbTokenKey = TMDB_TOKEN_KEY;
   }
@@ -40,7 +40,7 @@ class TMDBManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error getting TMDB API key:', error);
+      this.logger.error('Error getting TMDB API key:', error);
       return {
         response: { error: 'Failed to get TMDB API key' },
         statusCode: 500,
@@ -65,7 +65,7 @@ class TMDBManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error setting TMDB API key:', error);
+      this.logger.error('Error setting TMDB API key:', error);
       return {
         response: { error: 'Failed to set TMDB API key' },
         statusCode: 500,
@@ -90,7 +90,7 @@ class TMDBManager {
         statusCode: 204,
       };
     } catch (error) {
-      logger.error('Error deleting TMDB API key:', error);
+      this.logger.error('Error deleting TMDB API key:', error);
       return {
         response: { error: 'Failed to delete TMDB API key' },
         statusCode: 500,
@@ -167,7 +167,7 @@ class TMDBManager {
         throw fetchError;
       }
     } catch (error) {
-      console.error('Error verifying TMDB API key:', error);
+      this.logger.error('Error verifying TMDB API key:', error);
       return {
         response: {
           valid: false,
@@ -235,7 +235,7 @@ class TMDBManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error fetching TMDB lists:', error);
+      this.logger.error('Error fetching TMDB lists:', error);
       return {
         response: { error: `Failed to fetch TMDB lists: ${error.message}` },
         statusCode: 500,
@@ -310,7 +310,7 @@ class TMDBManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error fetching TMDB list items:', error);
+      this.logger.error('Error fetching TMDB list items:', error);
       return {
         response: { error: `Failed to fetch TMDB list items: ${error.message}` },
         statusCode: 500,
@@ -327,7 +327,7 @@ class TMDBManager {
       // TODO: Implement actual title existence check
       return false;
     } catch (error) {
-      logger.error('Error checking title existence:', error);
+      this.logger.error('Error checking title existence:', error);
       return false;
     }
   }
@@ -341,7 +341,7 @@ class TMDBManager {
       // TODO: Implement actual watchlist status check
       return false;
     } catch (error) {
-      logger.error('Error checking watchlist status:', error);
+      this.logger.error('Error checking watchlist status:', error);
       return false;
     }
   }
@@ -390,7 +390,7 @@ class TMDBManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error getting TMDB movie stream:', error);
+      this.logger.error('Error getting TMDB movie stream:', error);
       return {
         response: { error: `Failed to get TMDB movie stream: ${error.message}` },
         statusCode: 500,

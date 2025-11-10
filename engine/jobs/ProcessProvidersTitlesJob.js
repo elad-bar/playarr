@@ -2,7 +2,8 @@ import { BaseJob } from './BaseJob.js';
 
 /**
  * Job for processing provider titles (fetching metadata from IPTV providers)
- * Handles fetching categories and metadata from all configured IPTV providers
+ * Handles fetching categories and metadata from all configured IPTV providers,
+ * and matching TMDB IDs for provider titles
  * @extends {BaseJob}
  */
 export class ProcessProvidersTitlesJob extends BaseJob {
@@ -41,10 +42,10 @@ export class ProcessProvidersTitlesJob extends BaseJob {
       await this.mongoData.updateJobStatus(jobName, 'running');
 
       // Load provider titles incrementally (only updated since last execution)
+      // Include ignored titles for proper comparison and filtering
       for (const [providerId, providerInstance] of this.providers) {
         try {
-          await providerInstance.loadProviderTitles(lastExecution);
-          await providerInstance.loadIgnoredTitlesFromMongoDB();
+          await providerInstance.loadProviderTitles(lastExecution, true);
         } catch (error) {
           this.logger.warn(`[${providerId}] Error loading titles from MongoDB: ${error.message}`);
         }

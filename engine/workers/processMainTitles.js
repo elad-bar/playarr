@@ -1,42 +1,27 @@
-import { parentPort, workerData } from 'worker_threads';
-import { ProviderInitializer } from '../utils/ProviderInitializer.js';
+import { ApplicationContext } from '../context/ApplicationContext.js';
 import { ProcessMainTitlesJob } from '../jobs/ProcessMainTitlesJob.js';
 
 /**
  * Bree.js worker file for processing main titles
- * This file is executed by Bree.js as a separate worker thread
+ * Runs in main thread (worker: false) to access shared ApplicationContext
  * 
- * Uses ProviderInitializer singleton to prevent redundant initialization
- * within the same worker thread context
+ * @param {Object} [params={}] - Optional parameters (workerData equivalent)
+ * @returns {Promise<Object>} Count of generated main titles by type
  */
-async function processMainTitlesWorker() {
-  const cacheDir = workerData.cacheDir;
-
-  // Initialize providers once (singleton pattern)
-  await ProviderInitializer.initialize(cacheDir);
+export default async function(params = {}) {
+  const context = ApplicationContext.getInstance();
   
-  // Get initialized providers
-  const cache = ProviderInitializer.getCache();
-  const mongoData = ProviderInitializer.getMongoData();
-  const providers = ProviderInitializer.getProviders();
-  const tmdbProvider = ProviderInitializer.getTMDBProvider();
+  // Get providerId from params
+  const providerId = params?.providerId || null; // Optional provider ID
+
+  // Get initialized dependencies from context
+  const cache = context.getCache();
+  const mongoData = context.getMongoData();
+  const providers = context.getProviders();
+  const tmdbProvider = context.getTMDBProvider();
 
   const job = new ProcessMainTitlesJob(cache, mongoData, providers, tmdbProvider);
-  const results = await job.execute();
+  const results = await job.execute(providerId);
 
   return results;
 }
-
-// Execute worker and send result back to parent
-processMainTitlesWorker()
-  .then(result => {
-    if (parentPort) {
-      parentPort.postMessage({ success: true, result });
-    }
-  })
-  .catch(error => {
-    if (parentPort) {
-      parentPort.postMessage({ success: false, error: error.message, stack: error.stack });
-    }
-  });
-

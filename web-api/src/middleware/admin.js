@@ -1,3 +1,7 @@
+import { createLogger } from '../utils/logger.js';
+
+const logger = createLogger('AdminMiddleware');
+
 /**
  * Create middleware to require admin role (requires JWT authentication)
  * Matches Python's require_admin decorator
@@ -19,7 +23,7 @@ export function createRequireAdmin(requireAuth) {
 
         next();
       } catch (error) {
-        console.error('Admin middleware error:', error);
+        logger.error('Admin middleware error:', error);
         return res.status(403).json({ error: 'Admin verification failed' });
       }
     });

@@ -1,27 +1,22 @@
-import express from 'express';
-import { createRequireAuth } from '../middleware/auth.js';
+import BaseRouter from './BaseRouter.js';
 
 /**
  * Profile router for handling user profile endpoints
  */
-class ProfileRouter {
+class ProfileRouter extends BaseRouter {
   /**
    * @param {UserManager} userManager - User manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(userManager, database) {
+    super(database, 'ProfileRouter');
     this._userManager = userManager;
-    this._database = database;
-    this._requireAuth = createRequireAuth(database);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * GET /api/profile
      * Get current user's profile
@@ -32,8 +27,7 @@ class ProfileRouter {
         const result = await this._userManager.getProfile(username);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Get profile error:', error);
-        return res.status(500).json({ error: 'Failed to get profile' });
+        return this.returnErrorResponse(res, 500, 'Failed to get profile', `Get profile error: ${error.message}`);
       }
     });
 
@@ -53,8 +47,7 @@ class ProfileRouter {
         const result = await this._userManager.updateProfile(username, updates);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Update profile error:', error);
-        return res.status(500).json({ error: 'Failed to update profile' });
+        return this.returnErrorResponse(res, 500, 'Failed to update profile', `Update profile error: ${error.message}`);
       }
     });
 
@@ -68,8 +61,7 @@ class ProfileRouter {
         const result = await this._userManager.regenerateApiKey(username);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Regenerate API key error:', error);
-        return res.status(500).json({ error: 'Failed to regenerate API key' });
+        return this.returnErrorResponse(res, 500, 'Failed to regenerate API key', `Regenerate API key error: ${error.message}`);
       }
     });
 
@@ -83,14 +75,13 @@ class ProfileRouter {
         const { current_password, new_password } = req.body;
 
         if (!current_password || !new_password) {
-          return res.status(400).json({ error: 'Current password and new password are required' });
+          return this.returnErrorResponse(res, 400, 'Current password and new password are required');
         }
 
         const result = await this._userManager.changePassword(username, current_password, new_password);
         return res.status(result.statusCode).json(result.response);
       } catch (error) {
-        console.error('Change password error:', error);
-        return res.status(500).json({ error: 'Failed to change password' });
+        return this.returnErrorResponse(res, 500, 'Failed to change password', `Change password error: ${error.message}`);
       }
     });
   }

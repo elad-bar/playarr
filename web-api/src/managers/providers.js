@@ -1,27 +1,28 @@
+import { BaseManager } from './BaseManager.js';
 import { DatabaseCollections, DataProvider } from '../config/collections.js';
 import { toCollectionName } from '../config/collections.js';
-import { createLogger } from '../utils/logger.js';
 import slugify from 'slugify';
 import dotenv from 'dotenv';
+import { JobsManager } from './jobs.js';
 
 dotenv.config();
-
-const logger = createLogger('ProvidersManager');
 
 /**
  * Providers manager for handling IPTV provider operations
  * Uses DatabaseService collection-based methods for all data access
  */
-class ProvidersManager {
+class ProvidersManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    * @param {import('../services/websocket.js').WebSocketService} webSocketService - WebSocket service instance
    * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
+   * @param {import('./jobs.js').JobsManager} jobsManager - Jobs manager instance
    */
-  constructor(database, webSocketService, titlesManager) {
-    this._database = database;
+  constructor(database, webSocketService, titlesManager, jobsManager) {
+    super('ProvidersManager', database);
     this._webSocketService = webSocketService;
     this._titlesManager = titlesManager;
+    this._jobsManager = jobsManager;
     this._providersCollection = toCollectionName(DatabaseCollections.IPTV_PROVIDERS);
   }
 
@@ -83,7 +84,7 @@ class ProvidersManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error(`Error getting ignored titles for provider ${providerId}:`, error);
+      this.logger.error(`Error getting ignored titles for provider ${providerId}:`, error);
       return {
         response: { error: 'Failed to get ignored titles' },
         statusCode: 500,
@@ -120,7 +121,7 @@ class ProvidersManager {
       const providers = await this._database.getDataList(this._providersCollection);
       return Array.isArray(providers) ? providers : [];
     } catch (error) {
-      logger.error('Error reading providers:', error);
+      this.logger.error('Error reading providers:', error);
       return [];
     }
   }
@@ -148,9 +149,9 @@ class ProvidersManager {
         await collection.insertMany(providersWithTimestamps);
       }
       
-      logger.info(`Saved ${providers.length} providers to MongoDB`);
+      this.logger.info(`Saved ${providers.length} providers to MongoDB`);
     } catch (error) {
-      logger.error('Error writing providers to MongoDB:', error);
+      this.logger.error('Error writing providers to MongoDB:', error);
       throw error;
     }
   }
@@ -167,7 +168,7 @@ class ProvidersManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error getting providers:', error);
+      this.logger.error('Error getting providers:', error);
       return {
         response: { error: 'Failed to get providers', providers: [] },
         statusCode: 500,
@@ -195,7 +196,7 @@ class ProvidersManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error getting provider:', error);
+      this.logger.error('Error getting provider:', error);
       return {
         response: { error: 'Failed to get provider' },
         statusCode: 500,
@@ -271,7 +272,7 @@ class ProvidersManager {
         statusCode: 201,
       };
     } catch (error) {
-      logger.error('Error creating provider:', error);
+      this.logger.error('Error creating provider:', error);
       return {
         response: { error: 'Failed to create provider' },
         statusCode: 500,
@@ -315,7 +316,16 @@ class ProvidersManager {
           // Do NOT delete provider_titles (only on delete, not disable)
         } catch (error) {
           // Log error but don't fail the provider update
-          logger.error(`Error cleaning up provider ${providerId}: ${error.message}`);
+          this.logger.error(`Error cleaning up provider ${providerId}: ${error.message}`);
+        }
+
+        // Trigger processMainTitles with providerId when provider is disabled
+        try {
+          this.logger.info(`Provider ${providerId} disabled. Triggering processMainTitles for provider ${providerId}...`);
+          await this._jobsManager.triggerJob('processMainTitles', { providerId });
+        } catch (error) {
+          this.logger.error(`Failed to trigger processMainTitles: ${error.message}`);
+          // Don't fail the provider update if triggering fails
         }
       }
 
@@ -346,7 +356,7 @@ class ProvidersManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error updating provider:', error);
+      this.logger.error('Error updating provider:', error);
       return {
         response: { error: 'Failed to update provider' },
         statusCode: 500,
@@ -384,7 +394,7 @@ class ProvidersManager {
         await this._database.deleteProviderTitles(providerId);
       } catch (error) {
         // Log error but don't fail the provider deletion
-        logger.error(`Error cleaning up provider ${providerId}: ${error.message}`);
+        this.logger.error(`Error cleaning up provider ${providerId}: ${error.message}`);
       }
 
       // Set deleted: true and update lastUpdated timestamp
@@ -403,12 +413,22 @@ class ProvidersManager {
         action: 'deleted'
       });
 
+      // Trigger purgeProviderCache with providerId
+      // The postExecute will automatically trigger processMainTitles
+      try {
+        this.logger.info(`Provider ${providerId} deleted. Triggering purgeProviderCache (provider: ${providerId})...`);
+        await this._jobsManager.triggerJob('purgeProviderCache', { providerId });
+      } catch (error) {
+        this.logger.error(`Failed to trigger purgeProviderCache after provider deletion: ${error.message}`);
+        // Don't fail the provider deletion if triggering fails
+      }
+
       return {
         response: {},
         statusCode: 204,
       };
     } catch (error) {
-      logger.error('Error deleting provider:', error);
+      this.logger.error('Error deleting provider:', error);
       return {
         response: { error: 'Failed to delete provider' },
         statusCode: 500,
@@ -423,7 +443,7 @@ class ProvidersManager {
     try {
       return await this.getProviders();
     } catch (error) {
-      logger.error('Error getting provider priorities:', error);
+      this.logger.error('Error getting provider priorities:', error);
       return {
         response: { error: 'Failed to get provider priorities' },
         statusCode: 500,
@@ -466,7 +486,7 @@ class ProvidersManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error updating provider priorities:', error);
+      this.logger.error('Error updating provider priorities:', error);
       return {
         response: { error: 'Failed to update provider priorities' },
         statusCode: 500,

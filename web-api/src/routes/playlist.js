@@ -1,5 +1,4 @@
-import express from 'express';
-import { createRequireApiKey } from '../middleware/apiKey.js';
+import BaseRouter from './BaseRouter.js';
 
 /**
  * Get the base URL from the request, respecting X-Forwarded-* headers
@@ -40,24 +39,20 @@ function getBaseUrl(req) {
 /**
  * Playlist router for handling playlist endpoints
  */
-class PlaylistRouter {
+class PlaylistRouter extends BaseRouter {
   /**
    * @param {PlaylistManager} playlistManager - Playlist manager instance
    * @param {DatabaseService} database - Database service instance
    */
   constructor(playlistManager, database) {
+    super(database, 'PlaylistRouter');
     this._playlistManager = playlistManager;
-    this._database = database;
-    this._requireApiKey = createRequireApiKey(database);
-    this.router = express.Router();
-    this._setupRoutes();
   }
 
   /**
-   * Setup all routes for this router
-   * @private
+   * Initialize routes for this router
    */
-  _setupRoutes() {
+  initialize() {
     /**
      * GET /api/playlist/:title_type
      * Get M3U8 playlist for movies or tvshows (requires API key)
@@ -67,7 +62,7 @@ class PlaylistRouter {
         const { title_type } = req.params;
 
         if (!['movies', 'tvshows'].includes(title_type)) {
-          return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'tvshows'" });
+          return this.returnErrorResponse(res, 400, "Invalid title type. Must be 'movies' or 'tvshows'");
         }
 
         const baseUrl = getBaseUrl(req);
@@ -78,8 +73,7 @@ class PlaylistRouter {
         res.setHeader('Content-Type', 'text/plain');
         return res.send(m3uContent);
       } catch (error) {
-        console.error('Get M3U8 playlist error:', error);
-        return res.status(500).json({ error: 'Failed to get playlist' });
+        return this.returnErrorResponse(res, 500, 'Failed to get playlist', `Get M3U8 playlist error: ${error.message}`);
       }
     });
 
@@ -92,7 +86,7 @@ class PlaylistRouter {
         const { title_type } = req.params;
 
         if (!['movies', 'tvshows'].includes(title_type)) {
-          return res.status(400).json({ error: "Invalid title type. Must be 'movies' or 'tvshows'" });
+          return this.returnErrorResponse(res, 400, "Invalid title type. Must be 'movies' or 'tvshows'");
         }
 
         const baseUrl = getBaseUrl(req);
@@ -102,8 +96,7 @@ class PlaylistRouter {
 
         return res.status(200).json(mediaFiles);
       } catch (error) {
-        console.error('Get media files mapping error:', error);
-        return res.status(500).json({ error: 'Failed to get media files mapping' });
+        return this.returnErrorResponse(res, 500, 'Failed to get media files mapping', `Get media files mapping error: ${error.message}`);
       }
     });
   }

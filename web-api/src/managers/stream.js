@@ -1,10 +1,8 @@
-import { createLogger } from '../utils/logger.js';
+import { BaseManager } from './BaseManager.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
 import http from 'http';
 import https from 'https';
 import { URL } from 'url';
-
-const logger = createLogger('StreamManager');
 
 /**
  * Constants for stream endpoint
@@ -20,12 +18,12 @@ const STREAM_HEADERS = {
  * Stream manager for handling stream data operations
  * Matches Python's StreamService
  */
-class StreamManager {
+class StreamManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    */
   constructor(database) {
-    this._database = database;
+    super('StreamManager', database);
     this._timeout = 7500; // 7.5 seconds timeout for URL checks
   }
 
@@ -59,7 +57,7 @@ class StreamManager {
    * Matches Python's StreamService.get_best_source()
    */
   async getBestSource(titleId, mediaType, seasonNumber = null, episodeNumber = null) {
-    logger.info(
+    this.logger.info(
       `Getting best source for title ID: ${titleId}, media type: ${mediaType}, season: ${seasonNumber}, episode: ${episodeNumber}`
     );
 
@@ -67,30 +65,30 @@ class StreamManager {
       const sources = await this._getSources(titleId, mediaType, seasonNumber, episodeNumber);
 
       if (!sources || sources.length === 0) {
-        logger.warn(`No sources found for title ${mediaType} ${titleId}`);
+        this.logger.warn(`No sources found for title ${mediaType} ${titleId}`);
         return null;
       }
 
-      logger.info(`Found ${sources.length} source(s) for title ${mediaType} ${titleId}`);
+      this.logger.info(`Found ${sources.length} source(s) for title ${mediaType} ${titleId}`);
 
       // Check each source and return the first valid one
       for (let i = 0; i < sources.length; i++) {
         const source = sources[i];
         const sourceUrl = typeof source === 'string' ? source : source.url;
         const providerType = typeof source === 'object' ? source.providerType : null;
-        logger.info(`Checking source ${i + 1}/${sources.length}: ${sourceUrl}`);
+        this.logger.info(`Checking source ${i + 1}/${sources.length}: ${sourceUrl}`);
         if (await this._checkUrl(sourceUrl, providerType)) {
-          logger.info(`Best source for title ${mediaType} ${titleId} is valid: ${sourceUrl}`);
+          this.logger.info(`Best source for title ${mediaType} ${titleId} is valid: ${sourceUrl}`);
           return sourceUrl;
         } else {
-          logger.warn(`Source ${i + 1}/${sources.length} is invalid for title ${mediaType} ${titleId}: ${sourceUrl}`);
+          this.logger.warn(`Source ${i + 1}/${sources.length} is invalid for title ${mediaType} ${titleId}: ${sourceUrl}`);
         }
       }
 
-      logger.warn(`No valid sources found for title ${mediaType} ${titleId} after checking ${sources.length} source(s)`);
+      this.logger.warn(`No valid sources found for title ${mediaType} ${titleId} after checking ${sources.length} source(s)`);
       return null;
     } catch (error) {
-      logger.error(`Error getting best source for title ${mediaType} ${titleId}:`, error);
+      this.logger.error(`Error getting best source for title ${mediaType} ${titleId}:`, error);
       return null;
     }
   }
@@ -102,9 +100,6 @@ class StreamManager {
    */
   async _getSources(titleId, mediaType, seasonNumber = null, episodeNumber = null) {
     try {
-      // Build stream key prefix: {mediaType}-{titleId}-{streamId}-
-      const titlePrefix = `${mediaType}-${titleId}-`;
-      
       // Build stream ID suffix
       let streamIdSuffix = 'main';
       if (mediaType === 'tvshows') {
@@ -123,11 +118,11 @@ class StreamManager {
       });
       
       if (!streams || streams.length === 0) {
-        logger.warn(`No streams found for title ${titleKey}, stream ${streamIdSuffix}`);
+        this.logger.warn(`No streams found for title ${titleKey}, stream ${streamIdSuffix}`);
         return [];
       }
 
-      logger.debug(`Found ${streams.length} stream(s) for title ${titleKey}, stream ${streamIdSuffix}`);
+      this.logger.debug(`Found ${streams.length} stream(s) for title ${titleKey}, stream ${streamIdSuffix}`);
 
       // Get providers data to access streams_urls for base URL concatenation
       // Filter to only enabled providers
@@ -136,14 +131,14 @@ class StreamManager {
       const providers = allProviders.filter(p => p.enabled !== false);
       const providersMap = new Map(providers.map(p => [p.id, p]));
 
-      logger.debug(`Loaded ${providers.length} enabled provider(s) out of ${allProviders.length} total`);
+      this.logger.debug(`Loaded ${providers.length} enabled provider(s) out of ${allProviders.length} total`);
 
       const sources = [];
       
       for (const streamEntry of streams) {
         const proxyUrl = streamEntry.proxy_url;
         if (!proxyUrl) {
-          logger.debug(`Stream for provider ${streamEntry.provider_id} has no proxy_url, skipping`);
+          this.logger.debug(`Stream for provider ${streamEntry.provider_id} has no proxy_url, skipping`);
           continue;
         }
 
@@ -152,11 +147,11 @@ class StreamManager {
 
           // Skip if provider is not found (disabled or deleted)
           if (!provider) {
-            logger.debug(`Skipping stream for disabled/deleted provider ${providerId}`);
+            this.logger.debug(`Skipping stream for disabled/deleted provider ${providerId}`);
             continue;
           }
 
-          logger.debug(`Processing stream for provider ${providerId}, proxy_url: ${proxyUrl}`);
+          this.logger.debug(`Processing stream for provider ${providerId}, proxy_url: ${proxyUrl}`);
           
           // Get provider type for optimized URL checking
           const providerType = provider.type || null;
@@ -164,38 +159,38 @@ class StreamManager {
           // Check if URL is already absolute (has base URL)
           if (proxyUrl.startsWith('http://') || proxyUrl.startsWith('https://')) {
             // Already absolute, use as-is
-            logger.debug(`Using absolute URL: ${proxyUrl}`);
+            this.logger.debug(`Using absolute URL: ${proxyUrl}`);
             sources.push({ url: proxyUrl, providerType });
           } else if (proxyUrl.startsWith('/')) {
             // Relative URL - need to concatenate with base URLs
             if (provider && provider.streams_urls && Array.isArray(provider.streams_urls) && provider.streams_urls.length > 0) {
-              logger.debug(`Provider ${providerId} has ${provider.streams_urls.length} stream URL(s) configured`);
+              this.logger.debug(`Provider ${providerId} has ${provider.streams_urls.length} stream URL(s) configured`);
               // For each base URL in streams_urls, create a full URL
               for (const baseUrl of provider.streams_urls) {
                 if (baseUrl && typeof baseUrl === 'string' && baseUrl.trim()) {
                   // Remove trailing slash from baseUrl if present, then add proxyUrl
                   const cleanBaseUrl = baseUrl.replace(/\/$/, '');
                   const fullUrl = `${cleanBaseUrl}${proxyUrl}`;
-                  logger.debug(`Constructed full URL: ${fullUrl}`);
+                  this.logger.debug(`Constructed full URL: ${fullUrl}`);
                   sources.push({ url: fullUrl, providerType });
                 }
               }
             } else {
               // No streams_urls configured, log warning but still try the relative URL
-              logger.warn(`Provider ${providerId} has relative stream URL but no streams_urls configured. Using relative URL: ${proxyUrl}`);
+              this.logger.warn(`Provider ${providerId} has relative stream URL but no streams_urls configured. Using relative URL: ${proxyUrl}`);
               sources.push({ url: proxyUrl, providerType });
             }
           } else {
             // Neither absolute nor relative (unexpected format), use as-is
-            logger.warn(`Unexpected stream URL format for ${providerId}: ${proxyUrl}`);
+            this.logger.warn(`Unexpected stream URL format for ${providerId}: ${proxyUrl}`);
             sources.push({ url: proxyUrl, providerType });
           }
       }
 
-      logger.debug(`Found ${sources.length} source URL(s) for title ${titleId}`);
+      this.logger.debug(`Found ${sources.length} source URL(s) for title ${titleId}`);
       return sources;
     } catch (error) {
-      logger.error(`Error getting sources for title ${titleId}:`, error);
+      this.logger.error(`Error getting sources for title ${titleId}:`, error);
       return [];
     }
   }
@@ -220,13 +215,13 @@ class StreamManager {
       }
     } catch (error) {
       if (error.name === 'AbortError' || error.code === 'ETIMEDOUT') {
-        logger.warn(`URL check timed out after ${this._timeout}ms: ${url}`);
+        this.logger.warn(`URL check timed out after ${this._timeout}ms: ${url}`);
       } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
-        logger.warn(`URL check network error (${error.code}): ${url} - ${error.message}`);
+        this.logger.warn(`URL check network error (${error.code}): ${url} - ${error.message}`);
       } else if (error.message) {
-        logger.warn(`URL check failed: ${url} - ${error.message}`);
+        this.logger.warn(`URL check failed: ${url} - ${error.message}`);
       } else {
-        logger.error(`Error checking URL: ${url}`, error);
+        this.logger.error(`Error checking URL: ${url}`, error);
       }
       return false;
     }
@@ -244,7 +239,7 @@ class StreamManager {
     const timeoutId = setTimeout(() => controller.abort(), this._timeout);
 
     try {
-      logger.info(`Checking URL: ${url} (method: ${method})`);
+      this.logger.info(`Checking URL: ${url} (method: ${method})`);
 
       const response = await fetch(url, {
         method: method,
@@ -255,9 +250,9 @@ class StreamManager {
 
       const isValid = response.ok;
       if (isValid) {
-        logger.info(`URL check successful: ${url} (status: ${response.status}, method: ${method})`);
+        this.logger.info(`URL check successful: ${url} (status: ${response.status}, method: ${method})`);
       } else {
-        logger.warn(`URL check failed: ${url} (status: ${response.status}, method: ${method})`);
+        this.logger.warn(`URL check failed: ${url} (status: ${response.status}, method: ${method})`);
       }
 
       return isValid;
@@ -278,7 +273,7 @@ class StreamManager {
     const MAX_REDIRECTS = 3;
     
     if (redirectDepth > MAX_REDIRECTS) {
-      logger.warn(`URL check exceeded max redirects (${MAX_REDIRECTS}): ${url}`);
+      this.logger.warn(`URL check exceeded max redirects (${MAX_REDIRECTS}): ${url}`);
       return false;
     }
 
@@ -302,7 +297,7 @@ class StreamManager {
         const maxBytes = 100; // Only read first 100 bytes
         const chunks = [];
 
-        logger.info(`Checking URL: ${url} (method: GET, redirect depth: ${redirectDepth})`);
+        this.logger.info(`Checking URL: ${url} (method: GET, redirect depth: ${redirectDepth})`);
 
         const req = httpModule.get(options, (res) => {
           const statusCode = res.statusCode || 0;
@@ -322,7 +317,7 @@ class StreamManager {
                 redirectUrl = new URL(redirectUrl, baseUrl).href;
               }
               
-              logger.debug(`Following redirect to: ${redirectUrl}`);
+              this.logger.debug(`Following redirect to: ${redirectUrl}`);
               // Recursively follow redirect
               return this._checkUrlWithNative(redirectUrl, redirectDepth + 1)
                 .then(resolve)
@@ -343,9 +338,9 @@ class StreamManager {
               req.destroy(); // Stop downloading
 
               if (isValid) {
-                logger.info(`URL check successful: ${url} (status: ${statusCode}, read ${bytesRead} bytes)`);
+                this.logger.info(`URL check successful: ${url} (status: ${statusCode}, read ${bytesRead} bytes)`);
               } else {
-                logger.warn(`URL check failed: ${url} (status: ${statusCode}, read ${bytesRead} bytes)`);
+                this.logger.warn(`URL check failed: ${url} (status: ${statusCode}, read ${bytesRead} bytes)`);
               }
 
               resolve(isValid);
@@ -357,9 +352,9 @@ class StreamManager {
               resolved = true;
 
               if (isValid) {
-                logger.info(`URL check successful: ${url} (status: ${statusCode}, read ${bytesRead} bytes)`);
+                this.logger.info(`URL check successful: ${url} (status: ${statusCode}, read ${bytesRead} bytes)`);
               } else {
-                logger.warn(`URL check failed: ${url} (status: ${statusCode}, read ${bytesRead} bytes)`);
+                this.logger.warn(`URL check failed: ${url} (status: ${statusCode}, read ${bytesRead} bytes)`);
               }
 
               resolve(isValid);

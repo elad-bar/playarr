@@ -1,8 +1,6 @@
+import { BaseManager } from './BaseManager.js';
 import path from 'path';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('TitlesManager');
 
 /**
  * @typedef {Object} MainTitle
@@ -38,13 +36,13 @@ const logger = createLogger('TitlesManager');
  * Titles manager for handling titles data operations
  * Matches Python's TitlesService
  */
-class TitlesManager {
+class TitlesManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    * @param {import('./users.js').UserManager} userManager - User manager instance (for watchlist operations)
    */
   constructor(database, userManager) {
-    this._database = database;
+    super('TitlesManager', database);
     this._userManager = userManager;
     this._titlesCollection = toCollectionName(DatabaseCollections.TITLES);
     this._titlesStreamsCollection = toCollectionName(DatabaseCollections.TITLES_STREAMS);
@@ -68,21 +66,21 @@ class TitlesManager {
       const titlesData = await this._database.getDataList(this._titlesCollection);
       
       if (!titlesData) {
-        logger.info('No titles found in main.json');
+        this.logger.info('No titles found in main.json');
         return new Map();
       }
 
       // Should always be a Map when mapping is configured
       if (titlesData instanceof Map) {
-        logger.info(`Loaded ${titlesData.size} titles from main.json`);
+        this.logger.info(`Loaded ${titlesData.size} titles from main.json`);
         return titlesData;
       }
 
       // This should never happen if mapping is configured correctly
-      logger.warn('Titles data is not a Map - mapping may not be configured correctly');
+      this.logger.warn('Titles data is not a Map - mapping may not be configured correctly');
       return new Map();
     } catch (error) {
-      logger.error('Error loading titles:', error);
+      this.logger.error('Error loading titles:', error);
       return new Map();
     }
   }
@@ -133,7 +131,7 @@ class TitlesManager {
           .map(p => p.id)
       );
     } catch (error) {
-      logger.error('Error loading enabled providers:', error);
+      this.logger.error('Error loading enabled providers:', error);
       return new Set();
     }
   }
@@ -382,7 +380,7 @@ class TitlesManager {
         // Watchlist filter active - need to load all matching titles to filter
         // But limit to prevent memory issues
         if (totalCount > MAX_TITLES_FOR_WATCHLIST_FILTER) {
-          logger.warn(`Too many titles (${totalCount}) for watchlist filtering. Limiting to ${MAX_TITLES_FOR_WATCHLIST_FILTER}`);
+          this.logger.warn(`Too many titles (${totalCount}) for watchlist filtering. Limiting to ${MAX_TITLES_FOR_WATCHLIST_FILTER}`);
           titlesCursor = titlesCursor.limit(MAX_TITLES_FOR_WATCHLIST_FILTER);
           totalCount = MAX_TITLES_FOR_WATCHLIST_FILTER;
         }
@@ -479,7 +477,7 @@ class TitlesManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error getting titles:', error);
+      this.logger.error('Error getting titles:', error);
       return {
         response: { error: 'Failed to read titles data' },
         statusCode: 500,
@@ -630,7 +628,7 @@ class TitlesManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error getting title details:', error);
+      this.logger.error('Error getting title details:', error);
       return {
         response: { error: 'Failed to get title details' },
         statusCode: 500,
@@ -729,7 +727,7 @@ class TitlesManager {
         statusCode: totalUpdated > 0 ? 200 : 404,
       };
     } catch (error) {
-      logger.error('Error updating watchlist:', error);
+      this.logger.error('Error updating watchlist:', error);
       return {
         response: { error: 'Failed to update watchlist status' },
         statusCode: 500,

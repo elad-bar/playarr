@@ -1,20 +1,18 @@
-import { createLogger } from '../utils/logger.js';
+import { BaseManager } from './BaseManager.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
-
-const logger = createLogger('XtreamManager');
 
 /**
  * Xtream Code API manager for exposing movies and TV shows in Xtream Code format
  * Matches Xtream Code API response structure
  * Filters by user watchlist (same as playlist endpoints)
  */
-class XtreamManager {
+class XtreamManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
    */
   constructor(database, titlesManager) {
-    this._database = database;
+    super('XtreamManager', database);
     this._titlesManager = titlesManager;
     this._titlesCollection = toCollectionName(DatabaseCollections.TITLES);
   }
@@ -88,7 +86,7 @@ class XtreamManager {
 
       return Array.from(categories.values());
     } catch (error) {
-      logger.error('Error getting VOD categories:', error);
+      this.logger.error('Error getting VOD categories:', error);
       return [];
     }
   }
@@ -135,7 +133,6 @@ class XtreamManager {
             cast: '',
             director: '',
             genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', '),
-            releaseDate: title.release_date || '',
             last_modified: title.lastUpdated || title.createdAt || ''
           },
           category_id: this._getCategoryId(title.genres),
@@ -145,6 +142,7 @@ class XtreamManager {
           rating_5based: ((title.vote_average || 0) / 2).toFixed(1),
           added: title.createdAt || '',
           release_date: title.release_date || '',
+          backdrop_path: title.backdrop_path ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}` : '',
           stream_url: streamUrl
         };
 
@@ -153,7 +151,7 @@ class XtreamManager {
 
       return movies;
     } catch (error) {
-      logger.error('Error getting VOD streams:', error);
+      this.logger.error('Error getting VOD streams:', error);
       return [];
     }
   }
@@ -175,9 +173,10 @@ class XtreamManager {
             const genreName = typeof genre === 'string' ? genre : genre.name;
             if (genreName && !categories.has(genreName)) {
               categories.set(genreName, {
-                category_id: categories.size + 1,
+                category_id: String(categories.size + 1),
                 category_name: genreName,
-                parent_id: 0
+                parent_id: 0,
+                category_type: 'series'
               });
             }
           });
@@ -186,7 +185,7 @@ class XtreamManager {
 
       return Array.from(categories.values());
     } catch (error) {
-      logger.error('Error getting series categories:', error);
+      this.logger.error('Error getting series categories:', error);
       return [];
     }
   }
@@ -217,17 +216,19 @@ class XtreamManager {
         const seriesObj = {
           series_id: title.title_id,
           name: title.title,
+          series_name: title.title,
           cover: title.poster_path ? `https://image.tmdb.org/t/p/w300${title.poster_path}` : '',
           plot: title.overview || '',
           cast: '',
           director: '',
           genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', '),
-          releaseDate: title.release_date || '',
+          release_date: title.release_date || '',
           last_modified: title.lastUpdated || title.createdAt || '',
           rating: title.vote_average?.toString() || '0',
           rating_5based: ((title.vote_average || 0) / 2).toFixed(1),
           category_id: this._getCategoryId(title.genres),
           category_name: this._getCategoryName(title.genres),
+          backdrop_path: title.backdrop_path ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}` : '',
           num: this._getEpisodeCount(title.streams)
         };
 
@@ -236,7 +237,7 @@ class XtreamManager {
 
       return series;
     } catch (error) {
-      logger.error('Error getting series:', error);
+      this.logger.error('Error getting series:', error);
       return [];
     }
   }
@@ -263,10 +264,10 @@ class XtreamManager {
         ? `https://image.tmdb.org/t/p/w300${title.poster_path}` 
         : '';
 
-      // Build backdrop_path array
+      // Build backdrop_path as string (not array)
       const backdropPath = title.backdrop_path 
-        ? [`https://image.tmdb.org/t/p/w300${title.backdrop_path}`]
-        : [];
+        ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}`
+        : '';
 
       // Calculate duration_secs and format duration
       const durationSecs = title.runtime ? title.runtime * 60 : 0;
@@ -275,23 +276,32 @@ class XtreamManager {
       // Get category ID
       const categoryId = this._getCategoryId(title.genres);
 
-      // Convert createdAt to Unix timestamp
-      const added = this._toUnixTimestamp(title.createdAt);
+      // Convert createdAt to Unix timestamp (as integer)
+      const added = parseInt(this._toUnixTimestamp(title.createdAt), 10);
+
+      // Build info object with conditional duration_secs
+      const infoObj = {
+        movie_image: movieImage,
+        tmdb_id: title.title_id?.toString() || '',
+        backdrop_path: backdropPath,
+        genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(' / ') || '',
+        plot: title.overview || '',
+        cast: '',
+        rating: title.vote_average?.toString() || '0',
+        rating_5based: ((title.vote_average || 0) / 2).toFixed(1),
+        director: '',
+        release_date: title.release_date || '',
+        name: title.title,
+        duration: duration
+      };
+
+      // Only include duration_secs if value > 0
+      if (durationSecs > 0) {
+        infoObj.duration_secs = durationSecs;
+      }
 
       return {
-        info: {
-          movie_image: movieImage,
-          tmdb_id: title.title_id?.toString() || '',
-          backdrop_path: backdropPath,
-          genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(' / ') || '',
-          plot: title.overview || '',
-          cast: '',
-          rating: title.vote_average?.toString() || '0',
-          director: '',
-          releasedate: title.release_date || '',
-          duration_secs: durationSecs,
-          duration: duration
-        },
+        info: infoObj,
         movie_data: {
           stream_id: title.title_id,
           name: title.title,
@@ -303,7 +313,7 @@ class XtreamManager {
         }
       };
     } catch (error) {
-      logger.error(`Error getting VOD info for ${vodId}:`, error);
+      this.logger.error(`Error getting VOD info for ${vodId}:`, error);
       return null;
     }
   }
@@ -368,13 +378,12 @@ class XtreamManager {
               season_num: season,
               season: season,
               title: `S${seasonPadded}E${episodePadded}`,
+              episode_name: `S${seasonPadded}E${episodePadded}`,
               container_extension: 'mp4',
               info: {
                 plot: '',
                 release_date: '',
-                duration: '',
-                rating: '0',
-                rating_5based: '0'
+                duration: ''
               }
             });
             
@@ -399,11 +408,12 @@ class XtreamManager {
           tmdb_id: title.title_id,
           name: title.title,
           cover: title.poster_path ? `https://image.tmdb.org/t/p/w300${title.poster_path}` : '',
+          backdrop_path: title.backdrop_path ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}` : '',
           plot: title.overview || '',
           cast: '',
           director: '',
           genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', '),
-          releaseDate: title.release_date || '',
+          release_date: title.release_date || '',
           last_modified: title.lastUpdated || title.createdAt || '',
           rating: title.vote_average?.toString() || '0',
           rating_5based: ((title.vote_average || 0) / 2).toFixed(1)
@@ -412,7 +422,7 @@ class XtreamManager {
         episodes: episodes
       };
     } catch (error) {
-      logger.error(`Error getting series info for ${seriesId}:`, error);
+      this.logger.error(`Error getting series info for ${seriesId}:`, error);
       return null;
     }
   }
@@ -459,14 +469,14 @@ class XtreamManager {
    * Get category ID from genres
    * @private
    * @param {Array} genres - Array of genre objects or strings
-   * @returns {number} Category ID
+   * @returns {string} Category ID as string
    */
   _getCategoryId(genres) {
-    if (!genres || genres.length === 0) return 0;
+    if (!genres || genres.length === 0) return '0';
     const firstGenre = genres[0];
     const genreName = typeof firstGenre === 'string' ? firstGenre : firstGenre.name;
     // Simple hash-based ID
-    return Math.abs(genreName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)) % 1000;
+    return String(Math.abs(genreName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)) % 1000);
   }
 
   /**

@@ -1,3 +1,5 @@
+import { BaseManager } from './BaseManager.js';
+
 /**
  * M3U8 parameters that should be included in playlist entries
  * Matches Python's M3U8_PARAMETERS
@@ -13,12 +15,12 @@ const M3U8_PARAMETERS = [
  * Playlist manager for handling M3U8 playlist generation
  * Matches Python's PlaylistService
  */
-class PlaylistManager {
+class PlaylistManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    */
   constructor(database) {
-    this._database = database;
+    super('PlaylistManager', database);
   }
 
   /**

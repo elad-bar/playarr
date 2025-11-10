@@ -1,42 +1,42 @@
-import { parentPort, workerData } from 'worker_threads';
-import { ProviderInitializer } from '../utils/ProviderInitializer.js';
+import { ApplicationContext } from '../context/ApplicationContext.js';
 import { ProcessProvidersTitlesJob } from '../jobs/ProcessProvidersTitlesJob.js';
+import { createLogger } from '../utils/logger.js';
 
 /**
  * Bree.js worker file for processing provider titles
- * This file is executed by Bree.js as a separate worker thread
+ * Runs in main thread (worker: false) to access shared ApplicationContext
  * 
- * Uses ProviderInitializer singleton to prevent redundant initialization
- * within the same worker thread context
+ * @param {Object} [params={}] - Optional parameters (workerData equivalent)
+ * @returns {Promise<Array>} Array of fetch results
  */
-async function processProvidersTitlesWorker() {
-  const cacheDir = workerData.cacheDir;
-
-  // Initialize providers once (singleton pattern)
-  await ProviderInitializer.initialize(cacheDir);
+export default async function(params = {}) {
+  // Create logger inside function so it's available when Bree.js evaluates the function
+  const logger = createLogger('processProvidersTitles');
   
-  // Get initialized providers
-  const cache = ProviderInitializer.getCache();
-  const mongoData = ProviderInitializer.getMongoData();
-  const providers = ProviderInitializer.getProviders();
-  const tmdbProvider = ProviderInitializer.getTMDBProvider();
+  try {
+    logger.debug('Worker function called');
+    const context = ApplicationContext.getInstance();
+    
+    logger.debug('Getting dependencies from context');
+    // Get initialized dependencies from context
+    const cache = context.getCache();
+    const mongoData = context.getMongoData();
+    const providers = context.getProviders();
+    const tmdbProvider = context.getTMDBProvider();
 
-  const job = new ProcessProvidersTitlesJob(cache, mongoData, providers, tmdbProvider);
-  const results = await job.execute();
-
-  return results;
+    logger.debug('Creating job instance');
+    const job = new ProcessProvidersTitlesJob(cache, mongoData, providers, tmdbProvider);
+    
+    logger.debug('Executing job...');
+    const results = await job.execute();
+    
+    logger.debug('Job completed, returning results');
+    return results;
+  } catch (error) {
+    logger.error(`Error in worker: ${error.message}`);
+    if (error.stack) {
+      logger.error(`Stack trace: ${error.stack}`);
+    }
+    throw error;
+  }
 }
-
-// Execute worker and send result back to parent
-processProvidersTitlesWorker()
-  .then(result => {
-    if (parentPort) {
-      parentPort.postMessage({ success: true, result });
-    }
-  })
-  .catch(error => {
-    if (parentPort) {
-      parentPort.postMessage({ success: false, error: error.message, stack: error.stack });
-    }
-  });
-

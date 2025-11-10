@@ -8,11 +8,13 @@ export class JobsManager {
   /**
    * @param {import('../services/MongoDataService.js').MongoDataService} mongoData - MongoDB data service for job history
    * @param {Object} jobsConfig - Jobs configuration from jobs.json
+   * @param {import('bree').default} [bree] - Optional Bree instance for checking worker state
    */
-  constructor(mongoData, jobsConfig) {
+  constructor(mongoData, jobsConfig, bree = null) {
     this.mongoData = mongoData;
     this.jobsConfig = jobsConfig;
     this.logger = createLogger('JobsManager');
+    this._bree = bree;
     
     // Build job metadata lookup from config
     this._jobMetadata = {};
@@ -23,7 +25,8 @@ export class JobsManager {
         description: job.description,
         schedule: job.schedule,
         interval: job.interval,
-        skipIfOtherInProgress: job.skipIfOtherInProgress || []
+        skipIfOtherInProgress: job.skipIfOtherInProgress || [],
+        postExecute: job.postExecute || []
       };
     });
   }
@@ -40,10 +43,17 @@ export class JobsManager {
 
   /**
    * Check if a job is currently running
+   * Checks both Bree's worker state (most up-to-date) and MongoDB state
    * @param {string} engineJobName - Engine job name
    * @returns {Promise<boolean>} True if job is running
    */
   async isJobRunning(engineJobName) {
+    // First check Bree's worker state (most up-to-date runtime state)
+    if (this._bree && this._bree.workers && this._bree.workers.has(engineJobName)) {
+      return true;
+    }
+    
+    // Fallback to MongoDB state (persisted job history)
     if (!this.mongoData) {
       throw new Error('MongoDB data service is not available');
     }

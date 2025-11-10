@@ -1,18 +1,16 @@
+import { BaseManager } from './BaseManager.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('StatsManager');
 
 /**
  * Stats manager for handling statistics data operations
  * Matches Python's StatsService format
  */
-class StatsManager {
+class StatsManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    */
   constructor(database) {
-    this._database = database;
+    super('StatsManager', database);
     this._statsCollection = toCollectionName(DatabaseCollections.STATS);
   }
 
@@ -38,7 +36,7 @@ class StatsManager {
         statusCode: 200,
       };
     } catch (error) {
-      logger.error('Error getting statistics:', error);
+      this.logger.error('Error getting statistics:', error);
       return {
         response: { error: 'Failed to get statistics' },
         statusCode: 500,
@@ -99,7 +97,7 @@ class StatsManager {
 
       return { providers: providersList };
     } catch (error) {
-      logger.error('Error getting statistics:', error);
+      this.logger.error('Error getting statistics:', error);
       return null;
     }
   }
