@@ -116,14 +116,19 @@ export class ProcessProvidersTitlesJob extends BaseJob {
 
   /**
    * Fetch categories from all providers
+   * Processes all providers in parallel for better performance
    * @returns {Promise<void>}
    */
   async fetchAllCategories() {
     this.logger.info(`Fetching categories from ${this.providers.size} provider(s)...`);
     
-    for (const [providerId, providerInstance] of this.providers) {
-      await this.fetchCategoriesFromProvider(providerInstance, providerId);
-    }
+    // Process all providers in parallel
+    const categoryPromises = Array.from(this.providers.entries()).map(
+      ([providerId, providerInstance]) => 
+        this.fetchCategoriesFromProvider(providerInstance, providerId)
+    );
+    
+    await Promise.all(categoryPromises);
   }
 
   /**
@@ -156,31 +161,35 @@ export class ProcessProvidersTitlesJob extends BaseJob {
 
   /**
    * Fetch metadata from all providers
+   * Processes all providers in parallel for better performance
    * @returns {Promise<Array<{providerId: string, providerName: string, movies?: number, tvShows?: number, error?: string}>>} Array of fetch results
    */
   async fetchAllMetadata() {
     this.logger.info(`Starting metadata fetch process for ${this.providers.size} provider(s)...`);
-    const results = [];
-
-    for (const [providerId, providerInstance] of this.providers) {
-      try {
-        this.logger.debug(`[${providerId}] Processing provider (${providerInstance.getProviderType()})`);
-        const result = await this.fetchMetadataFromProvider(providerInstance, providerId);
-        results.push({
-          providerId,
-          providerName: providerId,
-          ...result
-        });
-      } catch (error) {
-        this.logger.error(`[${providerId}] Error processing provider: ${error.message}`);
-        results.push({
-          providerId,
-          providerName: providerId,
-          error: error.message
-        });
+    
+    // Process all providers in parallel
+    const metadataPromises = Array.from(this.providers.entries()).map(
+      async ([providerId, providerInstance]) => {
+        try {
+          this.logger.debug(`[${providerId}] Processing provider (${providerInstance.getProviderType()})`);
+          const result = await this.fetchMetadataFromProvider(providerInstance, providerId);
+          return {
+            providerId,
+            providerName: providerId,
+            ...result
+          };
+        } catch (error) {
+          this.logger.error(`[${providerId}] Error processing provider: ${error.message}`);
+          return {
+            providerId,
+            providerName: providerId,
+            error: error.message
+          };
+        }
       }
-    }
-
+    );
+    
+    const results = await Promise.all(metadataPromises);
     return results;
   }
 }
