@@ -1122,16 +1122,25 @@ export class TMDBProvider extends BaseProvider {
     const tmdbType = type === 'movies' ? 'movie' : 'tv';
 
     // Strategy 1: For AGTV provider, try using title_id (IMDB ID) directly
+    // Note: Xtream providers either have tmdb_id from extended info or fall through to search
     if (providerType === 'agtv' && title.title_id) {
       try {
         // Check if title_id looks like an IMDB ID (starts with 'tt')
         if (title.title_id.startsWith('tt')) {
           const result = await this.findByIMDBId(title.title_id, type);
           
-          if (type === 'movies' && result.movie_results && result.movie_results.length > 0) {
-            return result.movie_results[0].id;
-          } else if (type === 'tvshows' && result.tv_results && result.tv_results.length > 0) {
-            return result.tv_results[0].id;
+          if (!result) {
+            this.logger.debug(`IMDB ID lookup returned null/undefined for ${title.title_id} (type: ${type})`);
+          } else {
+            // Dynamically access results using tmdbType (movie_results or tv_results)
+            const resultsKey = `${tmdbType}_results`;
+            if (result[resultsKey] && result[resultsKey].length > 0) {
+              const tmdbId = result[resultsKey][0].id;
+              this.logger.debug(`Found TMDB ${tmdbType} ID ${tmdbId} via IMDB ${title.title_id}`);
+              return tmdbId;
+            }
+            // Log when expected results are not found
+            this.logger.debug(`IMDB ID ${title.title_id} found but ${resultsKey} is empty or missing`);
           }
         }
       } catch (error) {
@@ -1140,6 +1149,7 @@ export class TMDBProvider extends BaseProvider {
     }
 
     // Strategy 2: Search by title name
+    // Used for AGTV when IMDB lookup fails, and for Xtream when tmdb_id is not available
     if (title.title) {
       try {
         // Prefer release_date year if available (for Xtream providers), otherwise extract from title

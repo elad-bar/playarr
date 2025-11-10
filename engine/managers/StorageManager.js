@@ -45,12 +45,16 @@ export class StorageManager {
       throw new Error(`Last part must be a filename with extension, got: ${fileName}`);
     }
 
+    // Sanitize filename: remove invalid Windows filename characters
+    // Windows doesn't allow: < > : " / \ | ? *
+    const sanitizedFileName = fileName.replace(/[<>:"/\\|?*]/g, '_');
+
     // Build directory path
     const dir = path.join(this.storageDir, ...directoryParts);
     fs.ensureDirSync(dir);
     
-    // Return full file path - lastPart is already filename with extension
-    return path.join(dir, fileName);
+    // Return full file path with sanitized filename
+    return path.join(dir, sanitizedFileName);
   }
 
   /**

@@ -16,7 +16,7 @@ export class AGTVProvider extends BaseIPTVProvider {
    */
   constructor(providerData, cache, data, mongoData, tmdbProvider) {
     // AGTV uses 10k batch size since everything is in-memory and extremely fast
-    super(providerData, cache, data, mongoData, 10000, tmdbProvider);
+    super(providerData, cache, data, mongoData, 500, tmdbProvider);
         
     /**
      * Configuration for each media type
@@ -500,6 +500,9 @@ export class AGTVProvider extends BaseIPTVProvider {
       
       // Ensure type is set
       title.type = type;
+      
+      // Set title_id from idField for TMDB matching (AGTV uses stream_id as idField, which contains IMDB ID)
+      title.title_id = title[config.idField];
 
       // Match TMDB ID if needed (common logic from BaseIPTVProvider)
       // This will set ignored flags on title if matching fails, but still return true
