@@ -96,6 +96,12 @@ async function main() {
         jobConfig.interval = job.interval;
       }
       
+      // Prevent manual-only jobs from running on startup
+      // They should only run via postExecute or manual trigger
+      if (!job.interval) {
+        jobConfig.runOnInit = false;
+      }
+      
       // Only include timeout if it's a valid non-zero value
       // Bree.js doesn't accept "0" as a timeout value
       if (job.timeout && job.timeout !== '0' && job.timeout !== 0) {
