@@ -56,9 +56,6 @@ async function initializeMongoDB() {
     await mongoClient.connect();
     mongoData = new MongoDataService(mongoClient);
     logger.debug('MongoDB connection initialized for job validation');
-    
-    // Initialize JobsManager with MongoDB and jobs config
-    jobsManager = new JobsManager(mongoData, jobsConfig);
   } catch (error) {
     logger.error(`Failed to connect to MongoDB: ${error.message}`);
     logger.warn('Job validation will not work without MongoDB connection');
@@ -109,6 +106,9 @@ async function main() {
     })
   });
 
+  // Initialize JobsManager with MongoDB, jobs config, and Bree instance
+  jobsManager = new JobsManager(mongoData, jobsConfig, bree);
+
   // Override the run method to prevent any job from running if it's already running
   // Uses MongoDB job_history as single source of truth
   const originalRun = bree.run.bind(bree);
@@ -143,10 +143,13 @@ async function main() {
       
       return result;
     } catch (error) {
-      // If Bree throws "already running" error, ignore it (MongoDB is source of truth)
+      // If Bree throws "already running" error, throw a custom error that can be handled upstream
       if (error.message && error.message.includes('already running')) {
         logger.debug(`Skipping ${name} - Bree detected it is already running`);
-        return;
+        const alreadyRunningError = new Error(`Job '${name}' is already running`);
+        alreadyRunningError.code = 'JOB_ALREADY_RUNNING';
+        alreadyRunningError.isAlreadyRunning = true;
+        throw alreadyRunningError;
       }
       throw error;
     }

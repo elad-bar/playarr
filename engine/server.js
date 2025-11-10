@@ -91,8 +91,12 @@ class EngineServer {
             ...(providerId ? { providerId } : {})
           });
         } catch (error) {
-          // Handle "already running" error from Bree (fallback)
-          if (error.message && error.message.includes('already running')) {
+          // Handle "already running" error from Bree (fallback for race conditions)
+          // Check for both the custom error code and the error message
+          if (error.code === 'JOB_ALREADY_RUNNING' || 
+              error.isAlreadyRunning || 
+              (error.message && error.message.includes('already running'))) {
+            logger.debug(`Job '${jobName}' is already running (detected by Bree error)`);
             return res.status(409).json({ 
               error: `Job '${jobName}' is already running`,
               status: 'running'
@@ -101,6 +105,17 @@ class EngineServer {
           throw error;
         }
       } catch (error) {
+        // Handle "already running" errors that might have slipped through
+        if (error.code === 'JOB_ALREADY_RUNNING' || 
+            error.isAlreadyRunning || 
+            (error.message && error.message.includes('already running'))) {
+          logger.debug(`Job '${jobName}' is already running (detected in outer catch)`);
+          return res.status(409).json({ 
+            error: `Job '${jobName}' is already running`,
+            status: 'running'
+          });
+        }
+        // Log and return 500 for unexpected errors
         logger.error(`Error triggering job '${req.params.jobName}':`, error);
         res.status(500).json({ 
           error: `Failed to trigger job: ${error.message}` 
