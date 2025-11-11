@@ -12,7 +12,25 @@ const __dirname = path.dirname(__filename);
 // Ensure logs directory exists
 // Path: from web-api/src/utils/ to root: ../../../logs
 const logsDir = process.env.LOGS_DIR || path.join(__dirname, '../../../logs');
-fs.ensureDirSync(logsDir);
+const apiLogPath = path.join(logsDir, 'api.log');
+
+// Ensure log directory exists
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir);
+}
+
+// If a previous log exists, rename it with a timestamp
+if (fs.existsSync(apiLogPath)) {
+  const stats = fs.statSync(apiLogPath);
+  const createdAt = stats.birthtime; // file creation time
+  const timestamp = createdAt
+    .toISOString()
+    .replace(/[:.]/g, '-') // make it filename-safe
+    .replace('T', '_')
+    .replace('Z', '');
+  const archivedLog = path.join(logsDir, `api_${timestamp}.log`);
+  fs.renameSync(apiLogPath, archivedLog);
+}
 
 /**
  * Create logger instance with formatted output to console and file
@@ -46,7 +64,7 @@ export function createLogger(context) {
       // File transport - debug level and above (more verbose)
       new winston.transports.File({
         level: 'debug',
-        filename: path.join(logsDir, 'api.log'),
+        filename: apiLogPath,
         format: logFormat,
         maxsize: 10485760, // 10MB
         maxFiles: 5 // Keep last 5 files

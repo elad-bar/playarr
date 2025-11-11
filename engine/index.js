@@ -17,15 +17,23 @@ const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "../cache");
 // Rotate log file on startup - rename previous log to engine-previous.log
 const logsDir = process.env.LOGS_DIR || path.join(__dirname, "../logs");
 const engineLogPath = path.join(logsDir, "engine.log");
-const previousLogPath = path.join(logsDir, "engine-previous.log");
 
+// Ensure log directory exists
+if (!fsExtra.existsSync(logsDir)) {
+  fsExtra.mkdirSync(logsDir);
+}
+
+// If a previous log exists, rename it with a timestamp
 if (fsExtra.existsSync(engineLogPath)) {
-  // Remove previous log if it exists (will be overwritten)
-  if (fsExtra.existsSync(previousLogPath)) {
-    fsExtra.removeSync(previousLogPath);
-  }
-  // Move current log to previous log
-  fsExtra.moveSync(engineLogPath, previousLogPath);
+  const stats = fsExtra.statSync(engineLogPath);
+  const createdAt = stats.birthtime; // file creation time
+  const timestamp = createdAt
+    .toISOString()
+    .replace(/[:.]/g, '-') // make it filename-safe
+    .replace('T', '_')
+    .replace('Z', '');
+  const archivedLog = path.join(logsDir, `engine_${timestamp}.log`);
+  fsExtra.renameSync(engineLogPath, archivedLog);
 }
 
 const logger = createLogger("Main");
