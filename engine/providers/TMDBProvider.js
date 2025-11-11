@@ -1331,6 +1331,27 @@ export class TMDBProvider extends BaseProvider {
   }
 
   /**
+   * Remove provider from title sources for disabled categories
+   * More efficient: queries provider_titles directly to find disabled category titles
+   * @param {string} providerId - Provider ID
+   * @param {Object} enabledCategories - Object with movies and tvshows arrays of enabled category keys
+   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number, titleKeys: Array<string>}>}
+   */
+  async removeProviderFromTitleSourcesByDisabledCategories(providerId, enabledCategories) {
+    return await this.mongoData.removeProviderFromTitleSourcesByDisabledCategories(providerId, enabledCategories);
+  }
+
+  /**
+   * Delete titles that have no streams left in title_streams collection
+   * More efficient: checks title_streams collection instead of titles.streams
+   * @param {Array<string>} titleKeys - Array of title_key values to check
+   * @returns {Promise<number>} Number of deleted titles
+   */
+  async deleteTitlesWithoutStreams(titleKeys) {
+    return await this.mongoData.deleteTitlesWithoutStreams(titleKeys);
+  }
+
+  /**
    * Delete titles without sources
    * Removes main titles that have no provider sources left
    * @param {Array<string>} [affectedProviderIds] - Optional: provider IDs that were processed (for query optimization)

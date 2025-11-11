@@ -89,10 +89,10 @@ export class IPTVProviderCategoriesChangedJob extends BaseJob {
             // 4. Delete provider titles for disabled categories using provider instance
             await providerInstance.deleteTitlesByCategories(disabledCategoryKeys);
 
-            // Track this provider and its disabled categories for batch operations
+            // Track this provider and its enabled categories for batch operations
             providersWithDisabledCategories.push({
               providerId,
-              disabledCategoryKeys
+              enabledCategories
             });
           }
 
@@ -109,23 +109,32 @@ export class IPTVProviderCategoriesChangedJob extends BaseJob {
       // Batch operations: run once after all providers are processed
       if (providersWithDisabledCategories.length > 0) {
         try {
-          // Collect all provider IDs and all disabled category keys
-          const affectedProviderIds = providersWithDisabledCategories.map(p => p.providerId);
-          const allDisabledCategoryKeys = [...new Set(
-            providersWithDisabledCategories.flatMap(p => p.disabledCategoryKeys)
-          )];
+          const allTitleKeys = [];
 
-          // 6. Delete title streams for disabled categories (batch operation through TMDBProvider)
-          const deletedStreams = await this.tmdbProvider.deleteTitleStreamsByCategories(affectedProviderIds, allDisabledCategoryKeys);
-          this.logger.info(`Deleted ${deletedStreams} title streams for disabled categories across ${affectedProviderIds.length} provider(s)`);
+          // Process each provider individually to use its enabled_categories
+          for (const { providerId, enabledCategories } of providersWithDisabledCategories) {
+            // Remove provider from title sources for disabled categories
+            // This efficiently queries provider_titles to find disabled category titles
+            const result = await this.tmdbProvider.removeProviderFromTitleSourcesByDisabledCategories(
+              providerId,
+              enabledCategories
+            );
 
-          // 7. Remove all affected providers from title sources (batch operation through TMDBProvider)
-          const { titlesUpdated, streamsRemoved } = await this.tmdbProvider.removeProvidersFromTitleSources(affectedProviderIds);
-          this.logger.info(`Removed ${affectedProviderIds.length} provider(s) from ${titlesUpdated} titles, ${streamsRemoved} streams removed`);
+            this.logger.info(
+              `Removed provider ${providerId} from ${result.titlesUpdated} titles, ` +
+              `${result.streamsRemoved} streams removed for disabled categories`
+            );
 
-          // 8. Delete titles without sources (batch operation through TMDBProvider)
-          const deletedTitlesWithoutSources = await this.tmdbProvider.deleteTitlesWithoutSources(affectedProviderIds);
-          this.logger.info(`Deleted ${deletedTitlesWithoutSources} titles without sources`);
+            // Collect title_keys for checking titles without streams
+            allTitleKeys.push(...result.titleKeys);
+          }
+
+          // Delete titles that have no streams left in title_streams collection
+          const uniqueTitleKeys = [...new Set(allTitleKeys)];
+          if (uniqueTitleKeys.length > 0) {
+            const deletedTitles = await this.tmdbProvider.deleteTitlesWithoutStreams(uniqueTitleKeys);
+            this.logger.info(`Deleted ${deletedTitles} titles without streams`);
+          }
         } catch (error) {
           this.logger.error(`Error in batch operations: ${error.message}`);
           // Don't fail the entire job, but log the error
