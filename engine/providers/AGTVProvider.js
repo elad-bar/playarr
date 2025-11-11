@@ -77,24 +77,6 @@ export class AGTVProvider extends BaseIPTVProvider {
   }
 
   /**
-   * Extract season/episode from title name (e.g., "Show Name S01 E01" -> "S01-E01")
-   * @private
-   * @param {string} titleName - Title name that may contain season/episode
-   * @returns {string|null} Formatted season/episode key (e.g., "S01-E01") or null if not found
-   */
-  _extractSeasonEpisode(titleName) {
-    // Match pattern like "S01 E01", "S1 E1", etc.
-    const match = titleName.match(/S(\d+)\s+E(\d+)/i);
-    if (!match) {
-      return null;
-    }
-
-    const season = String(match[1]).padStart(2, '0');
-    const episode = String(match[2]).padStart(2, '0');
-    return `S${season}-E${episode}`;
-  }
-
-  /**
    * Parse M3U8 content for movies
    * Each stream is a separate title
    * @private

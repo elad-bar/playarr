@@ -1043,24 +1043,6 @@ export class TMDBProvider extends BaseProvider {
   }
 
   /**
-   * Get similar movies by TMDB ID
-   * @param {number} tmdbId - TMDB movie ID
-   * @returns {Promise<Object>} Similar movies results
-   */
-  async getSimilarMovies(tmdbId) {
-    return await this.getSimilar('movie', tmdbId);
-  }
-
-  /**
-   * Get similar TV shows by TMDB ID
-   * @param {number} tmdbId - TMDB TV show ID
-   * @returns {Promise<Object>} Similar TV shows results
-   */
-  async getSimilarTVShows(tmdbId) {
-    return await this.getSimilar('tv', tmdbId);
-  }
-
-  /**
    * Get recommended batch size for processing titles based on rate limit configuration
    * The batch size is calculated from the API rate limit settings to optimize throughput
    * while avoiding memory issues. The limiter handles actual rate limiting internally.
