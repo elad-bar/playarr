@@ -553,27 +553,6 @@ export class MongoDataService {
   }
 
   /**
-   * Get IPTV providers from MongoDB (enabled, non-deleted only)
-   * @returns {Promise<Array<Object>>} Array of enabled, non-deleted provider documents, sorted by priority
-   */
-  async getIPTVProviders() {
-    return await this.db.collection('iptv_providers')
-      .find({ enabled: true, deleted: { $ne: true } })
-      .sort({ priority: 1 })
-      .toArray();
-  }
-
-  /**
-   * Get deleted providers from MongoDB
-   * @returns {Promise<Array<Object>>} Array of deleted provider documents
-   */
-  async getDeletedProviders() {
-    return await this.db.collection('iptv_providers')
-      .find({ deleted: true })
-      .toArray();
-  }
-
-  /**
    * Get job history from MongoDB
    * @param {string} jobName - Job name (e.g., "SyncIPTVProviderTitlesJob")
    * @param {string} [providerId=null] - Optional provider ID for provider-specific jobs
@@ -748,22 +727,6 @@ export class MongoDataService {
       },
       { upsert: true }
     );
-  }
-
-  /**
-   * Get cache policies by provider ID
-   * @param {string} providerId - Provider identifier
-   * @returns {Promise<Array<Object>>} Array of cache policy documents for the provider
-   */
-  async getCachePoliciesByProvider(providerId) {
-    try {
-      return await this.db.collection('cache_policy')
-        .find({ provider_id: providerId })
-        .toArray();
-    } catch (error) {
-      logger.error(`Error getting cache policies for provider ${providerId}: ${error.message}`);
-      return [];
-    }
   }
 
   /**
