@@ -33,6 +33,7 @@ class EngineServer {
         const allJobs = this._jobsManager.getAllJobsMetadata();
         const jobs = allJobs.map(job => ({
           name: job.name,
+          jobHistoryName: job.jobHistoryName,
           description: job.description,
           schedule: job.schedule,
           interval: job.interval,

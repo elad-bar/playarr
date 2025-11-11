@@ -33,17 +33,6 @@ class JobsManager extends BaseManager {
     }
   }
 
-  /**
-   * Map job name from engine format to job history format
-   * @param {string} engineJobName - Job name from engine
-   * @returns {string} Job name for job_history collection
-   */
-  _mapJobNameToHistory(engineJobName) {
-    const mapping = {
-      'syncIPTVProviderTitles': 'SyncIPTVProviderTitlesJob'
-    };
-    return mapping[engineJobName] || engineJobName;
-  }
 
   /**
    * Format job data for UI
@@ -52,8 +41,6 @@ class JobsManager extends BaseManager {
    * @returns {Object} Formatted job data
    */
   _formatJobData(engineJob, jobHistory) {
-    const historyJobName = this._mapJobNameToHistory(engineJob.name);
-    
     return {
       name: engineJob.name,
       description: engineJob.description,
@@ -100,8 +87,7 @@ class JobsManager extends BaseManager {
       // Get job history for each job from MongoDB
       const jobsWithHistory = await Promise.all(
         engineJobs.map(async (engineJob) => {
-          const historyJobName = this._mapJobNameToHistory(engineJob.name);
-          const jobHistory = await this._getJobHistory(historyJobName);
+          const jobHistory = await this._getJobHistory(engineJob.jobHistoryName);
           return this._formatJobData(engineJob, jobHistory);
         })
       );

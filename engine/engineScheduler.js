@@ -20,6 +20,7 @@ export class EngineScheduler {
     this._mongoData = mongoData;
     this._jobsManager = null;
     this._intervalId = null;
+    this._intervalIds = new Map(); // Map of jobName -> intervalId
     this._runningJobs = new Map();
     this._workersDir = path.join(__dirname, 'workers');
     this.logger = createLogger('EngineScheduler');
@@ -46,19 +47,22 @@ export class EngineScheduler {
     const scheduledJobs = jobsConfig.jobs.filter(job => job.interval);
     this._jobsManager = new JobsManager(this._mongoData, jobsConfig, null);
 
-    // Set up hourly interval first (so scheduler is ready)
-    if (scheduledJobs.length > 0) {
-      const intervalMs = this._parseTime(scheduledJobs[0].interval);
-      this._intervalId = setInterval(async () => {
-        for (const job of scheduledJobs) {
-          try {
-            await this.runJob(job.name);
-          } catch (error) {
-            this.logger.error(`Error running scheduled job '${job.name}': ${error.message}`);
-          }
+    // Set up individual intervals for each scheduled job
+    scheduledJobs.forEach(job => {
+      const intervalMs = this._parseTime(job.interval);
+      const intervalId = setInterval(async () => {
+        try {
+          await this.runJob(job.name);
+        } catch (error) {
+          this.logger.error(`Error running scheduled job '${job.name}': ${error.message}`);
         }
       }, intervalMs);
-      this.logger.info(`Scheduler started (interval: ${scheduledJobs[0].interval})`);
+      this._intervalIds.set(job.name, intervalId);
+      this.logger.debug(`Scheduled job '${job.name}' to run every ${job.interval}`);
+    });
+
+    if (scheduledJobs.length > 0) {
+      this.logger.info(`Scheduler started with ${scheduledJobs.length} job(s) at their configured intervals`);
     }
 
     this.logger.info('EngineScheduler initialized');
@@ -86,11 +90,20 @@ export class EngineScheduler {
    * @returns {Promise<void>}
    */
   async stop() {
+    // Clear all individual job intervals
+    if (this._intervalIds && this._intervalIds.size > 0) {
+      this._intervalIds.forEach((intervalId, jobName) => {
+        clearInterval(intervalId);
+        this.logger.debug(`Stopped interval for job '${jobName}'`);
+      });
+      this._intervalIds.clear();
+    }
+    // Keep backward compatibility with old _intervalId
     if (this._intervalId) {
       clearInterval(this._intervalId);
       this._intervalId = null;
-      this.logger.info('Job scheduler stopped');
     }
+    this.logger.info('Job scheduler stopped');
   }
 
   /**
