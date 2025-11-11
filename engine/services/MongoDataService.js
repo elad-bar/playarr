@@ -877,25 +877,6 @@ export class MongoDataService {
   }
 
   /**
-   * Delete title streams for multiple providers (batch operation)
-   * @param {Array<string>} providerIds - Array of provider IDs
-   * @returns {Promise<number>} Number of deleted documents
-   */
-  async deleteTitleStreams(providerIds) {
-    try {
-      if (!providerIds || providerIds.length === 0) {
-        return 0;
-      }
-      const result = await this.db.collection('title_streams')
-        .deleteMany({ provider_id: { $in: providerIds } });
-      return result.deletedCount || 0;
-    } catch (error) {
-      logger.error(`Error deleting title streams for providers: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
    * Delete title streams for specific categories of multiple providers (batch operation)
    * @param {Array<string>} providerIds - Array of provider IDs
    * @param {Array<string>} categoryKeys - Array of category keys (e.g., ["movies-1", "tvshows-5"])
@@ -1049,115 +1030,6 @@ export class MongoDataService {
       return { titlesUpdated, streamsRemoved };
     } catch (error) {
       logger.error(`Error removing provider from title sources: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Remove multiple providers from title sources (batch operation)
-   * Efficiently queries title_streams first to find only affected titles
-   * @param {Array<string>} providerIds - Array of provider IDs to remove
-   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number}>}
-   */
-  async removeProvidersFromTitleSources(providerIds) {
-    try {
-      if (!providerIds || providerIds.length === 0) {
-        return { titlesUpdated: 0, streamsRemoved: 0 };
-      }
-
-      // 1. Get all title_streams for these providers
-      const streams = await this.db.collection('title_streams')
-        .find({ provider_id: { $in: providerIds } })
-        .toArray();
-      
-      if (streams.length === 0) {
-        return { titlesUpdated: 0, streamsRemoved: 0 };
-      }
-      
-      // 2. Extract unique title_key values
-      const titleKeys = [...new Set(streams.map(s => s.title_key))];
-      
-      // 3. Fetch only affected titles
-      const titles = await this.db.collection('titles')
-        .find({ title_key: { $in: titleKeys } })
-        .toArray();
-      
-      if (titles.length === 0) {
-        return { titlesUpdated: 0, streamsRemoved: 0 };
-      }
-      
-      // Create a Set for faster lookup
-      const providerIdSet = new Set(providerIds);
-      
-      let titlesUpdated = 0;
-      let streamsRemoved = 0;
-      const bulkOps = [];
-      
-      // 4. Process each title
-      for (const title of titles) {
-        const streamsObj = title.streams || {};
-        let titleModified = false;
-        const updatedStreams = { ...streamsObj };
-        
-        // Process each stream entry in the streams object
-        for (const [streamKey, streamValue] of Object.entries(streamsObj)) {
-          if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
-            const originalLength = streamValue.sources.length;
-            // Filter out all provider IDs that are being removed
-            const filteredSources = streamValue.sources.filter(id => !providerIdSet.has(id));
-            
-            if (filteredSources.length !== originalLength) {
-              if (filteredSources.length > 0) {
-                updatedStreams[streamKey] = {
-                  ...streamValue,
-                  sources: filteredSources
-                };
-              } else {
-                updatedStreams[streamKey] = undefined;
-              }
-              streamsRemoved += (originalLength - filteredSources.length);
-              titleModified = true;
-            }
-          }
-        }
-        
-        // Remove undefined entries (streams with no sources left)
-        for (const key in updatedStreams) {
-          if (updatedStreams[key] === undefined) {
-            delete updatedStreams[key];
-          }
-        }
-        
-        // 5. Prepare update operation
-        if (titleModified) {
-          titlesUpdated++;
-          bulkOps.push({
-            updateOne: {
-              filter: { title_key: title.title_key },
-              update: {
-                $set: {
-                  streams: updatedStreams,
-                  lastUpdated: new Date()
-                }
-              }
-            }
-          });
-        }
-      }
-      
-      // 6. Execute bulk update
-      if (bulkOps.length > 0) {
-        const collection = this.db.collection('titles');
-        // Process in batches of 1000
-        for (let i = 0; i < bulkOps.length; i += 1000) {
-          const batch = bulkOps.slice(i, i + 1000);
-          await collection.bulkWrite(batch, { ordered: false });
-        }
-      }
-      
-      return { titlesUpdated, streamsRemoved };
-    } catch (error) {
-      logger.error(`Error removing providers from title sources: ${error.message}`);
       throw error;
     }
   }
@@ -1439,48 +1311,6 @@ export class MongoDataService {
       return result.deletedCount || 0;
     } catch (error) {
       logger.error(`Error deleting titles without streams: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Delete titles that have no sources
-   * @returns {Promise<number>} Number of deleted titles
-   */
-  async deleteTitlesWithoutSources() {
-    try {
-      const titles = await this.db.collection('titles')
-        .find({})
-        .toArray();
-      
-      const titlesToDelete = [];
-      for (const title of titles) {
-        const streams = title.streams || {};
-        let hasSources = false;
-        
-        for (const streamValue of Object.values(streams)) {
-          if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
-            if (streamValue.sources.length > 0) {
-              hasSources = true;
-              break;
-            }
-          }
-        }
-        
-        if (!hasSources) {
-          titlesToDelete.push(title.title_key);
-        }
-      }
-      
-      if (titlesToDelete.length === 0) {
-        return 0;
-      }
-      
-      const result = await this.db.collection('titles')
-        .deleteMany({ title_key: { $in: titlesToDelete } });
-      return result.deletedCount || 0;
-    } catch (error) {
-      logger.error(`Error deleting titles without sources: ${error.message}`);
       throw error;
     }
   }
