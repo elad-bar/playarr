@@ -201,6 +201,27 @@ export class MongoDataService {
   }
 
   /**
+   * Reset lastUpdated timestamp for all provider titles of a provider
+   * Used when provider is re-enabled to ensure all titles are reprocessed by ProviderTitlesMonitorJob
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<number>} Number of titles updated
+   */
+  async resetProviderTitlesLastUpdated(providerId) {
+    try {
+      const now = new Date();
+      const result = await this.db.collection('provider_titles')
+        .updateMany(
+          { provider_id: providerId },
+          { $set: { lastUpdated: now } }
+        );
+      return result.modifiedCount || 0;
+    } catch (error) {
+      logger.error(`Error resetting provider titles lastUpdated for ${providerId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Get main titles from MongoDB
    * @param {Object} [query={}] - MongoDB query object
    * @returns {Promise<Array<Object>>} Array of main title documents

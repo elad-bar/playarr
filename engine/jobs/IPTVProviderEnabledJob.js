@@ -68,7 +68,11 @@ export class IPTVProviderEnabledJob extends BaseJob {
           // 1. Update provider configuration
           await providerInstance.updateConfiguration(providerConfig);
 
-          // 2. Trigger process provider titles using provider instance
+          // 2. Reset lastUpdated for all provider titles to ensure they're reprocessed
+          const titlesUpdated = await providerInstance.resetTitlesLastUpdated();
+          this.logger.info(`Reset lastUpdated for ${titlesUpdated} provider titles for ${providerId}`);
+
+          // 3. Trigger process provider titles using provider instance
           await providerInstance.processProviderTitles();
 
           processed++;

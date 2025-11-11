@@ -915,5 +915,17 @@ export class BaseIPTVProvider extends BaseProvider {
     
     this.logger.info(`Completed processing provider titles for ${this.providerId}`);
   }
+
+  /**
+   * Reset lastUpdated for all provider titles
+   * Ensures all titles will be picked up by ProviderTitlesMonitorJob
+   * @returns {Promise<number>} Number of titles updated
+   */
+  async resetTitlesLastUpdated() {
+    if (!this.mongoData) {
+      throw new Error('MongoDataService is required');
+    }
+    return await this.mongoData.resetProviderTitlesLastUpdated(this.providerId);
+  }
 }
 
