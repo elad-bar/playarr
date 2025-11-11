@@ -53,6 +53,150 @@ export class MongoDataService {
   }
 
   /**
+   * Extract category IDs from category keys
+   * @private
+   * @param {Array<string>} categoryKeys - Array of category keys (e.g., ["movies-1", "tvshows-5"])
+   * @returns {Array<number>} Array of category IDs (integers), filtered to remove invalid values
+   */
+  _extractCategoryIdsFromKeys(categoryKeys) {
+    if (!categoryKeys || categoryKeys.length === 0) {
+      return [];
+    }
+
+    return categoryKeys
+      .map(key => {
+        const parts = key.split('-');
+        return parts.length > 1 ? parseInt(parts[1]) : null;
+      })
+      .filter(id => id !== null && !isNaN(id));
+  }
+
+  /**
+   * Convert array of documents to key-value object
+   * @private
+   * @param {Array<Object>} docs - Array of documents with _id and value fields
+   * @returns {Object} Object with _id as keys and value as values
+   */
+  _convertDocsToKeyValueObject(docs) {
+    const result = {};
+    for (const doc of docs) {
+      result[doc._id] = doc.value;
+    }
+    return result;
+  }
+
+  /**
+   * Execute bulk insert and update operations in batches
+   * @private
+   * @param {import('mongodb').Collection} collection - MongoDB collection
+   * @param {Array<Object>} toInsert - Array of documents to insert
+   * @param {Array<Object>} toUpdate - Array of bulk write operations for updates
+   * @returns {Promise<{inserted: number, updated: number}>} Count of inserted and updated documents
+   */
+  async _executeBulkOperations(collection, toInsert, toUpdate) {
+    let inserted = 0;
+    let updated = 0;
+
+    // Bulk insert in batches
+    if (toInsert.length > 0) {
+      for (let i = 0; i < toInsert.length; i += this.batchSize) {
+        const batch = toInsert.slice(i, i + this.batchSize);
+        const result = await collection.insertMany(batch, { ordered: false });
+        inserted += result.insertedCount;
+      }
+    }
+
+    // Bulk update in batches
+    if (toUpdate.length > 0) {
+      for (let i = 0; i < toUpdate.length; i += this.batchSize) {
+        const batch = toUpdate.slice(i, i + this.batchSize);
+        const result = await collection.bulkWrite(batch, { ordered: false });
+        updated += result.modifiedCount;
+      }
+    }
+
+    return { inserted, updated };
+  }
+
+  /**
+   * Remove provider IDs from title stream sources
+   * @private
+   * @param {Array<Object>} titles - Array of title documents with streams property
+   * @param {string|Array<string>|Set<string>} providerIds - Provider ID(s) to remove (single string, array, or Set)
+   * @param {import('mongodb').Collection} collection - MongoDB collection for titles
+   * @param {boolean} [executeBulkOps=true] - Whether to execute bulk operations immediately
+   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number, bulkOps: Array<Object>}>} Results and bulk operations
+   */
+  async _removeProvidersFromTitleStreams(titles, providerIds, collection, executeBulkOps = true) {
+    // Normalize providerIds to Set
+    const providerIdSet = providerIds instanceof Set 
+      ? providerIds 
+      : new Set(Array.isArray(providerIds) ? providerIds : [providerIds]);
+
+    let titlesUpdated = 0;
+    let streamsRemoved = 0;
+    const bulkOps = [];
+
+    for (const title of titles) {
+      const streamsObj = title.streams || {};
+      let titleModified = false;
+      const updatedStreams = { ...streamsObj };
+
+      for (const [streamKey, streamValue] of Object.entries(streamsObj)) {
+        if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
+          const originalLength = streamValue.sources.length;
+          const filteredSources = streamValue.sources.filter(id => !providerIdSet.has(id));
+
+          if (filteredSources.length !== originalLength) {
+            if (filteredSources.length > 0) {
+              updatedStreams[streamKey] = {
+                ...streamValue,
+                sources: filteredSources
+              };
+            } else {
+              updatedStreams[streamKey] = undefined;
+            }
+            streamsRemoved += (originalLength - filteredSources.length);
+            titleModified = true;
+          }
+        }
+      }
+
+      // Remove undefined entries (streams with no sources left)
+      for (const key in updatedStreams) {
+        if (updatedStreams[key] === undefined) {
+          delete updatedStreams[key];
+        }
+      }
+
+      if (titleModified) {
+        titlesUpdated++;
+        bulkOps.push({
+          updateOne: {
+            filter: { title_key: title.title_key },
+            update: {
+              $set: {
+                streams: updatedStreams,
+                lastUpdated: new Date()
+              }
+            }
+          }
+        });
+      }
+    }
+
+    // Execute bulk update if requested
+    if (executeBulkOps && bulkOps.length > 0) {
+      for (let i = 0; i < bulkOps.length; i += this.batchSize) {
+        const batch = bulkOps.slice(i, i + this.batchSize);
+        await collection.bulkWrite(batch, { ordered: false });
+      }
+    }
+
+    return { titlesUpdated, streamsRemoved, bulkOps };
+  }
+
+  /**
    * Get provider titles from MongoDB
    * @param {string} providerId - Provider identifier
    * @param {Object} [options={}] - Query options
@@ -176,28 +320,7 @@ export class MongoDataService {
       }
     }
 
-    let inserted = 0;
-    let updated = 0;
-
-    // Bulk insert new titles in batches of 1000
-    if (toInsert.length > 0) {
-      for (let i = 0; i < toInsert.length; i += this.batchSize) {
-        const batch = toInsert.slice(i, i + this.batchSize);
-        const result = await collection.insertMany(batch, { ordered: false });
-        inserted += result.insertedCount;
-      }
-    }
-
-    // Bulk update existing titles in batches of 1000
-    if (toUpdate.length > 0) {
-      for (let i = 0; i < toUpdate.length; i += this.batchSize) {
-        const batch = toUpdate.slice(i, i + this.batchSize);
-        const result = await collection.bulkWrite(batch, { ordered: false });
-        updated += result.modifiedCount;
-      }
-    }
-
-    return { inserted, updated };
+    return await this._executeBulkOperations(collection, toInsert, toUpdate);
   }
 
   /**
@@ -308,28 +431,7 @@ export class MongoDataService {
       }
     }
 
-    let inserted = 0;
-    let updated = 0;
-
-    // Bulk insert new titles
-    if (toInsert.length > 0) {
-      for (let i = 0; i < toInsert.length; i += this.batchSize) {
-        const batch = toInsert.slice(i, i + this.batchSize);
-        const result = await collection.insertMany(batch, { ordered: false });
-        inserted += result.insertedCount;
-      }
-    }
-
-    // Bulk update existing titles
-    if (toUpdate.length > 0) {
-      for (let i = 0; i < toUpdate.length; i += this.batchSize) {
-        const batch = toUpdate.slice(i, i + this.batchSize);
-        const result = await collection.bulkWrite(batch, { ordered: false });
-        updated += result.modifiedCount;
-      }
-    }
-
-    return { inserted, updated };
+    return await this._executeBulkOperations(collection, toInsert, toUpdate);
   }
 
   /**
@@ -402,28 +504,7 @@ export class MongoDataService {
       }
     }
 
-    let inserted = 0;
-    let updated = 0;
-
-    // Bulk insert new streams
-    if (toInsert.length > 0) {
-      for (let i = 0; i < toInsert.length; i += this.batchSize) {
-        const batch = toInsert.slice(i, i + this.batchSize);
-        const result = await collection.insertMany(batch, { ordered: false });
-        inserted += result.insertedCount;
-      }
-    }
-
-    // Bulk update existing streams
-    if (toUpdate.length > 0) {
-      for (let i = 0; i < toUpdate.length; i += this.batchSize) {
-        const batch = toUpdate.slice(i, i + this.batchSize);
-        const result = await collection.bulkWrite(batch, { ordered: false });
-        updated += result.modifiedCount;
-      }
-    }
-
-    return { inserted, updated };
+    return await this._executeBulkOperations(collection, toInsert, toUpdate);
   }
 
   /**
@@ -517,28 +598,7 @@ export class MongoDataService {
       }
     }
 
-    let inserted = 0;
-    let updated = 0;
-
-    // Bulk insert new categories
-    if (toInsert.length > 0) {
-      for (let i = 0; i < toInsert.length; i += this.batchSize) {
-        const batch = toInsert.slice(i, i + this.batchSize);
-        const result = await collection.insertMany(batch, { ordered: false });
-        inserted += result.insertedCount;
-      }
-    }
-
-    // Bulk update existing categories
-    if (toUpdate.length > 0) {
-      for (let i = 0; i < toUpdate.length; i += this.batchSize) {
-        const batch = toUpdate.slice(i, i + this.batchSize);
-        const result = await collection.bulkWrite(batch, { ordered: false });
-        updated += result.modifiedCount;
-      }
-    }
-
-    return { inserted, updated };
+    return await this._executeBulkOperations(collection, toInsert, toUpdate);
   }
 
   /**
@@ -658,11 +718,7 @@ export class MongoDataService {
         .find({})
         .toArray();
       
-      const policies = {};
-      for (const doc of docs) {
-        policies[doc._id] = doc.value;
-      }
-      return policies;
+      return this._convertDocsToKeyValueObject(docs);
     } catch (error) {
       logger.error(`Error getting cache policies: ${error.message}`);
       return {};
@@ -739,11 +795,7 @@ export class MongoDataService {
         .find({})
         .toArray();
       
-      const settings = {};
-      for (const doc of docs) {
-        settings[doc._id] = doc.value;
-      }
-      return settings;
+      return this._convertDocsToKeyValueObject(docs);
     } catch (error) {
       logger.error(`Error getting settings: ${error.message}`);
       return {};
@@ -791,14 +843,11 @@ export class MongoDataService {
   async deleteProviderTitleStreamsByCategories(providerId, categoryKeys) {
     try {
       // First, get provider titles that match the category keys
+      const categoryIds = this._extractCategoryIdsFromKeys(categoryKeys);
       const providerTitles = await this.db.collection('provider_titles')
         .find({ 
           provider_id: providerId,
-          category_id: { $in: categoryKeys.map(key => {
-            // Extract category_id from category_key (format: "type-id")
-            const parts = key.split('-');
-            return parts.length > 1 ? parseInt(parts[1]) : null;
-          }).filter(Boolean) }
+          category_id: { $in: categoryIds }
         })
         .toArray();
 
@@ -835,12 +884,7 @@ export class MongoDataService {
       }
 
       // Extract category IDs from category keys (format: "type-id")
-      const categoryIds = categoryKeys
-        .map(key => {
-          const parts = key.split('-');
-          return parts.length > 1 ? parseInt(parts[1]) : null;
-        })
-        .filter(id => id !== null && !isNaN(id));
+      const categoryIds = this._extractCategoryIdsFromKeys(categoryKeys);
 
       if (categoryIds.length === 0) {
         return 0;
@@ -873,12 +917,7 @@ export class MongoDataService {
       }
 
       // Extract category IDs from category keys (format: "type-id")
-      const categoryIds = categoryKeys
-        .map(key => {
-          const parts = key.split('-');
-          return parts.length > 1 ? parseInt(parts[1]) : null;
-        })
-        .filter(id => id !== null && !isNaN(id));
+      const categoryIds = this._extractCategoryIdsFromKeys(categoryKeys);
 
       if (categoryIds.length === 0) {
         return 0;
@@ -946,72 +985,11 @@ export class MongoDataService {
         return { titlesUpdated: 0, streamsRemoved: 0 };
       }
       
-      let titlesUpdated = 0;
-      let streamsRemoved = 0;
-      const bulkOps = [];
+      // 4. Remove provider from title streams
+      const collection = this.db.collection('titles');
+      const result = await this._removeProvidersFromTitleStreams(titles, providerId, collection);
       
-      // 4. Process each title
-      for (const title of titles) {
-        const streamsObj = title.streams || {};
-        let titleModified = false;
-        const updatedStreams = { ...streamsObj };
-        
-        // Process each stream entry in the streams object
-        for (const [streamKey, streamValue] of Object.entries(streamsObj)) {
-          if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
-            const originalLength = streamValue.sources.length;
-            const filteredSources = streamValue.sources.filter(id => id !== providerId);
-            
-            if (filteredSources.length !== originalLength) {
-              if (filteredSources.length > 0) {
-                updatedStreams[streamKey] = {
-                  ...streamValue,
-                  sources: filteredSources
-                };
-              } else {
-                updatedStreams[streamKey] = undefined;
-              }
-              streamsRemoved += (originalLength - filteredSources.length);
-              titleModified = true;
-            }
-          }
-        }
-        
-        // Remove undefined entries (streams with no sources left)
-        for (const key in updatedStreams) {
-          if (updatedStreams[key] === undefined) {
-            delete updatedStreams[key];
-          }
-        }
-        
-        // 5. Prepare update operation
-        if (titleModified) {
-          titlesUpdated++;
-          bulkOps.push({
-            updateOne: {
-              filter: { title_key: title.title_key },
-              update: {
-                $set: {
-                  streams: updatedStreams,
-                  lastUpdated: new Date()
-                }
-              }
-            }
-          });
-        }
-      }
-      
-      // 6. Execute bulk update
-      if (bulkOps.length > 0) {
-        const collection = this.db.collection('titles');
-        // Process in batches of 1000
-        for (let i = 0; i < bulkOps.length; i += 1000) {
-          const batch = bulkOps.slice(i, i + 1000);
-          await collection.bulkWrite(batch, { ordered: false });
-        }
-      }
-      
-      return { titlesUpdated, streamsRemoved };
+      return { titlesUpdated: result.titlesUpdated, streamsRemoved: result.streamsRemoved };
     } catch (error) {
       logger.error(`Error removing provider from title sources: ${error.message}`);
       throw error;
@@ -1054,72 +1032,18 @@ export class MongoDataService {
       const titleKeysToClean = titleKeys.filter(key => titleKeysWithStreamsSet.has(key));
 
       // 5. Remove provider from titles.streams for titles that still have streams
-      const providerIdSet = new Set(providerIds);
       let titlesUpdated = 0;
       let streamsRemoved = 0;
-      const bulkOps = [];
 
       if (titleKeysToClean.length > 0) {
         const titles = await this.db.collection('titles')
           .find({ title_key: { $in: titleKeysToClean } })
           .toArray();
 
-        for (const title of titles) {
-          const streamsObj = title.streams || {};
-          let titleModified = false;
-          const updatedStreams = { ...streamsObj };
-
-          for (const [streamKey, streamValue] of Object.entries(streamsObj)) {
-            if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
-              const originalLength = streamValue.sources.length;
-              const filteredSources = streamValue.sources.filter(id => !providerIdSet.has(id));
-
-              if (filteredSources.length !== originalLength) {
-                if (filteredSources.length > 0) {
-                  updatedStreams[streamKey] = {
-                    ...streamValue,
-                    sources: filteredSources
-                  };
-                } else {
-                  updatedStreams[streamKey] = undefined;
-                }
-                streamsRemoved += (originalLength - filteredSources.length);
-                titleModified = true;
-              }
-            }
-          }
-
-          // Remove undefined entries
-          for (const key in updatedStreams) {
-            if (updatedStreams[key] === undefined) {
-              delete updatedStreams[key];
-            }
-          }
-
-          if (titleModified) {
-            titlesUpdated++;
-            bulkOps.push({
-              updateOne: {
-                filter: { title_key: title.title_key },
-                update: {
-                  $set: {
-                    streams: updatedStreams,
-                    lastUpdated: new Date()
-                  }
-                }
-              }
-            });
-          }
-        }
-
-        // Execute bulk update
-        if (bulkOps.length > 0) {
-          const collection = this.db.collection('titles');
-          for (let i = 0; i < bulkOps.length; i += this.batchSize) {
-            const batch = bulkOps.slice(i, i + this.batchSize);
-            await collection.bulkWrite(batch, { ordered: false });
-          }
-        }
+        const collection = this.db.collection('titles');
+        const result = await this._removeProvidersFromTitleStreams(titles, providerIds, collection);
+        titlesUpdated = result.titlesUpdated;
+        streamsRemoved = result.streamsRemoved;
       }
 
       return {
@@ -1143,22 +1067,11 @@ export class MongoDataService {
   async removeProviderFromTitleSourcesByDisabledCategories(providerId, enabledCategories) {
     try {
       // 1. Extract enabled category IDs from enabled category keys
-      const enabledCategoryIds = new Set();
-      const enabledCategoryKeys = new Set([
+      const enabledCategoryKeys = [
         ...(enabledCategories.movies || []),
         ...(enabledCategories.tvshows || [])
-      ]);
-      
-      // Parse category keys to get category IDs (format: "type-id")
-      for (const key of enabledCategoryKeys) {
-        const parts = key.split('-');
-        if (parts.length > 1) {
-          const categoryId = parseInt(parts[1]);
-          if (!isNaN(categoryId)) {
-            enabledCategoryIds.add(categoryId);
-          }
-        }
-      }
+      ];
+      const enabledCategoryIds = new Set(this._extractCategoryIdsFromKeys(enabledCategoryKeys));
 
       // 2. Find provider_titles NOT in enabled categories (efficient single query)
       const disabledProviderTitles = await this.db.collection('provider_titles')
@@ -1190,67 +1103,10 @@ export class MongoDataService {
         .find({ title_key: { $in: titleKeys } })
         .toArray();
 
-      const providerIdSet = new Set([providerId]);
-      let titlesUpdated = 0;
-      let streamsRemoved = 0;
-      const bulkOps = [];
-
-      for (const title of titles) {
-        const streamsObj = title.streams || {};
-        let titleModified = false;
-        const updatedStreams = { ...streamsObj };
-
-        for (const [streamKey, streamValue] of Object.entries(streamsObj)) {
-          if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
-            const originalLength = streamValue.sources.length;
-            const filteredSources = streamValue.sources.filter(id => !providerIdSet.has(id));
-
-            if (filteredSources.length !== originalLength) {
-              if (filteredSources.length > 0) {
-                updatedStreams[streamKey] = {
-                  ...streamValue,
-                  sources: filteredSources
-                };
-              } else {
-                updatedStreams[streamKey] = undefined;
-              }
-              streamsRemoved += (originalLength - filteredSources.length);
-              titleModified = true;
-            }
-          }
-        }
-
-        // Remove undefined entries
-        for (const key in updatedStreams) {
-          if (updatedStreams[key] === undefined) {
-            delete updatedStreams[key];
-          }
-        }
-
-        if (titleModified) {
-          titlesUpdated++;
-          bulkOps.push({
-            updateOne: {
-              filter: { title_key: title.title_key },
-              update: {
-                $set: {
-                  streams: updatedStreams,
-                  lastUpdated: new Date()
-                }
-              }
-            }
-          });
-        }
-      }
-
-      // Execute bulk update
-      if (bulkOps.length > 0) {
-        const collection = this.db.collection('titles');
-        for (let i = 0; i < bulkOps.length; i += this.batchSize) {
-          const batch = bulkOps.slice(i, i + this.batchSize);
-          await collection.bulkWrite(batch, { ordered: false });
-        }
-      }
+      const collection = this.db.collection('titles');
+      const result = await this._removeProvidersFromTitleStreams(titles, providerId, collection);
+      const titlesUpdated = result.titlesUpdated;
+      const streamsRemoved = result.streamsRemoved;
 
       return {
         titlesUpdated,
