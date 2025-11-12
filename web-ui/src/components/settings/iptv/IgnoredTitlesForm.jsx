@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -23,16 +23,7 @@ function IgnoredTitlesForm({ provider }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    if (provider?.id) {
-      loadIgnoredTitles();
-    } else {
-      setIgnoredTitles([]);
-      setLoading(false);
-    }
-  }, [provider?.id]);
-
-  const loadIgnoredTitles = async () => {
+  const loadIgnoredTitles = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -45,7 +36,16 @@ function IgnoredTitlesForm({ provider }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [provider?.id]);
+
+  useEffect(() => {
+    if (provider?.id) {
+      loadIgnoredTitles();
+    } else {
+      setIgnoredTitles([]);
+      setLoading(false);
+    }
+  }, [provider?.id, loadIgnoredTitles]);
 
   // Parse title key to extract type and ID
   const parseTitleKey = (titleKey) => {
