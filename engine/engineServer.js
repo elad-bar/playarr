@@ -1,6 +1,5 @@
 import express from 'express';
 import { createLogger } from './utils/logger.js';
-import { ApplicationContext } from './context/ApplicationContext.js';
 
 const logger = createLogger('EngineServer');
 
@@ -9,12 +8,14 @@ const logger = createLogger('EngineServer');
  */
 class EngineServer {
   /**
-   * @param {import('./EngineScheduler.js').EngineScheduler} scheduler - Job scheduler instance
+   * @param {import('./engineScheduler.js').EngineScheduler} scheduler - Job scheduler instance
    * @param {import('./managers/JobsManager.js').JobsManager} jobsManager - Jobs manager for validation
+   * @param {import('./managers/ProviderManager.js').ProviderManager} providerManager - Provider manager for handling provider events
    */
-  constructor(scheduler, jobsManager) {
+  constructor(scheduler, jobsManager, providerManager) {
     this._scheduler = scheduler;
     this._jobsManager = jobsManager;
+    this._providerManager = providerManager;
     this._app = null;
     this._server = null;
   }
@@ -147,55 +148,30 @@ class EngineServer {
           return res.status(400).json({ error: 'action is required' });
         }
 
-        const context = ApplicationContext.getInstance();
-        const validActions = ['created', 'deleted', 'enabled', 'disabled', 'categories-changed', 'updated'];
-        
+        const validActions = Object.keys(this._providerManager.actionHandlers);
         if (!validActions.includes(action)) {
           return res.status(400).json({ error: `Invalid action: ${action}. Must be one of: ${validActions.join(', ')}` });
         }
 
-        logger.info(`Provider changed event: ${action} for provider ${providerId}`);
+        // Get instructions from ProviderManager
+        const result = await this._providerManager.handleProviderChanged(providerId, action, providerConfig);
 
-        // Handle action based on type
-        try {
-          switch (action) {
-            case 'created':
-              await this._handleProviderCreated(context, providerId, providerConfig);
-              break;
-            
-            case 'deleted':
-              await this._handleProviderDeleted(context, providerId);
-              break;
-            
-            case 'enabled':
-              await this._handleProviderEnabled(context, providerId, providerConfig);
-              break;
-            
-            case 'disabled':
-              await this._handleProviderDisabled(context, providerId, providerConfig);
-              break;
-            
-            case 'categories-changed':
-              await this._handleProviderCategoriesChanged(context, providerId, providerConfig);
-              break;
-            
-            case 'updated':
-              await this._handleProviderUpdated(context, providerId, providerConfig);
-              break;
+        // Execute any actions returned
+        if (result.actions && result.actions.length > 0) {
+          for (const actionItem of result.actions) {
+            if (actionItem.type === 'triggerJob') {
+              await this._scheduler.runJob(actionItem.jobName, actionItem.data);
+            }
+            // Could extend for other action types in the future
           }
-
-          res.json({ 
-            success: true, 
-            message: `Provider ${action} handled successfully`,
-            providerId,
-            action
-          });
-        } catch (error) {
-          logger.error(`Error handling provider ${action} for ${providerId}:`, error);
-          res.status(500).json({ 
-            error: `Failed to handle provider ${action}: ${error.message}` 
-          });
         }
+
+        res.json({ 
+          success: true, 
+          message: `Provider ${action} handled successfully`,
+          providerId,
+          action
+        });
       } catch (error) {
         logger.error(`Error processing provider changed event:`, error);
         res.status(500).json({ error: `Failed to process provider changed event: ${error.message}` });
@@ -239,176 +215,6 @@ class EngineServer {
     this._app.get('/api/health', (req, res) => {
       res.json({ status: 'ok', service: 'engine-api' });
     });
-  }
-
-  /**
-   * Handle provider created
-   * @private
-   */
-  async _handleProviderCreated(context, providerId, providerConfig) {
-    // Fetch provider config if not provided
-    if (!providerConfig) {
-      providerConfig = await context.mongoData.getProviderConfig(providerId);
-    }
-
-    if (!providerConfig) {
-      throw new Error(`Provider ${providerId} not found in database`);
-    }
-
-    // Get or create provider instance
-    let providerInstance = context.providers.get(providerId);
-    if (providerInstance) {
-      logger.info(`Provider ${providerId} already exists in context, updating configuration`);
-      await providerInstance.updateConfiguration(providerConfig);
-    } else {
-      // Create new provider instance
-      providerInstance = context.createProviderInstance(providerConfig);
-      await providerInstance.initializeCachePolicies();
-      context.providers.set(providerId, providerInstance);
-      logger.info(`Added provider ${providerId} to ApplicationContext`);
-    }
-
-    // If enabled, trigger sync job
-    if (providerConfig.enabled) {
-      await this._scheduler.runJob('syncIPTVProviderTitles', { providerId });
-    }
-  }
-
-  /**
-   * Handle provider deleted
-   * @private
-   */
-  async _handleProviderDeleted(context, providerId) {
-    const providerInstance = context.providers.get(providerId);
-
-    if (providerInstance) {
-      // Cleanup cache files
-      await providerInstance.cleanup();
-      
-      // Delete cache policies
-      await providerInstance.deleteCachePolicies();
-      
-      // Remove from ApplicationContext
-      context.providers.delete(providerId);
-      logger.info(`Removed provider ${providerId} from ApplicationContext`);
-    } else {
-      logger.warn(`Provider ${providerId} instance not found in ApplicationContext, skipping cleanup`);
-    }
-  }
-
-  /**
-   * Handle provider enabled
-   * @private
-   */
-  async _handleProviderEnabled(context, providerId, providerConfig) {
-    // Fetch provider config if not provided
-    if (!providerConfig) {
-      providerConfig = await context.mongoData.getProviderConfig(providerId);
-    }
-
-    if (!providerConfig) {
-      throw new Error(`Provider ${providerId} not found in database`);
-    }
-
-    // Get or create provider instance
-    let providerInstance = context.providers.get(providerId);
-    if (!providerInstance) {
-      providerInstance = context.createProviderInstance(providerConfig);
-      await providerInstance.initializeCachePolicies();
-      context.providers.set(providerId, providerInstance);
-      logger.info(`Created provider instance for ${providerId}`);
-    }
-
-    // Update configuration
-    await providerInstance.updateConfiguration(providerConfig);
-
-    // Reset lastUpdated for all provider titles
-    const titlesUpdated = await providerInstance.resetTitlesLastUpdated();
-    logger.info(`Reset lastUpdated for ${titlesUpdated} provider titles for ${providerId}`);
-
-    // Trigger sync job
-    await this._scheduler.runJob('syncIPTVProviderTitles', { providerId });
-  }
-
-  /**
-   * Handle provider disabled
-   * @private
-   */
-  async _handleProviderDisabled(context, providerId, providerConfig) {
-    // Fetch provider config if not provided
-    if (!providerConfig) {
-      providerConfig = await context.mongoData.getProviderConfig(providerId);
-    }
-
-    if (!providerConfig) {
-      throw new Error(`Provider ${providerId} not found in database`);
-    }
-
-    // Get or create provider instance
-    let providerInstance = context.providers.get(providerId);
-    if (!providerInstance) {
-      providerInstance = context.createProviderInstance(providerConfig);
-      await providerInstance.initializeCachePolicies();
-      context.providers.set(providerId, providerInstance);
-      logger.info(`Created provider instance for ${providerId}`);
-    }
-
-    // Update configuration
-    await providerInstance.updateConfiguration(providerConfig);
-  }
-
-  /**
-   * Handle provider categories changed
-   * @private
-   */
-  async _handleProviderCategoriesChanged(context, providerId, providerConfig) {
-    // Fetch provider config if not provided
-    if (!providerConfig) {
-      providerConfig = await context.mongoData.getProviderConfig(providerId);
-    }
-
-    if (!providerConfig) {
-      throw new Error(`Provider ${providerId} not found in database`);
-    }
-
-    // Get or create provider instance
-    let providerInstance = context.providers.get(providerId);
-    if (!providerInstance) {
-      providerInstance = context.createProviderInstance(providerConfig);
-      await providerInstance.initializeCachePolicies();
-      context.providers.set(providerId, providerInstance);
-      logger.info(`Created provider instance for ${providerId}`);
-    }
-
-    // Update configuration
-    await providerInstance.updateConfiguration(providerConfig);
-
-    // Trigger sync job
-    await this._scheduler.runJob('syncIPTVProviderTitles', { providerId });
-  }
-
-  /**
-   * Handle provider updated (general update, no state change)
-   * @private
-   */
-  async _handleProviderUpdated(context, providerId, providerConfig) {
-    // Fetch provider config if not provided
-    if (!providerConfig) {
-      providerConfig = await context.mongoData.getProviderConfig(providerId);
-    }
-
-    if (!providerConfig) {
-      throw new Error(`Provider ${providerId} not found in database`);
-    }
-
-    // Update configuration if instance exists
-    const providerInstance = context.providers.get(providerId);
-    if (providerInstance) {
-      await providerInstance.updateConfiguration(providerConfig);
-      logger.info(`Updated provider ${providerId} configuration in ApplicationContext`);
-    } else {
-      logger.debug(`Provider ${providerId} instance not in context, will be loaded on next sync`);
-    }
   }
 
   /**

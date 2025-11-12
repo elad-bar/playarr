@@ -1,4 +1,5 @@
 import { StorageManager } from '../managers/StorageManager.js';
+import { ProviderManager } from '../managers/ProviderManager.js';
 import { BaseProvider } from '../providers/BaseProvider.js';
 import { AGTVProvider } from '../providers/AGTVProvider.js';
 import { XtreamProvider } from '../providers/XtreamProvider.js';
@@ -10,7 +11,7 @@ import { MongoDataService } from '../services/MongoDataService.js';
 /**
  * Application Context Singleton
  * Centralized initialization and access to all application dependencies
- * Provides a single source of truth for MongoDB, Cache, TMDBProvider, and IPTV Providers
+ * Provides a single source of truth for MongoDB, Cache, ProviderManager, TMDBProvider, and IPTV Providers
  */
 export class ApplicationContext {
   static instance = null;
@@ -32,9 +33,10 @@ export class ApplicationContext {
    * Initializes all dependencies in the correct order:
    * 1. MongoDB connection
    * 2. StorageManager (cache)
-   * 3. Settings from MongoDB
-   * 4. TMDBProvider
-   * 5. IPTV Providers
+   * 3. ProviderManager
+   * 4. Settings from MongoDB
+   * 5. TMDBProvider
+   * 6. IPTV Providers
    * 
    * @param {string} cacheDir - Directory path for cache storage
    * @returns {Promise<ApplicationContext>} The initialized context instance
@@ -73,7 +75,11 @@ export class ApplicationContext {
     await context.cache.initialize();
     logger.debug('✓ Storage manager initialized');
 
-    // 3. Load settings from MongoDB
+    // 3. Initialize provider manager
+    context.providerManager = new ProviderManager(context.mongoData);
+    logger.debug('✓ Provider manager initialized');
+
+    // 4. Load settings from MongoDB
     let settings = {};
     try {
       settings = await context.mongoData.getSettings();
@@ -82,7 +88,7 @@ export class ApplicationContext {
       logger.warn(`Failed to load settings from MongoDB: ${error.message}`);
     }
 
-    // 4. Initialize TMDB provider (must be done before creating IPTV providers)
+    // 5. Initialize TMDB provider (must be done before creating IPTV providers)
     context.tmdbProvider = await TMDBProvider.getInstance(
       context.cache,
       context.mongoData,
@@ -90,7 +96,7 @@ export class ApplicationContext {
     );
     logger.debug('✓ TMDB provider initialized');
 
-    // 5. Load and initialize IPTV providers (all non-deleted providers)
+    // 6. Load and initialize IPTV providers (all non-deleted providers)
     context.providers = new Map();
     const providerConfigs = await BaseProvider.loadProviders(context.mongoData);
     logger.debug(`Found ${providerConfigs.length} provider(s)`);
@@ -147,6 +153,14 @@ export class ApplicationContext {
    */
   getProviders() {
     return this.providers;
+  }
+
+  /**
+   * Get provider manager instance
+   * @returns {import('../managers/ProviderManager.js').ProviderManager} Provider manager instance
+   */
+  getProviderManager() {
+    return this.providerManager;
   }
 
   /**
