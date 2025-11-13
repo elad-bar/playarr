@@ -89,26 +89,6 @@ export class TMDBProvider extends BaseProvider {
   }
 
   /**
-   * Search for a movie by title
-   * @param {string} title - Movie title to search for
-   * @param {number} [year] - Optional release year
-   * @returns {Promise<Object>} TMDB search results
-   */
-  async searchMovie(title, year = null) {
-    return await this.search('movie', title, year);
-  }
-
-  /**
-   * Search for a TV show by title
-   * @param {string} title - TV show title to search for
-   * @param {number} [year] - Optional first air date year
-   * @returns {Promise<Object>} TMDB search results
-   */
-  async searchTVShow(title, year = null) {
-    return await this.search('tv', title, year);
-  }
-
-  /**
    * Find TMDB ID by IMDB ID (returns both movies and TV shows)
    * Note: TMDB find endpoint returns both movie_results and tv_results
    * @param {string} imdbId - IMDB ID (e.g., 'tt0133093')
@@ -132,15 +112,6 @@ export class TMDBProvider extends BaseProvider {
     const endpoint = `/api/tmdb/details?type=${type}&tmdb_id=${tmdbId}`;
     this.logger.debug(`Getting TMDB details via server: ${type}/${tmdbId}`);
     return await this._makeGetRequestWithLimiter(endpoint);
-  }
-
-  /**
-   * Get movie details by TMDB ID
-   * @param {number} tmdbId - TMDB movie ID
-   * @returns {Promise<Object>} Movie details
-   */
-  async getMovieDetails(tmdbId) {
-    return await this.getDetails('movie', tmdbId);
   }
 
   /**

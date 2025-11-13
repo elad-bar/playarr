@@ -516,16 +516,6 @@ export class BaseIPTVProvider extends BaseProvider {
   }
 
   /**
-   * Update ignored titles in memory cache
-   * Replaces the entire ignored cache with new data
-   * @private
-   * @param {Object<string, string>} ignored - Object mapping title_key to reason for ignoring
-   */
-  updateIgnoredInMemory(ignored) {
-    this._ignoredCache = { ...ignored };
-  }
-
-  /**
    * Save titles metadata to MongoDB
    * Called periodically (every 30 seconds) or at end of process
    * Adds type and title_key properties to each title
@@ -604,16 +594,6 @@ export class BaseIPTVProvider extends BaseProvider {
       this._ignoredCache = {};
       return {};
     }
-    return this._ignoredCache;
-  }
-
-  /**
-   * Load ignored titles from MongoDB (async)
-   * Should be called to initialize ignored cache
-   * @returns {Promise<Object<string, string>>} Object mapping title_key to reason for ignoring
-   */
-  async loadIgnoredTitlesFromMongoDB() {
-    await this._loadIgnoredFromMongoDB();
     return this._ignoredCache;
   }
 
