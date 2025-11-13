@@ -43,8 +43,8 @@ RUN npm install --omit=dev && npm cache clean --force
 # Stage 4: Runtime
 FROM node:20-alpine
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# Install dumb-init and openssl for proper signal handling and token generation
+RUN apk add --no-cache dumb-init openssl
 
 # Set working directory
 WORKDIR /app
@@ -68,7 +68,10 @@ COPY engine/ ./engine/
 RUN mkdir -p /app/logs
 
 # Create startup script to run both engine and API
+# Generate random application token on startup and export as environment variable
 RUN echo '#!/bin/sh' > /app/start.sh && \
+    echo '# Generate random application token and export as environment variable' >> /app/start.sh && \
+    echo 'export APPLICATION_TOKEN=$(openssl rand -hex 32)' >> /app/start.sh && \
     echo 'cd /app/engine && node index.js &' >> /app/start.sh && \
     echo 'cd /app/web-api && node src/index.js' >> /app/start.sh && \
     chmod +x /app/start.sh

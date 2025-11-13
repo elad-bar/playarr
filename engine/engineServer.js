@@ -1,5 +1,6 @@
 import express from 'express';
 import { createLogger } from './utils/logger.js';
+import { ApplicationContext } from './context/ApplicationContext.js';
 
 const logger = createLogger('EngineServer');
 
@@ -10,14 +11,21 @@ class EngineServer {
   /**
    * @param {import('./engineScheduler.js').EngineScheduler} scheduler - Job scheduler instance
    * @param {import('./managers/JobsManager.js').JobsManager} jobsManager - Jobs manager for validation
-   * @param {import('./managers/ProviderManager.js').ProviderManager} providerManager - Provider manager for handling provider events
    */
-  constructor(scheduler, jobsManager, providerManager) {
+  constructor(scheduler, jobsManager) {
     this._scheduler = scheduler;
     this._jobsManager = jobsManager;
-    this._providerManager = providerManager;
     this._app = null;
     this._server = null;
+
+    this._actionToJobMap = {
+      'created': 'syncIPTVProviderTitles',      // Only if enabled (checked below)
+      'enabled': 'syncIPTVProviderTitles',
+      'categories-changed': 'syncIPTVProviderTitles',
+      'deleted': null,                          // No job needed
+      'disabled': null,                         // No job needed
+      'updated': null                           // No job needed
+    };
   }
 
   /**
@@ -137,6 +145,7 @@ class EngineServer {
     /**
      * POST /api/providers/:providerId/changed
      * Handle provider changed events from web API
+     * Reloads all provider instances and triggers appropriate jobs
      * Body: { action: "created" | "deleted" | "enabled" | "disabled" | "categories-changed" | "updated", providerId: string, providerConfig?: object }
      */
     this._app.post('/api/providers/:providerId/changed', async (req, res) => {
@@ -148,21 +157,31 @@ class EngineServer {
           return res.status(400).json({ error: 'action is required' });
         }
 
-        const validActions = Object.keys(this._providerManager.actionHandlers);
+        const validActions = ['created', 'deleted', 'enabled', 'disabled', 'categories-changed', 'updated'];
         if (!validActions.includes(action)) {
           return res.status(400).json({ error: `Invalid action: ${action}. Must be one of: ${validActions.join(', ')}` });
         }
 
-        // Get instructions from ProviderManager
-        const result = await this._providerManager.handleProviderChanged(providerId, action, providerConfig);
+        // Reload all provider instances from MongoDB
+        const context = ApplicationContext.getInstance();
+        await context.reloadProviders();
 
-        // Execute any actions returned
-        if (result.actions && result.actions.length > 0) {
-          for (const actionItem of result.actions) {
-            if (actionItem.type === 'triggerJob') {
-              await this._scheduler.runJob(actionItem.jobName, actionItem.data);
-            }
-            // Could extend for other action types in the future
+        // Determine if we should trigger a job
+        const jobName = this._actionToJobMap[action];
+        let shouldTriggerJob = false;
+
+        if (jobName) {
+          shouldTriggerJob = true;
+        }
+
+        // Trigger job if needed
+        if (shouldTriggerJob) {
+          try {
+            await this._scheduler.runJob(jobName, { providerId });
+            logger.info(`Triggered job '${jobName}' for provider ${providerId} after ${action} action`);
+          } catch (error) {
+            logger.error(`Error triggering job '${jobName}' for provider ${providerId}: ${error.message}`);
+            // Don't fail the request if job trigger fails - provider reload was successful
           }
         }
 
@@ -170,7 +189,8 @@ class EngineServer {
           success: true, 
           message: `Provider ${action} handled successfully`,
           providerId,
-          action
+          action,
+          jobTriggered: shouldTriggerJob ? jobName : null
         });
       } catch (error) {
         logger.error(`Error processing provider changed event:`, error);

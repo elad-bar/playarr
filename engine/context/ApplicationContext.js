@@ -1,5 +1,4 @@
 import { StorageManager } from '../managers/StorageManager.js';
-import { ProviderManager } from '../managers/ProviderManager.js';
 import { BaseProvider } from '../providers/BaseProvider.js';
 import { AGTVProvider } from '../providers/AGTVProvider.js';
 import { XtreamProvider } from '../providers/XtreamProvider.js';
@@ -11,7 +10,7 @@ import { MongoDataService } from '../services/MongoDataService.js';
 /**
  * Application Context Singleton
  * Centralized initialization and access to all application dependencies
- * Provides a single source of truth for MongoDB, Cache, ProviderManager, TMDBProvider, and IPTV Providers
+ * Provides a single source of truth for MongoDB, Cache, TMDBProvider, and IPTV Providers
  */
 export class ApplicationContext {
   static instance = null;
@@ -33,10 +32,9 @@ export class ApplicationContext {
    * Initializes all dependencies in the correct order:
    * 1. MongoDB connection
    * 2. StorageManager (cache)
-   * 3. ProviderManager
-   * 4. Settings from MongoDB
-   * 5. TMDBProvider
-   * 6. IPTV Providers
+   * 3. Settings from MongoDB
+   * 4. TMDBProvider
+   * 5. IPTV Providers
    * 
    * @param {string} cacheDir - Directory path for cache storage
    * @returns {Promise<ApplicationContext>} The initialized context instance
@@ -75,11 +73,7 @@ export class ApplicationContext {
     await context.cache.initialize();
     logger.debug('✓ Storage manager initialized');
 
-    // 3. Initialize provider manager
-    context.providerManager = new ProviderManager(context.mongoData);
-    logger.debug('✓ Provider manager initialized');
-
-    // 4. Load settings from MongoDB
+    // 3. Load settings from MongoDB
     let settings = {};
     try {
       settings = await context.mongoData.getSettings();
@@ -88,7 +82,7 @@ export class ApplicationContext {
       logger.warn(`Failed to load settings from MongoDB: ${error.message}`);
     }
 
-    // 5. Initialize TMDB provider (must be done before creating IPTV providers)
+    // 4. Initialize TMDB provider (must be done before creating IPTV providers)
     context.tmdbProvider = await TMDBProvider.getInstance(
       context.cache,
       context.mongoData,
@@ -96,7 +90,7 @@ export class ApplicationContext {
     );
     logger.debug('✓ TMDB provider initialized');
 
-    // 6. Load and initialize IPTV providers (all non-deleted providers)
+    // 5. Load and initialize IPTV providers (all non-deleted providers)
     context.providers = new Map();
     const providerConfigs = await BaseProvider.loadProviders(context.mongoData);
     logger.debug(`Found ${providerConfigs.length} provider(s)`);
@@ -156,11 +150,52 @@ export class ApplicationContext {
   }
 
   /**
-   * Get provider manager instance
-   * @returns {import('../managers/ProviderManager.js').ProviderManager} Provider manager instance
+   * Reload all provider instances from MongoDB
+   * Updates the providers map with fresh instances based on current database state
+   * @returns {Promise<void>}
    */
-  getProviderManager() {
-    return this.providerManager;
+  async reloadProviders() {
+    const logger = createLogger('ApplicationContext');
+    logger.debug('Reloading all provider instances...');
+
+    // Load fresh provider configs from MongoDB
+    const providerConfigs = await BaseProvider.loadProviders(this.mongoData);
+    logger.debug(`Found ${providerConfigs.length} provider(s) to reload`);
+
+    // Create a new map with fresh instances
+    const newProviders = new Map();
+
+    for (const providerData of providerConfigs) {
+      try {
+        // Check if instance already exists
+        const existingInstance = this.providers.get(providerData.id);
+        
+        if (existingInstance) {
+          // Update existing instance configuration
+          await existingInstance.updateConfiguration(providerData);
+          newProviders.set(providerData.id, existingInstance);
+          logger.debug(`✓ Updated provider: ${providerData.id} (${providerData.type})`);
+        } else {
+          // Create new instance
+          const instance = this.createProviderInstance(providerData);
+          newProviders.set(providerData.id, instance);
+          logger.debug(`✓ Created provider: ${providerData.id} (${providerData.type})`);
+        }
+      } catch (error) {
+        logger.error(`✗ Failed to reload provider ${providerData.id}: ${error.message}`);
+      }
+    }
+
+    // Remove providers that no longer exist in database
+    for (const [providerId, instance] of this.providers.entries()) {
+      if (!newProviders.has(providerId)) {
+        logger.debug(`Removed provider ${providerId} (no longer in database)`);
+      }
+    }
+
+    // Replace the providers map
+    this.providers = newProviders;
+    logger.debug(`Provider reload completed: ${this.providers.size} provider(s) active`);
   }
 
   /**

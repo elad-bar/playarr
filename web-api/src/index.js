@@ -67,6 +67,11 @@ import TMDBRouter from './routes/tmdb.js';
 import HealthcheckRouter from './routes/healthcheck.js';
 import XtreamRouter from './routes/xtream.js';
 import JobsRouter from './routes/jobs.js';
+import ProviderApiRouter from './routes/providerApi.js';
+import { ProviderApiStorage } from './services/providerApiStorage.js';
+import { XtreamProvider } from './providers/XtreamProvider.js';
+import { AGTVProvider } from './providers/AGTVProvider.js';
+import { DataProvider } from './config/collections.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -127,13 +132,25 @@ async function initialize() {
 
     webSocketService = new WebSocketService();
 
+    // Initialize provider API disk storage (before managers that need it)
+    const cacheDir = process.env.CACHE_DIR || '/app/cache';
+    const providerApiStorage = new ProviderApiStorage(cacheDir);
+
+    // Initialize provider instances
+    const xtreamProvider = new XtreamProvider(database, providerApiStorage);
+    const agtvProvider = new AGTVProvider(database, providerApiStorage);
+    const providerTypeMap = {
+      [DataProvider.XTREAM]: xtreamProvider,
+      [DataProvider.AGTV]: agtvProvider
+    };
+
     // Step 2: Initialize managers (dependency order)
     const userManager = new UserManager(database);
     const titlesManager = new TitlesManager(database, userManager);
     const settingsManager = new SettingsManager(database);
     const statsManager = new StatsManager(database);
     const jobsManager = new JobsManager(database);
-    const providersManager = new ProvidersManager(database, webSocketService, titlesManager);
+    const providersManager = new ProvidersManager(database, webSocketService, titlesManager, providerTypeMap);
     const categoriesManager = new CategoriesManager(database, providersManager);
     const streamManager = new StreamManager(database);
     const playlistManager = new PlaylistManager(database);
@@ -154,6 +171,7 @@ async function initialize() {
     const categoriesRouter = new CategoriesRouter(categoriesManager, database);
     const providersRouter = new ProvidersRouter(providersManager, database);
     const streamRouter = new StreamRouter(streamManager, database);
+    const providerApiRouter = new ProviderApiRouter(providersManager, database);
     const playlistRouter = new PlaylistRouter(playlistManager, database);
     const tmdbRouter = new TMDBRouter(tmdbManager, database);
     const healthcheckRouter = new HealthcheckRouter(database, settingsManager);
@@ -175,6 +193,7 @@ async function initialize() {
     healthcheckRouter.initialize();
     xtreamRouter.initialize();
     jobsRouter.initialize();
+    providerApiRouter.initialize();
 
     // Step 4: Register routes
     app.use('/api/auth', authRouter.router);
@@ -184,6 +203,7 @@ async function initialize() {
     app.use('/api/stats', statsRouter.router);
     app.use('/api/titles', titlesRouter.router);
     app.use('/api/jobs', jobsRouter.router);
+    app.use('/api/provider', providerApiRouter.router); // Provider API routes for engine (must come before /api/iptv/providers)
     app.use('/api/iptv/providers', providersRouter.router); // Must come before /api/iptv
     app.use('/api/iptv', categoriesRouter.router);
     app.use('/api/stream', streamRouter.router);

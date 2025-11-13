@@ -9,14 +9,6 @@
       "schedule": "Every 1 hour"
     },
     {
-      "name": "syncIPTVProviderCategories",
-      "jobHistoryName": "SyncIPTVProviderCategoriesJob",
-      "interval": "6h",
-      "timeout": "1s",
-      "description": "Sync IPTV provider categories and auto-disable missing enabled categories",
-      "schedule": "On startup and every 6 hours"
-    },
-    {
       "name": "providerTitlesMonitor",
       "jobHistoryName": "ProviderTitlesMonitorJob",
       "interval": "1m",

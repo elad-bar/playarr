@@ -1,4 +1,5 @@
 import { BaseIPTVProvider } from './BaseIPTVProvider.js';
+import { serverApiClient } from '../utils/serverApiClient.js';
 
 /**
  * Xtream Codec provider implementation
@@ -236,17 +237,11 @@ export class XtreamProvider extends BaseIPTVProvider {
 
   /**
    * Get default cache policies for Xtream provider
-   * @returns {Object} Cache policy object
+   * Cache policies are now handled by server, return empty object
+   * @returns {Object} Empty cache policy object
    */
   getDefaultCachePolicies() {
-    // Use providerId from instance (will be replaced during initialization)
-    const providerId = this.providerId;
-    return {
-      [`${providerId}/categories`]: 1,         // 1 hour (for categories/data.json)
-      [`${providerId}/metadata`]: 1,          // 1 hour (for metadata/data.json)
-      [`${providerId}/extended/movies`]: null,  // Never expire (for extended/{titleId}.json - movies)
-      [`${providerId}/extended/tvshows`]: 6,    // 6 hours (for extended/{titleId}.json - tvshows)
-    };
+    return {};
   }
 
   /**
@@ -280,76 +275,10 @@ export class XtreamProvider extends BaseIPTVProvider {
     return `/${mediaEndpoint}/${username}/${password}/${resource}`;
   }
 
-  /**
-   * @private
-   * @param {string} action
-   * @param {Object} [params={}]
-   * @returns {string}
-   */
-  _getApiUrl(action, params = {}) {
-    const baseUrl = this.providerData.api_url;
-    const username = this.providerData.username;
-    const password = this.providerData.password;
-    
-    const queryParams = new URLSearchParams({
-      username,
-      password,
-      action,
-      ...params
-    });
 
-    return `${baseUrl}/player_api.php?${queryParams.toString()}`;
-  }
 
   /**
-   * Fetch categories from Xtream provider
-   * Raw API data is cached for 1 hour, enabled status comes from provider config
-   * @param {string} type - Media type ('movies' or 'tvshows')
-   * @returns {Promise<Array<{category_id: number, category_name: string, enabled: boolean}>>} Array of category data
-   * @override
-   */
-  async fetchCategories(type) {
-    try {
-      const config = this._typeConfig[type];
-      if (!config) {
-        throw new Error(`Unsupported type: ${type}`);
-      }
-
-      // Skip if type is disabled
-      if (!config.enabled) {
-        return [];
-      }
-
-      // Fetch categories from API with caching
-      const categoriesUrl = this._getApiUrl(config.categoryAction);
-      const categoriesResponse = await this.fetchWithCache(
-        categoriesUrl,
-        [this.providerId, type, 'categories', 'data.json']
-      );
-      
-      // Normalize raw categories to standard format
-      const normalizedCategories = categoriesResponse.map(cat => ({
-        category_id: cat.category_id || cat.id,
-        category_name: cat.category_name || cat.name
-      }));
-
-      this.logger.debug(`${type}: Normalized categories: ${normalizedCategories.length}`);
-
-      // Save categories (no enabled field - enabled status is in provider config)
-      await this.saveCategories(type, normalizedCategories);
-      
-      // Load categories with enabled status from provider config
-      const categoriesWithStatus = await this.loadCategories(type);
-      
-      return categoriesWithStatus;
-    } catch (error) {
-      this.logger.error(`Error fetching ${type} categories: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Fetch titles metadata from cache or API
+   * Fetch titles metadata from server API
    * @private
    * @param {string} type - Media type ('movies', 'tvshows', or 'live')
    * @returns {Promise<Array>} Array of raw title objects
@@ -365,27 +294,19 @@ export class XtreamProvider extends BaseIPTVProvider {
       return [];
     }
 
-    const metadataUrl = this._getApiUrl(config.metadataAction);
-    const responseData = await this.fetchWithCache(
-      metadataUrl,
-      [this.providerId, type, 'metadata', 'data.json']
-    );
+    // Fetch metadata from server API
+    const response = await serverApiClient.fetchMetadata(this.providerId, type);
     
-    // Handle both array and object formats for backward compatibility
+    // Extract array from response (Xtream API may return object with dataKey or array directly)
     let titles = [];
-    if (Array.isArray(responseData)) {
-      titles = responseData;
-    } else if (responseData && responseData[config.dataKey]) {
-      titles = responseData[config.dataKey];
-    } else if (responseData && typeof responseData === 'object') {
-      // Fallback: try to extract any array from the response
-      const keys = Object.keys(responseData);
-      const arrayKey = keys.find(key => Array.isArray(responseData[key]));
-      if (arrayKey) {
-        titles = responseData[arrayKey];
-      }
+    if (Array.isArray(response)) {
+      titles = response;
+    } else if (response && response[config.dataKey]) {
+      titles = response[config.dataKey];
+    } else {
+      throw new Error(`Unexpected response format from server API for ${type}: expected array or object with ${config.dataKey}`);
     }
-
+    
     this.logger.info(`${type}: Loaded ${titles.length} titles`);
 
     return titles;
@@ -416,19 +337,13 @@ export class XtreamProvider extends BaseIPTVProvider {
       titleData.type = type;
     } else {
       try {
-        const extendedUrl = this._getApiUrl(config.extendedInfoAction, {
-          [config.extendedInfoParam]: titleId
-        });
-
         this.logger.debug(`${type}: Fetching extended info for title ${titleId}`);
 
-        // Use different TTL for movies (Infinity) vs tvshows (6h)
-        const ttlHours = type === 'movies' ? null : 6;
-        
-        const fullResponseData = await this.fetchWithCache(
-          extendedUrl,
-          [this.providerId, type, 'extended', `${titleId}.json`],
-          ttlHours
+        // Fetch extended info from server API
+        const fullResponseData = await serverApiClient.fetchExtendedInfo(
+          this.providerId,
+          type,
+          titleId
         );
 
         if (config.parseExtendedInfo) {

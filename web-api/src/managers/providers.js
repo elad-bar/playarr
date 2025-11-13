@@ -9,18 +9,103 @@ dotenv.config();
 /**
  * Providers manager for handling IPTV provider operations
  * Uses DatabaseService collection-based methods for all data access
+ * Manages provider instances and routes API calls to appropriate providers
  */
 class ProvidersManager extends BaseManager {
   /**
    * @param {import('../services/database.js').DatabaseService} database - Database service instance
    * @param {import('../services/websocket.js').WebSocketService} webSocketService - WebSocket service instance
    * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
+   * @param {Object<string, import('../providers/BaseIPTVProvider.js').BaseIPTVProvider>} providerTypeMap - Map of provider type to provider instance
    */
-  constructor(database, webSocketService, titlesManager) {
+  constructor(database, webSocketService, titlesManager, providerTypeMap) {
     super('ProvidersManager', database);
     this._webSocketService = webSocketService;
     this._titlesManager = titlesManager;
+    this._providerTypeMap = providerTypeMap;
     this._providersCollection = toCollectionName(DatabaseCollections.IPTV_PROVIDERS);
+  }
+
+  /**
+   * Get provider type from database
+   * @private
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<string>} Provider type ('xtream' or 'agtv')
+   */
+  async _getProviderType(providerId) {
+    const provider = await this._database.getData(this._providersCollection, { id: providerId });
+    
+    if (!provider) {
+      throw new Error(`Provider ${providerId} not found`);
+    }
+    
+    if (provider.deleted) {
+      throw new Error(`Provider ${providerId} is deleted`);
+    }
+    
+    return provider.type;
+  }
+
+  /**
+   * Get appropriate provider instance based on provider type
+   * @private
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<BaseIPTVProvider>} Provider instance (XtreamProvider or AGTVProvider)
+   */
+  async _getProvider(providerId) {
+    const providerType = await this._getProviderType(providerId);
+    
+    if (!this._providerTypeMap[providerType]) {
+      throw new Error(`Unsupported provider type: ${providerType}`);
+    }
+
+    return this._providerTypeMap[providerType];
+  }
+
+  /**
+   * Fetch categories from provider
+   * @param {string} providerId - Provider ID
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @returns {Promise<Array>} Array of category objects
+   */
+  async fetchCategories(providerId, type) {
+    const provider = await this._getProvider(providerId);
+    return await provider.fetchCategories(providerId, type);
+  }
+
+  /**
+   * Fetch metadata from provider
+   * @param {string} providerId - Provider ID
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @returns {Promise<Array>} Array of title objects
+   */
+  async fetchMetadata(providerId, type) {
+    const provider = await this._getProvider(providerId);
+    return await provider.fetchMetadata(providerId, type);
+  }
+
+  /**
+   * Fetch extended info from provider
+   * @param {string} providerId - Provider ID
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @param {string} titleId - Title ID
+   * @returns {Promise<Object>} Extended info object
+   */
+  async fetchExtendedInfo(providerId, type, titleId) {
+    const provider = await this._getProvider(providerId);
+    return await provider.fetchExtendedInfo(providerId, type, titleId);
+  }
+
+  /**
+   * Fetch M3U8 content from provider
+   * @param {string} providerId - Provider ID
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @param {number} [page] - Page number (for paginated types)
+   * @returns {Promise<string>} M3U8 content as string
+   */
+  async fetchM3U8(providerId, type, page = null) {
+    const provider = await this._getProvider(providerId);
+    return await provider.fetchM3U8(providerId, type, page);
   }
 
   /**
@@ -437,6 +522,13 @@ class ProvidersManager extends BaseManager {
         
         // 3. Delete titles without streams (optional, can be async/background)
         const deletedEmptyTitles = await this._database.deleteTitlesWithoutStreams(titleKeys);
+        
+        // 4. Clear provider API cache (disk storage)
+        // Get storage from any provider instance (they all share the same storage)
+        const firstProvider = Object.values(this._providerTypeMap)[0];
+        if (firstProvider && firstProvider._storage) {
+          firstProvider._storage.clearProviderCache(providerId);
+        }
         
         this.logger.info(
           `Provider ${providerId} cleanup: ${titlesUpdated} titles updated, ` +

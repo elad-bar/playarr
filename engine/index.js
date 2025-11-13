@@ -58,11 +58,8 @@ async function main() {
     // Get JobsManager instance
     const jobsManager = engineScheduler.getJobsManager();
 
-    // Get ProviderManager instance from context
-    const providerManager = context.getProviderManager();
-
     // Create and start HTTP server for job control API
-    const engineServer = new EngineServer(engineScheduler, jobsManager, providerManager);
+    const engineServer = new EngineServer(engineScheduler, jobsManager);
     await engineServer.start();
     logger.info("Engine HTTP API server is ready");
 

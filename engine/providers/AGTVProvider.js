@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { BaseIPTVProvider } from './BaseIPTVProvider.js';
+import { serverApiClient } from '../utils/serverApiClient.js';
 
 /**
  * Apollo Group TV provider implementation
@@ -46,14 +47,11 @@ export class AGTVProvider extends BaseIPTVProvider {
 
   /**
    * Get default cache policies for AGTV provider
-   * @returns {Object} Cache policy object
+   * Cache policies are now handled by server, return empty object
+   * @returns {Object} Empty cache policy object
    */
   getDefaultCachePolicies() {
-    const providerId = this.providerId;
-    return {
-      [`${providerId}/movies/metadata`]: 6,           // 6 hours (for M3U8 list.m3u8)
-      [`${providerId}/tvshows/metadata`]: 6,          // 6 hours (for M3U8 list-{page}.m3u8)
-    };
+    return {};
   }
 
   /**
@@ -286,7 +284,7 @@ export class AGTVProvider extends BaseIPTVProvider {
   }
 
   /**
-   * Fetch titles metadata from AGTV provider via M3U8
+   * Fetch titles metadata from AGTV provider via M3U8 (through server API)
    * @private
    * @param {string} type - Media type ('movies' or 'tvshows')
    * @returns {Promise<Array>} Array of raw title objects
@@ -298,12 +296,6 @@ export class AGTVProvider extends BaseIPTVProvider {
       return [];
     }
 
-    const apiUrl = this.providerData.api_url;
-    if (!apiUrl) {
-      this.logger.error('API URL not configured');
-      return [];
-    }
-
     const allTitles = [];
     
     if (config.isPaginated) {
@@ -311,13 +303,9 @@ export class AGTVProvider extends BaseIPTVProvider {
       let page = 1;
 
       while (true) {
-        const m3u8Url = this._buildM3U8Url(type, page);
-
         try {
-          const m3u8Content = await this._fetchM3U8WithCache(
-            m3u8Url,
-            [this.providerId, type, 'metadata', `list-${page}.m3u8`]
-          );
+          // Fetch M3U8 content from server API
+          const m3u8Content = await serverApiClient.fetchM3U8(this.providerId, type, page);
 
           const { titles, streamCount } = this._parseM3U8Content(m3u8Content, type);
 
@@ -336,7 +324,7 @@ export class AGTVProvider extends BaseIPTVProvider {
 
           page++;
         } catch (error) {
-          if (error.response && error.response.status === 404) {
+          if (error.message && error.message.includes('Page not found')) {
             // End of pagination
             break;
           }
@@ -348,13 +336,9 @@ export class AGTVProvider extends BaseIPTVProvider {
       this.logger.info(`${type}: Loaded ${allTitles.length} titles`);
     } else {
       // Single endpoint (movies)
-      const m3u8Url = this._buildM3U8Url(type);
-
       try {
-        const m3u8Content = await this._fetchM3U8WithCache(
-          m3u8Url,
-          [this.providerId, type, 'metadata', 'list.m3u8']
-        );
+        // Fetch M3U8 content from server API
+        const m3u8Content = await serverApiClient.fetchM3U8(this.providerId, type);
 
         const { titles } = this._parseM3U8Content(m3u8Content, type);
         allTitles.push(...titles);
