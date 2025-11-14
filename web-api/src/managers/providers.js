@@ -37,6 +37,9 @@ class ProvidersManager extends BaseManager {
     
     // Function to trigger jobs (passed via constructor)
     this._triggerJob = triggerJob;
+    
+    // Cache for providers - null = cache invalid/empty, Array = cached providers data
+    this._cachedProviders = null;
   }
 
   /**
@@ -387,18 +390,34 @@ class ProvidersManager extends BaseManager {
   }
 
   /**
-   * Read all providers from collection
+   * Read all providers from collection (with caching)
    * Uses DatabaseService collection-based methods
    * @private
    */
   async _readAllProviders() {
+    // Return cached data if available
+    if (this._cachedProviders !== null) {
+      return this._cachedProviders;
+    }
+
     try {
       const providers = await this._providerRepo.findByQuery({});
-      return Array.isArray(providers) ? providers : [];
+      this._cachedProviders = Array.isArray(providers) ? providers : [];
+      return this._cachedProviders;
     } catch (error) {
       this.logger.error('Error reading providers:', error);
+      // Cache empty array on error to prevent repeated DB calls
+      this._cachedProviders = [];
       return [];
     }
+  }
+
+  /**
+   * Invalidate providers cache
+   * @private
+   */
+  _invalidateProvidersCache() {
+    this._cachedProviders = null;
   }
 
   /**
@@ -551,6 +570,9 @@ class ProvidersManager extends BaseManager {
       providers.push(providerData);
       await this._writeAllProviders(providers);
 
+      // Update cache with new data (no need to re-read from DB)
+      this._cachedProviders = providers;
+
       // Reload provider configs in provider instances
       await this._reloadProviderConfigs();
 
@@ -665,6 +687,9 @@ class ProvidersManager extends BaseManager {
       providers[providerIndex] = updatedProvider;
       await this._writeAllProviders(providers);
 
+      // Update cache with new data (no need to re-read from DB)
+      this._cachedProviders = providers;
+
       // Reload provider configs in provider instances
       await this._reloadProviderConfigs();
 
@@ -680,6 +705,8 @@ class ProvidersManager extends BaseManager {
       };
     } catch (error) {
       this.logger.error('Error updating provider:', error);
+      // Invalidate cache on error
+      this._invalidateProvidersCache();
       return {
         response: { error: 'Failed to update provider' },
         statusCode: 500,
@@ -744,6 +771,9 @@ class ProvidersManager extends BaseManager {
       
       await this._writeAllProviders(providers);
 
+      // Update cache with new data (no need to re-read from DB)
+      this._cachedProviders = providers;
+
       // Reload provider configs in provider instances
       await this._reloadProviderConfigs();
 
@@ -759,6 +789,8 @@ class ProvidersManager extends BaseManager {
       };
     } catch (error) {
       this.logger.error('Error deleting provider:', error);
+      // Invalidate cache on error
+      this._invalidateProvidersCache();
       return {
         response: { error: 'Failed to delete provider' },
         statusCode: 500,
@@ -879,6 +911,9 @@ class ProvidersManager extends BaseManager {
         }
       );
 
+      // Invalidate cache (uses direct repository update, not _writeAllProviders)
+      this._invalidateProvidersCache();
+
       // Perform cleanup for disabled categories using repositories
       try {
         // Remove provider from titles for disabled categories
@@ -964,6 +999,9 @@ class ProvidersManager extends BaseManager {
       // Save all providers
       await this._writeAllProviders(allProviders);
 
+      // Update cache with new data (no need to re-read from DB)
+      this._cachedProviders = allProviders;
+
       // Reload provider configs in provider instances
       await this._reloadProviderConfigs();
 
@@ -979,6 +1017,8 @@ class ProvidersManager extends BaseManager {
       };
     } catch (error) {
       this.logger.error('Error updating provider priorities:', error);
+      // Invalidate cache on error
+      this._invalidateProvidersCache();
       return {
         response: { error: 'Failed to update provider priorities' },
         statusCode: 500,

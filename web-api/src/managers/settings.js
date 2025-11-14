@@ -14,24 +14,43 @@ class SettingsManager extends BaseManager {
     super('SettingsManager');
     this._settingsRepo = settingsRepo;
     this._settingsCollection = toCollectionName(DatabaseCollections.SETTINGS);
+    
+    // Cache for settings - null = cache invalid/empty, Object = cached settings data
+    this._cachedSettings = null;
   }
 
   /**
-   * Read settings from collection
+   * Read settings from collection (with caching)
    * Uses DatabaseService collection-based methods
    * Settings are stored as an object, not an array
    * @private
    * @returns {Promise<Object>} Settings object
    */
   async _readSettings() {
+    // Return cached data if available
+    if (this._cachedSettings !== null) {
+      return this._cachedSettings;
+    }
+
     try {
       // Settings are stored as an object, not an array
       const settings = await this._settingsRepo.getAllAsObject();
-      return settings || {};
+      this._cachedSettings = settings || {};
+      return this._cachedSettings;
     } catch (error) {
       this.logger.error(`Error reading settings: ${error.message}`);
+      // Cache empty object on error to prevent repeated DB calls
+      this._cachedSettings = {};
       return {};
     }
+  }
+
+  /**
+   * Invalidate settings cache
+   * @private
+   */
+  _invalidateCache() {
+    this._cachedSettings = null;
   }
 
   /**
@@ -92,12 +111,17 @@ class SettingsManager extends BaseManager {
       // Write back (this merges/overwrites the entire object)
       await this._writeSettings(settings);
 
+      // Update cache with new data (no need to re-read from DB)
+      this._cachedSettings = settings;
+
       return {
         response: { value },
         statusCode: 200,
       };
     } catch (error) {
       this.logger.error(`Error setting ${key}:`, error);
+      // Invalidate cache on error
+      this._invalidateCache();
       return {
         response: { error: `Failed to set ${key}` },
         statusCode: 500,
@@ -119,12 +143,17 @@ class SettingsManager extends BaseManager {
       // Write back
       await this._writeSettings(settings);
       
+      // Update cache with new data (no need to re-read from DB)
+      this._cachedSettings = settings;
+
       return {
         response: { success: true },
         statusCode: 200,
       };
     } catch (error) {
       this.logger.error(`Error deleting ${key}:`, error);
+      // Invalidate cache on error
+      this._invalidateCache();
       return {
         response: { error: `Failed to delete ${key}` },
         statusCode: 500,
