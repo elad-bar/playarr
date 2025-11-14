@@ -13,8 +13,9 @@ export class TMDBHandler extends BaseHandler {
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
    * @param {import('../repositories/TitleStreamRepository.js').TitleStreamRepository} titleStreamRepo - Title stream repository
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
+   * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository (required for fetching all provider titles)
    */
-  constructor(providerData, titleRepo, titleStreamRepo, tmdbProvider) {
+  constructor(providerData, titleRepo, titleStreamRepo, tmdbProvider, providerTitleRepo) {
     super(providerData, 'TMDB');
     if (!titleRepo) {
       throw new Error('TitleRepository is required');
@@ -25,9 +26,13 @@ export class TMDBHandler extends BaseHandler {
     if (!tmdbProvider) {
       throw new Error('TMDBProvider is required');
     }
+    if (!providerTitleRepo) {
+      throw new Error('ProviderTitleRepository is required');
+    }
     this.titleRepo = titleRepo;
     this.titleStreamRepo = titleStreamRepo;
     this.tmdbProvider = tmdbProvider;
+    this.providerTitleRepo = providerTitleRepo;
     
     // In-memory cache for main titles
     // Loaded once at the start of job execution and kept in memory
@@ -547,7 +552,7 @@ export class TMDBHandler extends BaseHandler {
       const existingMainTitle = existingMainTitleMap.get(titleKey);
       
       if (this._needsRegeneration(existingMainTitle, providerTitleGroups)) {
-        titlesToProcess.push({ key, type, tmdbId, providerTitleGroups });
+        titlesToProcess.push({ key, type, tmdbId, providerTitleGroups, titleKey });
       } else {
         skippedCount++;
       }
@@ -560,6 +565,57 @@ export class TMDBHandler extends BaseHandler {
     if (titlesToProcess.length === 0) {
       this.logger.info('No main titles need regeneration');
       return { movies: 0, tvShows: 0 };
+    }
+
+    // Fetch ALL provider titles for titles that need regeneration
+    // This ensures we include provider titles that weren't in the incremental load
+    if (titlesToProcess.length > 0) {
+      const titleKeysToFetch = titlesToProcess.map(t => t.titleKey);
+      this.logger.debug(`Fetching all provider titles for ${titleKeysToFetch.length} title(s) needing regeneration`);
+      
+      try {
+        // Fetch all provider titles for these title_keys (all providers, not just incremental)
+        const allProviderTitles = await this.providerTitleRepo.findByQuery({
+          title_key: { $in: titleKeysToFetch },
+          ignored: false
+        });
+        
+        // Group fetched titles by title_key and merge with existing providerTitleGroups
+        const fetchedTitlesByKey = new Map();
+        for (const title of allProviderTitles) {
+          if (!fetchedTitlesByKey.has(title.title_key)) {
+            fetchedTitlesByKey.set(title.title_key, []);
+          }
+          fetchedTitlesByKey.get(title.title_key).push(title);
+        }
+        
+        // Merge fetched titles into providerTitleGroups
+        for (const titleInfo of titlesToProcess) {
+          const fetchedTitles = fetchedTitlesByKey.get(titleInfo.titleKey) || [];
+          
+          // Create a map of existing provider IDs to avoid duplicates
+          const existingProviderIds = new Set(
+            titleInfo.providerTitleGroups.map(g => g.providerId)
+          );
+          
+          // Add fetched titles that aren't already in the groups
+          for (const fetchedTitle of fetchedTitles) {
+            if (!existingProviderIds.has(fetchedTitle.provider_id)) {
+              titleInfo.providerTitleGroups.push({
+                providerId: fetchedTitle.provider_id,
+                title: fetchedTitle
+              });
+              this.logger.debug(
+                `Added missing provider title: ${fetchedTitle.provider_id} for ${titleInfo.titleKey}`
+              );
+            }
+          }
+        }
+        
+        this.logger.debug(`Merged provider titles from database for regeneration`);
+      } catch (error) {
+        this.logger.warn(`Failed to fetch all provider titles for regeneration: ${error.message}. Continuing with incremental titles only.`);
+      }
     }
     
     this.logger.info(`Generating ${titlesToProcess.length} main titles (${skippedCount} skipped)...`);

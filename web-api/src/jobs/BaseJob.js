@@ -174,7 +174,7 @@ export class BaseJob {
       }
     };
     
-    return new TMDBHandler(providerData, this.titleRepo, this.titleStreamRepo, this.tmdbProvider);
+    return new TMDBHandler(providerData, this.titleRepo, this.titleStreamRepo, this.tmdbProvider, this.providerTitleRepo);
   }
 
   /**
