@@ -129,7 +129,7 @@ export class BaseIPTVHandler extends BaseHandler {
     // Step 2: Filter titles (provider-specific)
     const filteredTitles = await this._filterTitles(titles, type);
 
-    this.logger.info(`${type}: Filtered ${filteredTitles.length} titles to process`);
+    this.logger.debug(`${type}: Filtered ${filteredTitles.length} titles to process`);
 
     // Step 3: Process in batches for memory efficiency
     // Batch size controls memory usage (max concurrent promises), not save frequency
@@ -293,7 +293,7 @@ export class BaseIPTVHandler extends BaseHandler {
       return !config.shouldSkip(title, existingTitle);
     });
     
-    this.logger.info(`${type}: Filtered to ${filteredTitles.length} titles to process`);
+    this.logger.debug(`${type}: Filtered to ${filteredTitles.length} titles to process`);
 
     return filteredTitles;
   }
