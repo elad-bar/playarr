@@ -575,13 +575,25 @@ export class TMDBHandler extends BaseHandler {
       this.logger.debug(`Fetching all provider titles for ${titleKeysToFetch.length} title(s) needing regeneration`);
       
       try {
-        // Fetch all provider titles for these tmdb_ids (all providers, not just incremental)
-        // Note: We query by tmdb_id because provider titles use title_key based on provider's title_id,
-        // not the TMDB ID, so we can't match by title_key
-        const allProviderTitles = await this.providerTitleRepo.findByQuery({
-          tmdb_id: { $in: tmdbIdsToFetch },
-          ignored: false
-        });
+        // Group titles by type
+        const titlesByType = new Map();
+        for (const titleInfo of titlesToProcess) {
+          if (!titlesByType.has(titleInfo.type)) {
+            titlesByType.set(titleInfo.type, []);
+          }
+          titlesByType.get(titleInfo.type).push(titleInfo.tmdbId);
+        }
+        
+        // Query separately for each type to ensure type and tmdb_id match correctly
+        const allProviderTitles = [];
+        for (const [type, tmdbIds] of titlesByType) {
+          const typeProviderTitles = await this.providerTitleRepo.findByQuery({
+            type: type,
+            tmdb_id: { $in: tmdbIds },
+            ignored: false
+          });
+          allProviderTitles.push(...typeProviderTitles);
+        }
         
         // Group fetched titles by main title's title_key (type-tmdb_id) and merge with existing providerTitleGroups
         const fetchedTitlesByKey = new Map();
