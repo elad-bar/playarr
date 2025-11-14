@@ -20,8 +20,9 @@ class ProvidersManager extends BaseManager {
    * @param {import('../repositories/TitleStreamRepository.js').TitleStreamRepository} titleStreamRepo - Title streams repository
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Titles repository
    * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
+   * @param {Function<string>} triggerJob - Function to trigger jobs by name
    */
-  constructor(webSocketService, titlesManager, providerTypeMap, providerTitleRepo, titleStreamRepo, titleRepo, providerRepo) {
+  constructor(webSocketService, titlesManager, providerTypeMap, providerTitleRepo, titleStreamRepo, titleRepo, providerRepo, triggerJob) {
     super('ProvidersManager');
     this._webSocketService = webSocketService;
     this._titlesManager = titlesManager;
@@ -34,16 +35,8 @@ class ProvidersManager extends BaseManager {
     this._titleRepo = titleRepo;
     this._providerRepo = providerRepo;
     
-    // JobsManager for triggering jobs (set after initialization)
-    this._jobsManager = null;
-  }
-
-  /**
-   * Set JobsManager instance for triggering jobs
-   * @param {import('./jobs.js').JobsManager} jobsManager - Jobs manager instance
-   */
-  setJobsManager(jobsManager) {
-    this._jobsManager = jobsManager;
+    // Function to trigger jobs (passed via constructor)
+    this._triggerJob = triggerJob;
   }
 
   /**
@@ -52,13 +45,13 @@ class ProvidersManager extends BaseManager {
    * @returns {Promise<void>}
    */
   async _triggerSyncJob() {
-    if (!this._jobsManager) {
-      this.logger.warn('JobsManager not available, cannot trigger sync job');
+    if (!this._triggerJob) {
+      this.logger.warn('Trigger job function not available');
       return;
     }
     
     try {
-      await this._jobsManager.triggerJob('syncIPTVProviderTitles');
+      await this._triggerJob('syncIPTVProviderTitles');
       this.logger.info('Triggered syncIPTVProviderTitles job');
     } catch (error) {
       this.logger.error(`Failed to trigger syncIPTVProviderTitles job: ${error.message}`);

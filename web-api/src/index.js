@@ -206,6 +206,17 @@ async function initialize() {
     const statsManager = new StatsManager(statsRepo);
     const titlesManager = new TitlesManager(userManager, titleRepo, providerRepo);
     
+    // Declare jobsManager early for closure
+    let jobsManager;
+    
+    // Create generic triggerJob function (closure will capture jobsManager when assigned)
+    const triggerJob = async (jobName) => {
+      if (!jobsManager) {
+        throw new Error('JobsManager not initialized');
+      }
+      await jobsManager.triggerJob(jobName);
+    };
+    
     const providersManager = new ProvidersManager(
       webSocketService,
       titlesManager,
@@ -213,7 +224,8 @@ async function initialize() {
       providerTitleRepo,
       titleStreamRepo,
       titleRepo,
-      providerRepo
+      providerRepo,
+      triggerJob
     );
     const streamManager = new StreamManager(titleStreamRepo, providerRepo);
     const playlistManager = new PlaylistManager(titleRepo);
@@ -251,10 +263,7 @@ async function initialize() {
     logger.info('Job scheduler initialized and started');
     
     // Initialize JobsManager
-    const jobsManager = new JobsManager(jobsConfig, jobScheduler, jobHistoryRepo);
-
-    // Set JobsManager on ProvidersManager for job triggering
-    providersManager.setJobsManager(jobsManager);
+    jobsManager = new JobsManager(jobsConfig, jobScheduler, jobHistoryRepo);
 
     // Initialize user manager (creates default admin user)
     await userManager.initialize();
