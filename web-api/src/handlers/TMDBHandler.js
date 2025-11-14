@@ -571,22 +571,27 @@ export class TMDBHandler extends BaseHandler {
     // This ensures we include provider titles that weren't in the incremental load
     if (titlesToProcess.length > 0) {
       const titleKeysToFetch = titlesToProcess.map(t => t.titleKey);
+      const tmdbIdsToFetch = titlesToProcess.map(t => t.tmdbId);
       this.logger.debug(`Fetching all provider titles for ${titleKeysToFetch.length} title(s) needing regeneration`);
       
       try {
-        // Fetch all provider titles for these title_keys (all providers, not just incremental)
+        // Fetch all provider titles for these tmdb_ids (all providers, not just incremental)
+        // Note: We query by tmdb_id because provider titles use title_key based on provider's title_id,
+        // not the TMDB ID, so we can't match by title_key
         const allProviderTitles = await this.providerTitleRepo.findByQuery({
-          title_key: { $in: titleKeysToFetch },
+          tmdb_id: { $in: tmdbIdsToFetch },
           ignored: false
         });
         
-        // Group fetched titles by title_key and merge with existing providerTitleGroups
+        // Group fetched titles by main title's title_key (type-tmdb_id) and merge with existing providerTitleGroups
         const fetchedTitlesByKey = new Map();
         for (const title of allProviderTitles) {
-          if (!fetchedTitlesByKey.has(title.title_key)) {
-            fetchedTitlesByKey.set(title.title_key, []);
+          // Use the main title's title_key (type-tmdb_id) as the key
+          const mainTitleKey = generateTitleKey(title.type, title.tmdb_id);
+          if (!fetchedTitlesByKey.has(mainTitleKey)) {
+            fetchedTitlesByKey.set(mainTitleKey, []);
           }
-          fetchedTitlesByKey.get(title.title_key).push(title);
+          fetchedTitlesByKey.get(mainTitleKey).push(title);
         }
         
         // Merge fetched titles into providerTitleGroups
