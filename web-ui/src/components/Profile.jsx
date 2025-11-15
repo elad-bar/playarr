@@ -21,6 +21,7 @@ import ProfileApiKey from './profile/ProfileApiKey';
 import ProfileM3UEndpoint from './profile/ProfileM3UEndpoint';
 import ProfileIPTVSyncer from './profile/ProfileIPTVSyncer';
 import ProfileXtreamCode from './profile/ProfileXtreamCode';
+import ProfileStremio from './profile/ProfileStremio';
 
 function TabPanel({ children, value, index }) {
   return (
@@ -323,10 +324,10 @@ const Profile = ({ open, onClose }) => {
             </Grid>
           </TabPanel>
 
-          {/* Playlist Tab - 3 columns */}
+          {/* Playlist Tab - 2 rows of 2 columns each */}
           <TabPanel value={activeTab} index={1}>
             <Grid container spacing={3}>
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} md={6}>
                 <ProfileM3UEndpoint
                   apiKey={profile.api_key}
                   showApiKey={showApiKey}
@@ -337,13 +338,24 @@ const Profile = ({ open, onClose }) => {
                   }}
                 />
               </Grid>
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} md={6}>
                 <ProfileIPTVSyncer apiKey={profile.api_key} />
               </Grid>
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} md={6}>
                 <ProfileXtreamCode
                   apiKey={profile.api_key}
                   username={profile.username}
+                  showApiKey={showApiKey}
+                  maskApiKey={maskApiKey}
+                  onCopyUrl={() => {
+                    setApiKeyCopied(true);
+                    setTimeout(() => setApiKeyCopied(false), 2000);
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <ProfileStremio
+                  apiKey={profile.api_key}
                   showApiKey={showApiKey}
                   maskApiKey={maskApiKey}
                   onCopyUrl={() => {

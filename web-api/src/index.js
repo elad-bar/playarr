@@ -49,6 +49,7 @@ import { PlaylistManager } from './managers/playlist.js';
 import { TMDBManager } from './managers/tmdb.js';
 import { XtreamManager } from './managers/xtream.js';
 import { JobsManager } from './managers/jobs.js';
+import { StremioManager } from './managers/stremio.js';
 
 // Import middleware
 import Middleware from './middleware/Middleware.js';
@@ -67,6 +68,7 @@ import TMDBRouter from './routes/tmdb.js';
 import HealthcheckRouter from './routes/healthcheck.js';
 import XtreamRouter from './routes/xtream.js';
 import JobsRouter from './routes/jobs.js';
+import StremioRouter from './routes/stremio.js';
 import { XtreamProvider } from './providers/XtreamProvider.js';
 import { AGTVProvider } from './providers/AGTVProvider.js';
 import { TMDBProvider } from './providers/TMDBProvider.js';
@@ -239,6 +241,7 @@ async function initialize() {
     const playlistManager = new PlaylistManager(titleRepo);
     const tmdbManager = new TMDBManager(settingsManager, tmdbProvider);
     const xtreamManager = new XtreamManager(titlesManager);
+    const stremioManager = new StremioManager(titlesManager, streamManager, userManager);
     
     // Create job instances with all dependencies
     const jobInstances = new Map();
@@ -293,6 +296,7 @@ async function initialize() {
     const healthcheckRouter = new HealthcheckRouter(settingsManager, middleware);
     const xtreamRouter = new XtreamRouter(xtreamManager, streamManager, middleware);
     const jobsRouter = new JobsRouter(jobsManager, middleware);
+    const stremioRouter = new StremioRouter(stremioManager, middleware);
 
     // Initialize all routers
     authRouter.initialize();
@@ -308,6 +312,7 @@ async function initialize() {
     healthcheckRouter.initialize();
     xtreamRouter.initialize();
     jobsRouter.initialize();
+    stremioRouter.initialize();
 
     // Step 5: Register routes
     app.use('/api/auth', authRouter.router);
@@ -328,6 +333,7 @@ async function initialize() {
     // These must come before the React Router fallback
     app.use('/movie', xtreamRouter.router);
     app.use('/series', xtreamRouter.router);
+    app.use('/stremio', stremioRouter.router);
 
     // Catch-all middleware for unmanaged API endpoints (only when setting is enabled)
     app.use(async (req, res, next) => {

@@ -107,7 +107,7 @@ class Middleware {
    * Middleware to require API key authentication (for streaming/playlist endpoints)
    * Matches Python's require_api_key decorator
    * 
-   * Gets API key from query parameter or X-API-Key header,
+   * Gets API key from URL parameter, query parameter, or X-API-Key header,
    * loads user from database using UserManager, and attaches user to request
    * 
    * @param {import('express').Request} req - Express request object
@@ -116,8 +116,8 @@ class Middleware {
    */
   async requireApiKey(req, res, next) {
     try {
-      // Get API key from query parameter or header
-      const apiKey = req.query.api_key || req.headers['x-api-key'];
+      // Get API key from URL parameter, query parameter, or header (in order of precedence)
+      const apiKey = req.params.api_key || req.query.api_key || req.headers['x-api-key'];
 
       if (!apiKey) {
         return res.status(401).json({ error: 'API key required' });

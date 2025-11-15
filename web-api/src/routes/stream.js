@@ -30,6 +30,11 @@ class StreamRouter extends BaseRouter {
           return this.returnErrorResponse(res, 503, 'No available providers');
         }
 
+        // Add CORS headers for Stremio casting support
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+
         return res.redirect(stream);
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Failed to get stream', `Get movie stream error: ${error.message}`);
@@ -54,10 +59,32 @@ class StreamRouter extends BaseRouter {
           return this.returnErrorResponse(res, 503, 'No available providers');
         }
 
+        // Add CORS headers for Stremio casting support
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+
         return res.redirect(stream);
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Failed to get stream', `Get TV show stream error: ${error.message}`);
       }
+    });
+
+    /**
+     * OPTIONS handler for CORS preflight on stream endpoints
+     */
+    this.router.options('/movies/:title_id', (req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+      res.status(200).send();
+    });
+
+    this.router.options('/tvshows/:title_id/:season/:episode', (req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+      res.status(200).send();
     });
   }
 }

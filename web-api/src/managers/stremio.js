@@ -1,0 +1,479 @@
+import { BaseManager } from './BaseManager.js';
+
+/**
+ * Stremio manager for handling Stremio addon data transformation
+ * Converts Playarr data format to Stremio addon protocol format
+ */
+class StremioManager extends BaseManager {
+  /**
+   * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
+   * @param {import('./stream.js').StreamManager} streamManager - Stream manager instance
+   * @param {import('./users.js').UserManager} userManager - User manager instance
+   */
+  constructor(titlesManager, streamManager, userManager) {
+    super('StremioManager');
+    this._titlesManager = titlesManager;
+    this._streamManager = streamManager;
+    this._userManager = userManager;
+    this._tmdbPosterBase = 'https://image.tmdb.org/t/p/w300';
+    this._tmdbBackdropBase = 'https://image.tmdb.org/t/p/w1280';
+    
+    // Type mapping: Stremio type -> Playarr type
+    this._typeMap = {
+      movie: 'movies',
+      series: 'tvshows'
+    };
+    
+    // Playarr type constants
+    this._playarrTypes = {
+      MOVIES: 'movies',
+      TVSHOWS: 'tvshows'
+    };
+  }
+
+  /**
+   * Convert Playarr title_key to Stremio ID
+   * Extracts just the title_id number since type comes from endpoint path
+   * @param {string} titleKey - Playarr title_key (e.g., "movies-12345" or "tvshows-67890")
+   * @returns {string|null} Stremio ID (e.g., "12345") or null if invalid
+   */
+  titleKeyToStremioId(titleKey) {
+    if (!titleKey) return null;
+    // Extract title_id from "movies-12345" or "tvshows-67890"
+    const match = titleKey.match(/^(movies|tvshows)-(\d+)$/);
+    return match ? match[2] : null; // Return just the number
+  }
+
+  /**
+   * Convert Stremio ID and type to Playarr title_key
+   * @param {string} stremioId - Stremio ID (just the title_id number, e.g., "12345")
+   * @param {string} stremioType - Stremio type from endpoint ('movie' or 'series')
+   * @returns {string|null} Playarr title_key (e.g., "movies-12345") or null if invalid
+   */
+  stremioIdToTitleKey(stremioId, stremioType) {
+    if (!stremioId || !stremioType) return null;
+    // Map Stremio type to Playarr type and construct title_key
+    const playarrType = this._typeMap[stremioType];
+    if (!playarrType) return null;
+    return `${playarrType}-${stremioId}`;
+  }
+
+  /**
+   * Get manifest for Stremio addon
+   * @param {string} baseUrl - Base URL for the addon (e.g., "https://yourdomain.com/stremio/{api_key}")
+   * @param {Object} user - User object with first_name and last_name
+   * @returns {Object} Stremio manifest object
+   */
+  getManifest(baseUrl, user = null) {
+    // Build personalized addon name
+    let addonName = 'Playarr';
+    if (user && (user.first_name || user.last_name)) {
+      const nameParts = [];
+      if (user.first_name) nameParts.push(user.first_name);
+      if (user.last_name) nameParts.push(user.last_name);
+      if (nameParts.length > 0) {
+        addonName = `Playarr (${nameParts.join(' ')})`;
+      }
+    }
+
+    return {
+      id: 'com.playarr.addon',
+      version: '1.0.0',
+      name: addonName,
+      description: 'Playarr IPTV streaming addon',
+      resources: [
+        {
+          name: 'catalog',
+          types: ['movie', 'series']
+        },
+        {
+          name: 'meta',
+          types: ['movie', 'series']
+        },
+        {
+          name: 'stream',
+          types: ['movie', 'series']
+        }
+      ],
+      types: ['movie', 'series'],
+      catalogs: [
+        {
+          type: 'movie',
+          id: 'playarr-movies',
+          name: 'Playarr Movies'
+        },
+        {
+          type: 'series',
+          id: 'playarr-series',
+          name: 'Playarr Series'
+        }
+      ],
+      background: `${baseUrl}/background.jpg`,
+      logo: `${baseUrl}/logo.png`,
+      contactEmail: 'support@playarr.com'
+    };
+  }
+
+  /**
+   * Get watchlist titles for a specific media type
+   * Optimized to query MongoDB directly for only watchlist titles
+   * This bypasses the 10k limit in getTitles and ensures ALL watchlist titles are returned
+   * @private
+   * @param {Object} user - Authenticated user object
+   * @param {string} mediaType - Media type ('movies' or 'tvshows')
+   * @returns {Promise<Array<Object>>} Array of title objects
+   */
+  async _getWatchlistTitles(user, mediaType) {
+    // Get titles in watchlist from user only (no fallbacks)
+    if (!user || !user.watchlist || !Array.isArray(user.watchlist)) {
+      return [];
+    }
+
+    const watchlistTitleKeys = user.watchlist.filter(key => key.startsWith(`${mediaType}-`));
+    
+    if (watchlistTitleKeys.length === 0) {
+      return [];
+    }
+
+    // Query MongoDB directly for only the watchlist titles
+    // Access titleRepo through titlesManager (same pattern as XtreamManager)
+    const titles = await this._titlesManager._titleRepo.findByTitleKeys(watchlistTitleKeys);
+
+    if (!titles || titles.length === 0) {
+      return [];
+    }
+
+    return titles;
+  }
+
+  /**
+   * Get catalog for a specific type
+   * @param {string} type - Catalog type ('movie' or 'series')
+   * @param {Object} user - User object
+   * @param {Object} options - Query options (page, perPage, etc.)
+   * @returns {Promise<Object>} Stremio catalog response
+   */
+  async getCatalog(type, user, options = {}) {
+    try {
+      // Map Stremio type to Playarr type using mapping object
+      const playarrType = this._typeMap[type];
+      if (!playarrType) {
+        this.logger.warn(`Unknown Stremio type: ${type}`);
+        return { metas: [] };
+      }
+      
+      // Get watchlist titles directly (optimized, no 10k limit)
+      // This ensures ALL user's watchlist titles are returned
+      const watchlistTitles = await this._getWatchlistTitles(user, playarrType);
+      
+      if (!watchlistTitles || watchlistTitles.length === 0) {
+        return { metas: [] };
+      }
+
+      // Apply pagination
+      const page = options.page || 1;
+      const perPage = options.perPage || 100;
+      const startIdx = (page - 1) * perPage;
+      const endIdx = startIdx + perPage;
+      const paginatedTitles = watchlistTitles.slice(startIdx, endIdx);
+
+      // Transform titles to Stremio format
+      const metas = paginatedTitles.map(title => this._titleToStremioMeta(title, type));
+
+      return { metas };
+    } catch (error) {
+      this.logger.error(`Error getting catalog for type ${type}:`, error);
+      return { metas: [] };
+    }
+  }
+
+  /**
+   * Get metadata for a specific title
+   * @param {string} type - Content type ('movie' or 'series') - comes from endpoint path
+   * @param {string} stremioId - Stremio ID (just the title_id number, e.g., "12345")
+   * @param {Object} user - User object
+   * @returns {Promise<Object>} Stremio meta response
+   */
+  async getMeta(type, stremioId, user) {
+    try {
+      // stremioId is now just the title_id number, type comes from endpoint path
+      const titleKey = this.stremioIdToTitleKey(stremioId, type);
+      if (!titleKey) {
+        return { meta: null };
+      }
+
+      // Get title details
+      const result = await this._titlesManager.getTitleDetails(titleKey, user);
+      
+      // getTitleDetails returns details directly in result.response, not result.response.title
+      if (result.statusCode !== 200 || !result.response) {
+        return { meta: null };
+      }
+
+      // Normalize the response from getTitleDetails to match what _titleToStremioMeta expects
+      const details = result.response;
+      const normalizedTitle = {
+        title_key: details.key || titleKey,
+        title: details.name || '',
+        release_date: details.release_date,
+        poster_path: details.poster_path,
+        backdrop_path: details.backdrop_path,
+        overview: details.overview,
+        vote_average: details.vote_average,
+        genres: details.genres || [],
+        runtime: details.runtime,
+        // Reconstruct streams object from flatStreams for episode extraction
+        streams: this._reconstructStreamsFromFlat(details.streams || [])
+      };
+
+      const meta = this._titleToStremioMeta(normalizedTitle, type, true);
+
+      return { meta };
+    } catch (error) {
+      this.logger.error(`Error getting meta for ${type} ${stremioId}:`, error);
+      return { meta: null };
+    }
+  }
+
+  /**
+   * Get streams for a specific title
+   * @param {string} type - Content type ('movie' or 'series') - comes from endpoint path
+   * @param {string} stremioId - Stremio ID (just the title_id number, e.g., "12345")
+   * @param {Object} user - User object
+   * @param {number} [season] - Season number (for series)
+   * @param {number} [episode] - Episode number (for series)
+   * @param {string} baseUrl - Base URL for stream endpoints
+   * @returns {Promise<Object>} Stremio stream response
+   */
+  async getStreams(type, stremioId, user, season = null, episode = null, baseUrl = '') {
+    try {
+      // For series, stremioId might be in format "101200-S01-E01" (episode ID from meta)
+      // For movies, stremioId is just the title_id number
+      // Check if type is series using mapping
+      const isSeries = this._typeMap[type] === this._playarrTypes.TVSHOWS;
+      
+      let titleId, mediaType, parsedSeason = season, parsedEpisode = episode;
+      
+      if (isSeries) {
+        // Try to parse episode ID format: "101200-S01-E01"
+        const episodeIdMatch = stremioId.match(/^(\d+)-S(\d+)-E(\d+)$/);
+        if (episodeIdMatch) {
+          // Episode ID format includes season/episode
+          titleId = episodeIdMatch[1];
+          parsedSeason = parseInt(episodeIdMatch[2], 10);
+          parsedEpisode = parseInt(episodeIdMatch[3], 10);
+          mediaType = this._typeMap[type]; // 'tvshows'
+        } else {
+          // Fallback: treat as just title_id, use season/episode from query params
+          titleId = stremioId;
+          mediaType = this._typeMap[type];
+        }
+      } else {
+        // Movie: stremioId is just the title_id
+        titleId = stremioId;
+        mediaType = this._typeMap[type]; // 'movies'
+      }
+      
+      // Construct title_key for validation
+      const titleKey = `${mediaType}-${titleId}`;
+
+      // Get stream URL using parsed season/episode
+      const streamUrl = await this._streamManager.getBestSource(
+        titleId,
+        mediaType,
+        parsedSeason,
+        parsedEpisode
+      );
+
+      if (!streamUrl) {
+        return { streams: [] };
+      }
+
+      // For Stremio, we need to return a stream object that points to our proxy endpoint
+      // Build proxy URL that includes API key
+      const proxyUrl = this._buildStreamProxyUrl(baseUrl, mediaType, titleId, parsedSeason, parsedEpisode, user.api_key);
+
+      const streams = [{
+        title: `Playarr Stream`,
+        url: proxyUrl,
+        behaviorHints: {
+          bingeGroup: isSeries ? titleId : undefined
+        }
+      }];
+
+      return { streams };
+    } catch (error) {
+      this.logger.error(`Error getting streams for ${type} ${stremioId}:`, error);
+      return { streams: [] };
+    }
+  }
+
+  /**
+   * Convert Playarr title to Stremio meta format
+   * @private
+   * @param {Object} title - Playarr title object
+   * @param {string} type - Stremio type ('movie' or 'series')
+   * @param {boolean} [includeDetails=false] - Whether to include detailed information
+   * @returns {Object} Stremio meta object
+   */
+  _titleToStremioMeta(title, type, includeDetails = false) {
+    const stremioId = this.titleKeyToStremioId(title.title_key);
+    const year = title.release_date ? new Date(title.release_date).getFullYear() : null;
+
+    // Check types using mapping
+    const isMovie = this._typeMap[type] === this._playarrTypes.MOVIES;
+    const isSeries = this._typeMap[type] === this._playarrTypes.TVSHOWS;
+
+    // Handle poster/backdrop paths - they might be full URLs from getTitleDetails or relative paths
+    const posterUrl = title.poster_path 
+      ? (title.poster_path.startsWith('http') ? title.poster_path : `${this._tmdbPosterBase}${title.poster_path}`)
+      : undefined;
+    const backdropUrl = title.backdrop_path
+      ? (title.backdrop_path.startsWith('http') ? title.backdrop_path : `${this._tmdbBackdropBase}${title.backdrop_path}`)
+      : undefined;
+
+    const meta = {
+      id: stremioId,
+      type: type,
+      name: title.title,
+      poster: posterUrl,
+      background: backdropUrl,
+      logo: posterUrl,
+      description: title.overview || undefined,
+      releaseInfo: year ? `${year}` : undefined,
+      imdbRating: title.vote_average ? (title.vote_average / 10).toFixed(1) : undefined,
+      genres: this._extractGenres(title.genres),
+      runtime: isMovie && title.runtime ? `${title.runtime} min` : undefined
+    };
+
+    // For series, add episodes info if available
+    if (isSeries && includeDetails && title.streams) {
+      const episodes = this._extractEpisodes(title);
+      if (episodes.length > 0) {
+        meta.episodes = episodes;
+      }
+    }
+
+    return meta;
+  }
+
+  /**
+   * Reconstruct streams object from flatStreams array for episode extraction
+   * @private
+   * @param {Array} flatStreams - Array of stream objects from getTitleDetails
+   * @returns {Object} Streams object with "S01-E01" keys
+   */
+  _reconstructStreamsFromFlat(flatStreams) {
+    const streams = {};
+    for (const stream of flatStreams) {
+      if (stream.season !== null && stream.episode !== null) {
+        const seasonStr = String(stream.season).padStart(2, '0');
+        const episodeStr = String(stream.episode).padStart(2, '0');
+        const streamId = `S${seasonStr}-E${episodeStr}`;
+        streams[streamId] = {
+          name: stream.name,
+          overview: stream.overview,
+          air_date: stream.air_date,
+          still_path: stream.still_path
+        };
+      }
+    }
+    return streams;
+  }
+
+  /**
+   * Extract genres from title
+   * @private
+   * @param {Array} genres - Genres array
+   * @returns {Array<string>} Array of genre names
+   */
+  _extractGenres(genres) {
+    if (!genres || !Array.isArray(genres)) {
+      return [];
+    }
+    return genres.map(g => typeof g === 'string' ? g : g.name).filter(Boolean);
+  }
+
+  /**
+   * Extract episodes from title streams
+   * @private
+   * @param {Object} title - Playarr title object
+   * @returns {Array<Object>} Array of episode objects
+   */
+  _extractEpisodes(title) {
+    if (!title.streams || typeof title.streams !== 'object') {
+      return [];
+    }
+
+    const episodes = [];
+    for (const [streamId, streamData] of Object.entries(title.streams)) {
+      // Parse streamId like "S01-E01"
+      const match = streamId.match(/^S(\d+)-E(\d+)$/);
+      if (!match) continue;
+
+      const [, season, episode] = match;
+      // Handle still_path - might be full URL or relative path
+      const thumbnailUrl = streamData.still_path
+        ? (streamData.still_path.startsWith('http') 
+            ? streamData.still_path 
+            : `https://image.tmdb.org/t/p/w300${streamData.still_path}`)
+        : undefined;
+
+      // Extract title_id from title_key (e.g., "tvshows-101200" -> "101200")
+      const titleIdMatch = title.title_key.match(/^(movies|tvshows)-(\d+)$/);
+      const titleId = titleIdMatch ? titleIdMatch[2] : null;
+      
+      // Episode ID format: {title_id}-S{season}-E{episode} (e.g., "101200-S01-E01")
+      // This ensures each episode has a unique ID that includes season/episode info
+      // The stream endpoint will parse this to extract title_id, season, and episode
+      const seasonStr = String(season).padStart(2, '0');
+      const episodeStr = String(episode).padStart(2, '0');
+      const episodeId = titleId ? `${titleId}-S${seasonStr}-E${episodeStr}` : `${title.title_key}-S${seasonStr}-E${episodeStr}`;
+      
+      const episodeObj = {
+        id: episodeId,
+        season: parseInt(season, 10),
+        episode: parseInt(episode, 10),
+        title: streamData.name || `Episode ${episode}`,
+        overview: streamData.overview || undefined,
+        released: streamData.air_date || undefined,
+        thumbnail: thumbnailUrl
+      };
+
+      episodes.push(episodeObj);
+    }
+
+    return episodes.sort((a, b) => {
+      if (a.season !== b.season) return a.season - b.season;
+      return a.episode - b.episode;
+    });
+  }
+
+  /**
+   * Build stream proxy URL
+   * @private
+   * @param {string} baseUrl - Base URL
+   * @param {string} mediaType - Media type ('movies' or 'tvshows')
+   * @param {string} titleId - Title ID
+   * @param {number|null} season - Season number
+   * @param {number|null} episode - Episode number
+   * @param {string} apiKey - User API key
+   * @returns {string} Stream proxy URL
+   */
+  _buildStreamProxyUrl(baseUrl, mediaType, titleId, season, episode, apiKey) {
+    // Remove /stremio/{api_key} from baseUrl to get the actual API base
+    const apiBase = baseUrl.replace(/\/stremio\/[^/]+$/, '');
+    
+    // Check media type using constant
+    const isMovies = mediaType === this._playarrTypes.MOVIES;
+    
+    if (isMovies) {
+      return `${apiBase}/api/stream/movies/${titleId}?api_key=${encodeURIComponent(apiKey)}`;
+    } else {
+      return `${apiBase}/api/stream/tvshows/${titleId}/${season}/${episode}?api_key=${encodeURIComponent(apiKey)}`;
+    }
+  }
+}
+
+export { StremioManager };
+
