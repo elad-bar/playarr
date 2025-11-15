@@ -310,7 +310,8 @@ class Middleware {
       }
 
       // Remove password_hash and MongoDB _id from user object
-      const { password_hash, _id, watchlist, ...userPublic } = user;
+      // Keep watchlist as it's needed for Xtream API endpoints
+      const { password_hash, _id, ...userPublic } = user;
 
       // Attach user to request object
       req.user = userPublic;
