@@ -253,9 +253,16 @@ export class LiveTVManager extends BaseManager {
    */
   async syncAllUsers() {
     try {
-      // Get all users with liveTV configured
+      // Get all users with liveTV configured (m3u_url must exist, not be null, and not be empty string)
       const users = await this._userRepo.findMany({
-        'liveTV.m3u_url': { $exists: true, $ne: null, $ne: '' }
+        $and: [
+          { 'liveTV': { $exists: true } },
+          { 'liveTV.m3u_url': { $exists: true } },
+          { 'liveTV.m3u_url': { $ne: null } },
+          { 'liveTV.m3u_url': { $ne: '' } },
+          { 'liveTV.m3u_url': { $type: 'string' } },
+          { 'liveTV.m3u_url': { $regex: /^.+$/ } } // Ensure at least one non-whitespace character
+        ]
       });
 
       if (users.length === 0) {
@@ -340,6 +347,26 @@ export class LiveTVManager extends BaseManager {
       const results = await Promise.all(
         users.map(async (user) => {
           try {
+            // Skip if liveTV is null/undefined (valid - user hasn't configured it)
+            if (!user.liveTV) {
+              return null; // Skip silently, not an error
+            }
+
+            // Warn only if liveTV object exists but m3u_url property is missing (corrupted data)
+            if (!('m3u_url' in user.liveTV)) {
+              this.logger.warn(`Skipping user ${user.username}: liveTV object exists but m3u_url property is missing (corrupted data)`);
+              return {
+                username: user.username,
+                success: false,
+                error: 'Live TV configuration is corrupted (m3u_url property missing)'
+              };
+            }
+
+            // Skip if m3u_url is null or empty (valid - user cleared their configuration)
+            if (!user.liveTV.m3u_url) {
+              return null; // Skip silently, not an error
+            }
+
             const m3uUrl = user.liveTV.m3u_url;
             const urlData = m3uUrlMap.get(m3uUrl);
             
@@ -430,9 +457,12 @@ export class LiveTVManager extends BaseManager {
         })
       );
 
+      // Filter out null results (users who don't have liveTV configured - not errors)
+      const filteredResults = results.filter(result => result !== null);
+
       return {
-        users_processed: users.length,
-        results
+        users_processed: filteredResults.length,
+        results: filteredResults
       };
     } catch (error) {
       this.logger.error(`Error in syncAllUsers: ${error.message}`);

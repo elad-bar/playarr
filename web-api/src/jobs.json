@@ -4,7 +4,7 @@
       "name": "syncIPTVProviderTitles",
       "jobHistoryName": "SyncIPTVProviderTitlesJob",
       "interval": "1h",
-      "timeout": "30s",
+      "timeout": "1m",
       "description": "Fetch metadata from IPTV providers and match TMDB IDs",
       "schedule": "Every 1 hour",
       "postExecute": ["providerTitlesMonitor"]
@@ -19,7 +19,6 @@
       "name": "syncLiveTV",
       "jobHistoryName": "SyncLiveTVJob",
       "interval": "6h",
-      "timeout": "20s",
       "description": "Sync Live TV channels and EPG from user-configured M3U and EPG URLs",
       "schedule": "Every 6 hours"
     }

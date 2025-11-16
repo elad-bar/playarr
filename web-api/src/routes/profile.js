@@ -49,15 +49,17 @@ class ProfileRouter extends BaseRouter {
 
         const result = await this._userManager.updateProfile(username, updates);
         
-        // Trigger Live TV sync job if liveTV was modified
+        // Trigger Live TV sync job if liveTV was modified (fire and forget - don't block response)
         if (liveTV !== undefined && this._jobsManager) {
-          try {
-            await this._jobsManager.triggerJob('syncLiveTV');
-            this.logger.info(`Triggered Live TV sync job after profile update for user ${username}`);
-          } catch (error) {
-            this.logger.warn(`Failed to trigger Live TV sync job: ${error.message}`);
-            // Don't fail the request if job trigger fails
-          }
+          // Trigger job asynchronously without awaiting - let it run in background
+          this._jobsManager.triggerJob('syncLiveTV')
+            .then(() => {
+              this.logger.info(`Triggered Live TV sync job after profile update for user ${username}`);
+            })
+            .catch((error) => {
+              this.logger.warn(`Failed to trigger Live TV sync job: ${error.message}`);
+              // Don't fail the request if job trigger fails
+            });
         }
         
         return res.status(result.statusCode).json(result.response);
