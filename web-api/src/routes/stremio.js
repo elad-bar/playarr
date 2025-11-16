@@ -19,15 +19,22 @@ class StremioRouter extends BaseRouter {
    */
   initialize() {
     /**
+     * OPTIONS handler for CORS preflight (must be before other routes)
+     */
+    this.router.options('*', (req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      res.status(200).send();
+    });
+
+    /**
      * GET /stremio/:api_key/manifest.json
      * Stremio addon manifest endpoint
      */
     this.router.get('/:api_key/manifest.json', this.middleware.requireApiKey, async (req, res) => {
       try {
-        // Log full request URL for debugging
-        const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-        this.logger.debug(`[Stremio] Manifest request: ${fullUrl}`);
-        
         // Verify API key matches the one in URL
         if (req.params.api_key !== req.user.api_key) {
           return this.returnErrorResponse(res, 401, 'Invalid API key');
@@ -57,10 +64,6 @@ class StremioRouter extends BaseRouter {
      */
     this.router.get('/:api_key/catalog/:type/:id.json', this.middleware.requireApiKey, async (req, res) => {
       try {
-        // Log full request URL for debugging
-        const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-        this.logger.debug(`[Stremio] Catalog request: ${fullUrl}`, { type: req.params.type, id: req.params.id, query: req.query });
-        
         // Verify API key
         if (req.params.api_key !== req.user.api_key) {
           return this.returnErrorResponse(res, 401, 'Invalid API key');
@@ -69,8 +72,8 @@ class StremioRouter extends BaseRouter {
         const { type, id } = req.params;
         
         // Validate type
-        if (type !== 'movie' && type !== 'series') {
-          return this.returnErrorResponse(res, 400, 'Invalid catalog type. Must be "movie" or "series"');
+        if (type !== 'movie' && type !== 'series' && type !== 'tv') {
+          return this.returnErrorResponse(res, 400, 'Invalid catalog type. Must be "movie", "series", or "tv"');
         }
 
         // Get catalog
@@ -92,23 +95,26 @@ class StremioRouter extends BaseRouter {
     /**
      * GET /stremio/:api_key/meta/:type/:id.json
      * Stremio metadata endpoint
+     * Note: Using * for id to handle special characters in channel IDs
      */
-    this.router.get('/:api_key/meta/:type/:id.json', this.middleware.requireApiKey, async (req, res) => {
+    this.router.get('/:api_key/meta/:type/*', this.middleware.requireApiKey, async (req, res) => {
       try {
-        // Log full request URL for debugging
-        const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-        this.logger.debug(`[Stremio] Meta request: ${fullUrl}`, { type: req.params.type, id: req.params.id });
-        
         // Verify API key
         if (req.params.api_key !== req.user.api_key) {
           return this.returnErrorResponse(res, 401, 'Invalid API key');
         }
 
-        const { type, id } = req.params;
+        const { type } = req.params;
         
         // Validate type
-        if (type !== 'movie' && type !== 'series') {
-          return this.returnErrorResponse(res, 400, 'Invalid meta type. Must be "movie" or "series"');
+        if (type !== 'movie' && type !== 'series' && type !== 'tv') {
+          return this.returnErrorResponse(res, 400, 'Invalid meta type. Must be "movie", "series", or "tv"');
+        }
+
+        // Extract ID from the wildcard parameter (remove .json extension if present)
+        let id = req.params[0] || '';
+        if (id.endsWith('.json')) {
+          id = id.slice(0, -5);
         }
 
         // Get meta
@@ -127,23 +133,26 @@ class StremioRouter extends BaseRouter {
     /**
      * GET /stremio/:api_key/stream/:type/:id.json
      * Stremio stream endpoint
+     * Note: Using * for id to handle special characters in channel IDs
      */
-    this.router.get('/:api_key/stream/:type/:id.json', this.middleware.requireApiKey, async (req, res) => {
+    this.router.get('/:api_key/stream/:type/*', this.middleware.requireApiKey, async (req, res) => {
       try {
-        // Log full request URL for debugging
-        const fullUrl = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-        this.logger.debug(`[Stremio] Stream request: ${fullUrl}`, { type: req.params.type, id: req.params.id, season: req.query.season, episode: req.query.episode });
-        
         // Verify API key
         if (req.params.api_key !== req.user.api_key) {
           return this.returnErrorResponse(res, 401, 'Invalid API key');
         }
 
-        const { type, id } = req.params;
+        const { type } = req.params;
         
         // Validate type
-        if (type !== 'movie' && type !== 'series') {
-          return this.returnErrorResponse(res, 400, 'Invalid stream type. Must be "movie" or "series"');
+        if (type !== 'movie' && type !== 'series' && type !== 'tv') {
+          return this.returnErrorResponse(res, 400, 'Invalid stream type. Must be "movie", "series", or "tv"');
+        }
+
+        // Extract ID from the wildcard parameter (remove .json extension if present)
+        let id = req.params[0] || '';
+        if (id.endsWith('.json')) {
+          id = id.slice(0, -5);
         }
 
         // Parse season/episode from query params (for series)
@@ -164,16 +173,6 @@ class StremioRouter extends BaseRouter {
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Failed to get streams', `Get streams error: ${error.message}`);
       }
-    });
-
-    /**
-     * OPTIONS handler for CORS preflight
-     */
-    this.router.options('*', (req, res) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-      res.status(200).send();
     });
   }
 

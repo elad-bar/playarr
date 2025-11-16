@@ -9,25 +9,29 @@ class StremioManager extends BaseManager {
    * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
    * @param {import('./stream.js').StreamManager} streamManager - Stream manager instance
    * @param {import('./users.js').UserManager} userManager - User manager instance
+   * @param {import('./liveTV.js').LiveTVManager} [liveTVManager] - Live TV manager instance (optional)
    */
-  constructor(titlesManager, streamManager, userManager) {
+  constructor(titlesManager, streamManager, userManager, liveTVManager = null) {
     super('StremioManager');
     this._titlesManager = titlesManager;
     this._streamManager = streamManager;
     this._userManager = userManager;
+    this._liveTVManager = liveTVManager;
     this._tmdbPosterBase = 'https://image.tmdb.org/t/p/w300';
     this._tmdbBackdropBase = 'https://image.tmdb.org/t/p/w1280';
     
     // Type mapping: Stremio type -> Playarr type
     this._typeMap = {
       movie: 'movies',
-      series: 'tvshows'
+      series: 'tvshows',
+      tv: 'livetv'
     };
     
     // Playarr type constants
     this._playarrTypes = {
       MOVIES: 'movies',
-      TVSHOWS: 'tvshows'
+      TVSHOWS: 'tvshows',
+      LIVETV: 'livetv'
     };
   }
 
@@ -82,53 +86,72 @@ class StremioManager extends BaseManager {
   /**
    * Get manifest for Stremio addon
    * @param {string} baseUrl - Base URL for the addon (e.g., "https://yourdomain.com/stremio/{api_key}")
-   * @param {Object} user - User object with first_name and last_name
+   * @param {Object} user - User object (used to check for Live TV configuration)
    * @returns {Object} Stremio manifest object
    */
   getManifest(baseUrl, user = null) {
-    // Build personalized addon name
-    let addonName = 'Playarr';
-    if (user && (user.first_name || user.last_name)) {
-      const nameParts = [];
-      if (user.first_name) nameParts.push(user.first_name);
-      if (user.last_name) nameParts.push(user.last_name);
-      if (nameParts.length > 0) {
-        addonName = `Playarr (${nameParts.join(' ')})`;
+    // Use fixed addon name
+    const addonName = 'Playarr';
+
+    const resources = [
+      {
+        name: 'catalog',
+        types: ['movie', 'series']
+      },
+      {
+        name: 'meta',
+        types: ['movie', 'series']
+      },
+      {
+        name: 'stream',
+        types: ['movie', 'series']
       }
+    ];
+
+    const types = ['movie', 'series'];
+    const catalogs = [
+      {
+        type: 'movie',
+        id: 'top',
+        name: 'Playarr Movies'
+      },
+      {
+        type: 'series',
+        id: 'top',
+        name: 'Playarr Series'
+      }
+    ];
+
+    // Add Live TV support if user has it configured
+    if (user?.liveTV?.m3u_url) {
+      resources.push({
+        name: 'catalog',
+        types: ['tv']
+      });
+      resources.push({
+        name: 'meta',
+        types: ['tv']
+      });
+      resources.push({
+        name: 'stream',
+        types: ['tv']
+      });
+      types.push('tv');
+      catalogs.push({
+        type: 'tv',
+        id: 'top',
+        name: 'Playarr Live TV'
+      });
     }
 
     return {
       id: 'com.playarr.addon',
-      version: '1.0.0',
+      version: '1.1.0',
       name: addonName,
       description: 'Playarr IPTV streaming addon',
-      resources: [
-        {
-          name: 'catalog',
-          types: ['movie', 'series']
-        },
-        {
-          name: 'meta',
-          types: ['movie', 'series']
-        },
-        {
-          name: 'stream',
-          types: ['movie', 'series']
-        }
-      ],
-      types: ['movie', 'series'],
-      catalogs: [
-        {
-          type: 'movie',
-          id: 'top',
-          name: 'Playarr Movies'
-        },
-        {
-          type: 'series',
-          id: 'top',
-          name: 'Playarr Series'
-        }
-      ],
+      resources,
+      types,
+      catalogs,
       background: `${baseUrl}/background.jpg`,
       logo: `${baseUrl}/logo.png`,
       contactEmail: 'support@playarr.com'
@@ -138,13 +161,38 @@ class StremioManager extends BaseManager {
   /**
    * Get catalog for a specific type
    * Returns all titles of the specified type (no watchlist filtering - handled by Stremio UI)
-   * @param {string} type - Catalog type ('movie' or 'series')
+   * @param {string} type - Catalog type ('movie', 'series', or 'tv')
    * @param {Object} user - User object (used for authentication only, not for filtering)
    * @param {Object} options - Query options (page, perPage, etc.)
    * @returns {Promise<Object>} Stremio catalog response
    */
   async getCatalog(type, user, options = {}) {
     try {
+      // Handle Live TV type
+      if (type === 'tv') {
+        if (!this._liveTVManager || !user?.liveTV?.m3u_url) {
+          return { metas: [] };
+        }
+        
+        const channels = await this._liveTVManager.getUserChannels(user.username);
+        const metas = channels.map(channel => {
+          // URL-encode the channel ID to ensure proper URL construction by Stremio
+          const encodedId = encodeURIComponent(channel.channel_id);
+          return {
+            id: encodedId,
+            type: 'tv',
+            name: channel.name,
+            poster: channel.tvg_logo || null,
+            background: channel.tvg_logo || null,
+            logo: channel.tvg_logo || null,
+            description: channel.currentProgram ? `Now: ${channel.currentProgram.title}${channel.currentProgram.desc ? ` - ${channel.currentProgram.desc}` : ''}` : channel.name,
+            genres: channel.group_title ? [channel.group_title] : []
+          };
+        });
+        
+        return { metas };
+      }
+
       // Map Stremio type to Playarr type using mapping object
       const playarrType = this._typeMap[type];
       if (!playarrType) {
@@ -181,12 +229,80 @@ class StremioManager extends BaseManager {
 
   /**
    * Get metadata for a specific title
-   * @param {string} type - Content type ('movie' or 'series') - comes from endpoint path
-   * @param {string} stremioId - Stremio ID (TMDB ID number, e.g., "12345", or IMDB ID, e.g., "tt0133093")
+   * @param {string} type - Content type ('movie', 'series', or 'tv') - comes from endpoint path
+   * @param {string} stremioId - Stremio ID (TMDB ID number, e.g., "12345", IMDB ID, e.g., "tt0133093", or channel ID for 'tv')
    * @param {Object} user - User object
    * @returns {Promise<Object>} Stremio meta response
    */
   async getMeta(type, stremioId, user) {
+    // Handle Live TV type
+    if (type === 'tv') {
+      if (!this._liveTVManager || !user?.liveTV?.m3u_url) {
+        return { meta: null };
+      }
+      
+      try {
+        // Decode the channel ID (since we encode it in the catalog)
+        const decodedChannelId = decodeURIComponent(stremioId);
+        
+        // Try with decoded ID first
+        let channel = await this._liveTVManager.getChannel(user.username, decodedChannelId);
+        
+        // If not found, try with the ID as-is (in case it wasn't encoded)
+        if (!channel && decodedChannelId !== stremioId) {
+          channel = await this._liveTVManager.getChannel(user.username, stremioId);
+        }
+        
+        if (!channel) {
+          return { meta: null };
+        }
+        
+        const channelId = channel.channel_id;
+        const programs = await this._liveTVManager.getChannelPrograms(user.username, channelId);
+        const now = new Date();
+        const currentProgram = programs.find(p => p.start <= now && p.stop >= now);
+        
+        // Build videos array for EPG data (required for Stremio to recognize TV channels as playable)
+        const videos = programs.map(program => {
+          const startTime = program.start instanceof Date ? program.start : new Date(program.start);
+          const stopTime = program.stop instanceof Date ? program.stop : new Date(program.stop);
+          const duration = Math.floor((stopTime - startTime) / 1000); // Duration in seconds
+          
+          return {
+            id: `${channelId}-${startTime.getTime()}`,
+            title: program.title || 'Unknown Program',
+            released: startTime.toISOString(),
+            duration: duration > 0 ? duration : 3600 // Default to 1 hour if duration is invalid
+          };
+        });
+        
+        // Return meta with encoded ID to match catalog format
+        return {
+          meta: {
+            id: encodeURIComponent(channelId), // Match the encoded ID from catalog
+            type: 'tv',
+            name: channel.name,
+            poster: channel.tvg_logo || null,
+            background: channel.tvg_logo || null, // Use logo as background if available
+            logo: channel.tvg_logo || null,
+            description: currentProgram ? `Now: ${currentProgram.title}${currentProgram.desc ? ` - ${currentProgram.desc}` : ''}` : channel.name,
+            genres: channel.group_title ? [channel.group_title] : [],
+            videos: videos.length > 0 ? videos : [
+              // Fallback: if no EPG data, provide a single "live" entry
+              {
+                id: `${channelId}-live`,
+                title: 'Live',
+                released: new Date().toISOString(),
+                duration: 0 // 0 duration indicates live stream
+              }
+            ]
+          }
+        };
+      } catch (error) {
+        this.logger.error(`Error getting meta for TV channel ${stremioId}:`, error);
+        return { meta: null };
+      }
+    }
     try {
       // stremioId can be a TMDB ID (numeric) or IMDB ID (starting with "tt")
       const titleKey = await this.stremioIdToTitleKey(stremioId, type);
@@ -230,8 +346,8 @@ class StremioManager extends BaseManager {
 
   /**
    * Get streams for a specific title
-   * @param {string} type - Content type ('movie' or 'series') - comes from endpoint path
-   * @param {string} stremioId - Stremio ID (TMDB ID number, e.g., "12345", IMDB ID, e.g., "tt0133093", episode format with dashes, e.g., "tt0133093-S01-E01", or Stremio colon format, e.g., "tt7491982:1:1")
+   * @param {string} type - Content type ('movie', 'series', or 'tv') - comes from endpoint path
+   * @param {string} stremioId - Stremio ID (TMDB ID number, e.g., "12345", IMDB ID, e.g., "tt0133093", episode format with dashes, e.g., "tt0133093-S01-E01", Stremio colon format, e.g., "tt7491982:1:1", or channel ID for 'tv')
    * @param {Object} user - User object
    * @param {number} [season] - Season number (for series)
    * @param {number} [episode] - Episode number (for series)
@@ -239,6 +355,56 @@ class StremioManager extends BaseManager {
    * @returns {Promise<Object>} Stremio stream response
    */
   async getStreams(type, stremioId, user, season = null, episode = null, baseUrl = '') {
+    // Handle Live TV type
+    if (type === 'tv') {
+      if (!this._liveTVManager || !user?.liveTV?.m3u_url) {
+        return { streams: [] };
+      }
+      
+      try {
+        // For TV channels, stremioId might be:
+        // 1. Just the channel ID (e.g., "12-kanal-il")
+        // 2. A program ID from videos array (e.g., "12-kanal-il-1234567890")
+        // Extract the channel ID by removing the timestamp suffix if present
+        let channelIdFromRequest = decodeURIComponent(stremioId);
+        
+        // Check if it's a program ID (format: channelId-timestamp)
+        const programIdMatch = channelIdFromRequest.match(/^(.+)-(\d+)$/);
+        const actualChannelId = programIdMatch ? programIdMatch[1] : channelIdFromRequest;
+        
+        // Try with extracted channel ID first
+        let channel = await this._liveTVManager.getChannel(user.username, actualChannelId);
+        
+        // If not found, try with the ID as-is (in case it wasn't in program format)
+        if (!channel && actualChannelId !== channelIdFromRequest) {
+          channel = await this._liveTVManager.getChannel(user.username, channelIdFromRequest);
+        }
+        
+        if (!channel) {
+          return { streams: [] };
+        }
+        
+        // Remove /stremio/{api_key} from baseUrl to get the actual API base
+        const apiBase = baseUrl.replace(/\/stremio\/[^/]+$/, '');
+        const channelId = encodeURIComponent(channel.channel_id);
+        const streamUrl = `${apiBase}/api/livetv/stream/${channelId}?api_key=${user.api_key}`;
+        
+        // For Live TV, always return the live stream URL regardless of which program was selected
+        return {
+          streams: [{
+            url: streamUrl,
+            title: channel.name,
+            behaviorHints: {
+              bingeGroup: `livetv-${channel.channel_id}`
+            }
+          }]
+        };
+      } catch (error) {
+        this.logger.error(`Error getting stream for TV channel ${stremioId}:`, error);
+        return { streams: [] };
+      }
+    }
+    
     try {
       // For series, stremioId might be in format "101200-S01-E01", "tt0133093-S01-E01", or "tt7491982:1:1" (Stremio colon format)
       // For movies, stremioId is just the title_id number or IMDB ID

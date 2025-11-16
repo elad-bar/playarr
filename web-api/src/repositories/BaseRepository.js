@@ -418,6 +418,19 @@ export class BaseRepository {
   async createIndexIfNotExists(keySpec, options = {}) {
     try {
       const collection = this.db.collection(this.collectionName);
+      
+      // Ensure collection exists before checking indexes
+      const collections = await this.db.listCollections({ name: this.collectionName }).toArray();
+      if (collections.length === 0) {
+        // Collection doesn't exist, create it by inserting and deleting a dummy document
+        try {
+          const result = await collection.insertOne({ _temp: true });
+          await collection.deleteOne({ _id: result.insertedId });
+        } catch (createError) {
+          // Ignore - collection might have been created by another process
+        }
+      }
+      
       const indexes = await collection.indexes();
       
       // Convert keySpec to string for comparison
@@ -727,12 +740,13 @@ export class BaseRepository {
       groupId[field] = `$${field}`;
     }
 
-    const duplicates = await collection.aggregate([
+    // First, check if duplicates exist (fast check without loading all docs)
+    const duplicateGroups = await collection.aggregate([
       {
         $group: {
           _id: groupId,
           count: { $sum: 1 },
-          docs: { $push: '$$ROOT' }
+          firstId: { $first: '$_id' } // Just get first ID to verify duplicates exist
         }
       },
       {
@@ -740,21 +754,25 @@ export class BaseRepository {
       }
     ]).toArray();
 
-    if (duplicates.length === 0) {
+    if (duplicateGroups.length === 0) {
       return 0;
     }
 
-    logger.info(`Found ${duplicates.length} duplicate key groups in ${this.collectionName}, removing duplicates...`);
+    logger.info(`Found ${duplicateGroups.length} duplicate key groups in ${this.collectionName}, removing duplicates...`);
     let totalRemoved = 0;
 
-    for (const dup of duplicates) {
-      const docs = dup.docs;
-      // Sort by lastUpdated (descending), then by createdAt (descending) to keep the most recent
-      docs.sort((a, b) => {
-        const aDate = a.lastUpdated || a.createdAt || new Date(0);
-        const bDate = b.lastUpdated || b.createdAt || new Date(0);
-        return bDate.getTime() - aDate.getTime();
-      });
+    // Now fetch only minimal fields for groups that have duplicates
+    for (const dupGroup of duplicateGroups) {
+      // Build query to find all documents with this duplicate key
+      const query = {};
+      for (const [field, value] of Object.entries(dupGroup._id)) {
+        query[field] = value;
+      }
+      
+      // Fetch only _id, lastUpdated, and createdAt to minimize memory usage
+      const docs = await collection.find(query, {
+        projection: { _id: 1, lastUpdated: 1, createdAt: 1 }
+      }).sort({ lastUpdated: -1, createdAt: -1 }).toArray();
 
       // Keep the first (most recent), remove the rest
       const toRemove = docs.slice(1);
@@ -762,7 +780,7 @@ export class BaseRepository {
         const idsToRemove = toRemove.map(d => d._id);
         const result = await collection.deleteMany({ _id: { $in: idsToRemove } });
         totalRemoved += result.deletedCount;
-        logger.debug(`Removed ${result.deletedCount} duplicate(s) for key: ${JSON.stringify(dup._id)}`);
+        logger.debug(`Removed ${result.deletedCount} duplicate(s) for key: ${JSON.stringify(dupGroup._id)}`);
       }
     }
 
@@ -783,6 +801,21 @@ export class BaseRepository {
       if (indexDefinitions.length === 0) {
         logger.debug(`No index definitions found for ${this.collectionName}`);
         return;
+      }
+
+      // Ensure collection exists before creating indexes
+      const collection = this.db.collection(this.collectionName);
+      const collections = await this.db.listCollections({ name: this.collectionName }).toArray();
+      if (collections.length === 0) {
+        // Collection doesn't exist, create it by inserting and immediately deleting a dummy document
+        try {
+          const result = await collection.insertOne({ _temp: true });
+          await collection.deleteOne({ _id: result.insertedId });
+          logger.debug(`Created collection ${this.collectionName} for index initialization`);
+        } catch (createError) {
+          // Collection might have been created by another process, continue
+          logger.debug(`Collection ${this.collectionName} creation: ${createError.message}`);
+        }
       }
 
       for (const indexDef of indexDefinitions) {

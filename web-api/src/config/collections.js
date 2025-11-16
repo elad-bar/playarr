@@ -9,6 +9,8 @@ export const DatabaseCollections = {
   SETTINGS: 'settings',
   STATS: 'stats',
   USERS: 'users',
+  CHANNELS: 'channels',
+  PROGRAMS: 'programs',
 };
 
 /**

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Grid,
@@ -10,9 +10,16 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
-  Typography
+  Typography,
+  Drawer,
+  Card,
+  CardContent,
+  CardActionArea,
+  useTheme,
+  useMediaQuery
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
+import InfoIcon from '@mui/icons-material/Info';
 import { authService } from '../services/auth';
 import { useAuth } from '../context/AuthContext';
 import ProfileUserDetails from './profile/ProfileUserDetails';
@@ -22,6 +29,7 @@ import ProfileM3UEndpoint from './profile/ProfileM3UEndpoint';
 import ProfileIPTVSyncer from './profile/ProfileIPTVSyncer';
 import ProfileXtreamCode from './profile/ProfileXtreamCode';
 import ProfileStremio from './profile/ProfileStremio';
+import ProfileLiveTV from './profile/ProfileLiveTV';
 
 function TabPanel({ children, value, index }) {
   return (
@@ -73,10 +81,22 @@ const Profile = ({ open, onClose }) => {
     confirm: false
   });
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
 
+
+  // Only load profile when dialog opens (not on mount or when closed)
+  const hasLoadedRef = useRef(false);
+  
   useEffect(() => {
-    loadProfile();
-  }, []);
+    if (open && !hasLoadedRef.current) {
+      hasLoadedRef.current = true;
+      loadProfile();
+    }
+    if (!open) {
+      hasLoadedRef.current = false;
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   const loadProfile = async () => {
@@ -211,6 +231,43 @@ const Profile = ({ open, onClose }) => {
     return key.substring(0, 4) + '•'.repeat(4) + key.substring(key.length - 4);
   };
 
+  const handleOpenClientDetails = (clientId) => {
+    setSelectedClient(clientId);
+    setDrawerOpen(true);
+  };
+
+  const handleCloseClientDetails = () => {
+    setDrawerOpen(false);
+    setSelectedClient(null);
+  };
+
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+
+  // Client configurations
+  const clients = [
+    {
+      id: 'm3u',
+      title: 'M3U8 Playlist',
+      description: 'Get M3U playlist files for media players like Plex, Jellyfin, Emby, VLC, and others.'
+    },
+    {
+      id: 'iptv-syncer',
+      title: 'Strmarr',
+      description: 'Generate STRM files for media clients like Emby, Jellyfin, and Kodi.'
+    },
+    {
+      id: 'xtream-code',
+      title: 'Xtream Code API',
+      description: 'Access your movies and TV shows using Xtream Code API compatible clients.'
+    },
+    {
+      id: 'stremio',
+      title: 'Stremio Addon',
+      description: 'Add Playarr as a Stremio addon to access all movies and TV shows directly in Stremio.'
+    }
+  ];
+
 
   if (!open) return null;
 
@@ -233,6 +290,7 @@ const Profile = ({ open, onClose }) => {
   }
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={onClose}
@@ -245,6 +303,8 @@ const Profile = ({ open, onClose }) => {
           setActiveTab(0);
           setError(null);
           setSuccess(null);
+          setDrawerOpen(false);
+          setSelectedClient(null);
         }
       }}
     >
@@ -275,7 +335,8 @@ const Profile = ({ open, onClose }) => {
               aria-label="profile tabs"
             >
               <Tab label="User Details" />
-              <Tab label="Playlist" />
+              <Tab label="LiveTV" />
+              <Tab label="Client" />
             </Tabs>
           </Box>
 
@@ -324,51 +385,145 @@ const Profile = ({ open, onClose }) => {
             </Grid>
           </TabPanel>
 
-          {/* Playlist Tab - 2 rows of 2 columns each */}
+          {/* LiveTV Tab */}
           <TabPanel value={activeTab} index={1}>
             <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <ProfileM3UEndpoint
-                  apiKey={profile.api_key}
-                  showApiKey={showApiKey}
-                  maskApiKey={maskApiKey}
-                  onCopyUrl={() => {
-                    setApiKeyCopied(true);
-                    setTimeout(() => setApiKeyCopied(false), 2000);
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <ProfileIPTVSyncer apiKey={profile.api_key} />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <ProfileXtreamCode
-                  apiKey={profile.api_key}
-                  username={profile.username}
-                  showApiKey={showApiKey}
-                  maskApiKey={maskApiKey}
-                  onCopyUrl={() => {
-                    setApiKeyCopied(true);
-                    setTimeout(() => setApiKeyCopied(false), 2000);
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <ProfileStremio
-                  apiKey={profile.api_key}
-                  showApiKey={showApiKey}
-                  maskApiKey={maskApiKey}
-                  onCopyUrl={() => {
-                    setApiKeyCopied(true);
-                    setTimeout(() => setApiKeyCopied(false), 2000);
-                  }}
+              <Grid item xs={12}>
+                <ProfileLiveTV
+                  profile={profile}
+                  onUpdate={loadProfile}
                 />
               </Grid>
             </Grid>
           </TabPanel>
+
+          {/* Client Tab - 4 columns layout */}
+          <TabPanel value={activeTab} index={2}>
+            <Grid container spacing={3}>
+              {clients.map((client) => (
+                <Grid item xs={12} sm={6} md={3} key={client.id}>
+                  <Card
+                    sx={{
+                      height: '100%',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      transition: 'transform 0.2s, box-shadow 0.2s',
+                      '&:hover': {
+                        transform: 'translateY(-4px)',
+                        boxShadow: 6
+                      }
+                    }}
+                  >
+                    <CardActionArea
+                      onClick={() => handleOpenClientDetails(client.id)}
+                      sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}
+                    >
+                      <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                          <Typography variant="h6" sx={{ fontWeight: 'bold', flex: 1 }}>
+                            {client.title}
+                          </Typography>
+                          <IconButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenClientDetails(client.id);
+                            }}
+                            color="primary"
+                            aria-label="View details"
+                            size="small"
+                            sx={{ ml: 1 }}
+                          >
+                            <InfoIcon />
+                          </IconButton>
+                        </Box>
+                        <Typography variant="body2" color="text.secondary">
+                          {client.description}
+                        </Typography>
+                      </CardContent>
+                    </CardActionArea>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </TabPanel>
         </Box>
-    </DialogContent>
+      </DialogContent>
     </Dialog>
+
+      {/* Client Details Drawer - Outside Dialog for proper z-index */}
+      <Drawer
+        anchor="right"
+        open={drawerOpen && open}
+        onClose={handleCloseClientDetails}
+        variant="temporary"
+        ModalProps={{
+          style: { zIndex: 1400 }
+        }}
+        PaperProps={{
+          sx: {
+            width: isMobile ? '100%' : 600,
+            maxWidth: '100%',
+            zIndex: 1400
+          }
+        }}
+      >
+        <Box sx={{ p: 3, height: '100%', overflow: 'auto' }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+              {clients.find(c => c.id === selectedClient)?.title || 'Client Details'}
+            </Typography>
+            <IconButton onClick={handleCloseClientDetails} aria-label="Close">
+              <CloseIcon />
+            </IconButton>
+          </Box>
+
+          {selectedClient === 'm3u' && (
+            <ProfileM3UEndpoint
+              apiKey={profile.api_key}
+              showApiKey={showApiKey}
+              maskApiKey={maskApiKey}
+              hideTitle={true}
+              profile={profile}
+              onCopyUrl={() => {
+                setApiKeyCopied(true);
+                setTimeout(() => setApiKeyCopied(false), 2000);
+              }}
+            />
+          )}
+
+          {selectedClient === 'iptv-syncer' && (
+            <ProfileIPTVSyncer apiKey={profile.api_key} hideTitle={true} />
+          )}
+
+          {selectedClient === 'xtream-code' && (
+            <ProfileXtreamCode
+              apiKey={profile.api_key}
+              username={profile.username}
+              showApiKey={showApiKey}
+              maskApiKey={maskApiKey}
+              hideTitle={true}
+              onCopyUrl={() => {
+                setApiKeyCopied(true);
+                setTimeout(() => setApiKeyCopied(false), 2000);
+              }}
+            />
+          )}
+
+          {selectedClient === 'stremio' && (
+            <ProfileStremio
+              apiKey={profile.api_key}
+              showApiKey={showApiKey}
+              maskApiKey={maskApiKey}
+              hideTitle={true}
+              onCopyUrl={() => {
+                setApiKeyCopied(true);
+                setTimeout(() => setApiKeyCopied(false), 2000);
+              }}
+            />
+          )}
+        </Box>
+      </Drawer>
+    </>
   );
 };
 

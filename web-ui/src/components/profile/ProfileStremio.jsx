@@ -10,7 +10,7 @@ import {
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
-const ProfileStremio = ({ apiKey, showApiKey, maskApiKey, onCopyUrl }) => {
+const ProfileStremio = ({ apiKey, showApiKey, maskApiKey, onCopyUrl, hideTitle = false }) => {
   const baseUrl = window.location.origin;
   const stremioManifestUrl = `${baseUrl}/stremio/${apiKey}/manifest.json`;
   
@@ -26,13 +26,15 @@ const ProfileStremio = ({ apiKey, showApiKey, maskApiKey, onCopyUrl }) => {
 
   return (
     <Paper elevation={3} sx={{ p: 3, height: '100%' }}>
-      <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 3 }}>
-        Stremio Addon
-      </Typography>
+      {!hideTitle && (
+        <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 3 }}>
+          Stremio Addon
+        </Typography>
+      )}
 
       <Typography variant="body1" sx={{ mb: 3, color: 'text.primary' }}>
-        Add Playarr as a Stremio addon to access your watchlist movies and TV shows directly in Stremio.
-        The addon shows only titles from your watchlist.
+        Add Playarr as a Stremio addon to access all movies and TV shows directly in Stremio.
+        Live TV channels are also available if configured.
       </Typography>
 
       <Box sx={{ mb: 3 }}>
@@ -99,7 +101,7 @@ const ProfileStremio = ({ apiKey, showApiKey, maskApiKey, onCopyUrl }) => {
           <strong>3.</strong> Click "Add Addon" and paste the URL
         </Typography>
         <Typography variant="body2" component="div" sx={{ color: 'text.primary' }}>
-          <strong>4.</strong> Your watchlist movies and TV shows will appear in Stremio
+          <strong>4.</strong> All movies and TV shows will appear in Stremio (Live TV channels available if configured)
         </Typography>
       </Box>
     </Paper>

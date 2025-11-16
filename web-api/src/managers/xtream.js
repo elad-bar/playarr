@@ -9,10 +9,12 @@ import { DatabaseCollections, toCollectionName } from '../config/collections.js'
 class XtreamManager extends BaseManager {
   /**
    * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
+   * @param {import('./liveTV.js').LiveTVManager} [liveTVManager] - Live TV manager instance (optional)
    */
-  constructor(titlesManager) {
+  constructor(titlesManager, liveTVManager = null) {
     super('XtreamManager');
     this._titlesManager = titlesManager;
+    this._liveTVManager = liveTVManager;
     this._titleRepo = titlesManager._titleRepo;
     this._titlesCollection = toCollectionName(DatabaseCollections.TITLES);
   }
@@ -497,6 +499,165 @@ class XtreamManager extends BaseManager {
   _getEpisodeCount(streams) {
     if (!streams || typeof streams !== 'object') return 0;
     return Object.keys(streams).length;
+  }
+
+  /**
+   * Get Live TV categories (channel groups)
+   * @param {Object} user - Authenticated user object
+   * @returns {Promise<Array>} Array of category objects
+   */
+  async getLiveCategories(user) {
+    try {
+      if (!this._liveTVManager || !user?.liveTV?.m3u_url) {
+        return [];
+      }
+
+      const channels = await this._liveTVManager.getUserChannels(user.username);
+      const categories = new Map();
+
+      // Extract unique group titles
+      channels.forEach(channel => {
+        if (channel.group_title && !categories.has(channel.group_title)) {
+          categories.set(channel.group_title, {
+            category_id: categories.size + 1,
+            category_name: channel.group_title,
+            parent_id: 0
+          });
+        }
+      });
+
+      return Array.from(categories.values());
+    } catch (error) {
+      this.logger.error('Error getting Live TV categories:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get Live TV streams (channels)
+   * @param {Object} user - Authenticated user object
+   * @param {string} baseUrl - Base URL for stream endpoints
+   * @param {number} [categoryId] - Optional category ID to filter by group
+   * @returns {Promise<Array>} Array of channel stream objects
+   */
+  async getLiveStreams(user, baseUrl, categoryId = null) {
+    try {
+      if (!this._liveTVManager || !user?.liveTV?.m3u_url) {
+        return [];
+      }
+
+      const channels = await this._liveTVManager.getUserChannels(user.username);
+      const categories = new Map();
+      let categoryCounter = 1;
+
+      // Build category map
+      channels.forEach(channel => {
+        if (channel.group_title && !categories.has(channel.group_title)) {
+          categories.set(channel.group_title, categoryCounter++);
+        }
+      });
+
+      // Filter by category if specified
+      let filteredChannels = channels;
+      if (categoryId) {
+        const categoryName = Array.from(categories.entries()).find(([_, id]) => id === categoryId)?.[0];
+        if (categoryName) {
+          filteredChannels = channels.filter(ch => ch.group_title === categoryName);
+        } else {
+          return [];
+        }
+      }
+
+      // Convert to Xtream format
+      return filteredChannels.map((channel, index) => {
+        const channelId = encodeURIComponent(channel.channel_id);
+        const streamUrl = `${baseUrl}/api/livetv/stream/${channelId}?api_key=${user.api_key}`;
+        const categoryIdForChannel = channel.group_title ? categories.get(channel.group_title) : 0;
+
+        return {
+          num: index + 1,
+          name: channel.name,
+          stream_type: 'live',
+          stream_id: channel.channel_id,
+          stream_icon: channel.tvg_logo || '',
+          epg_channel_id: channel.tvg_id || channel.channel_id,
+          added: channel.createdAt ? this._toUnixTimestamp(channel.createdAt) : Math.floor(Date.now() / 1000).toString(),
+          category_id: String(categoryIdForChannel),
+          category_ids: [String(categoryIdForChannel)],
+          custom_sid: '',
+          tv_archive: 0,
+          direct_source: streamUrl,
+          tv_archive_duration: 0
+        };
+      });
+    } catch (error) {
+      this.logger.error('Error getting Live TV streams:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get short EPG for Live TV channels
+   * @param {Object} user - Authenticated user object
+   * @returns {Promise<Array>} Array of EPG objects
+   */
+  async getShortEpg(user) {
+    try {
+      if (!this._liveTVManager || !user?.liveTV?.m3u_url) {
+        return [];
+      }
+
+      const channels = await this._liveTVManager.getUserChannels(user.username);
+      const now = new Date();
+      const epgData = [];
+
+      for (const channel of channels) {
+        const programs = await this._liveTVManager.getChannelPrograms(user.username, channel.channel_id);
+        
+        // Get current and next program
+        const currentProgram = programs.find(p => p.start <= now && p.stop >= now);
+        const nextProgram = programs.find(p => p.start > now);
+
+        if (currentProgram || nextProgram) {
+          epgData.push({
+            id: channel.channel_id,
+            epg_listings: [
+              ...(currentProgram ? [{
+                id: `${channel.channel_id}_${currentProgram.start.getTime()}`,
+                title: currentProgram.title,
+                lang: 'en',
+                start: this._toUnixTimestamp(currentProgram.start),
+                end: this._toUnixTimestamp(currentProgram.stop),
+                description: currentProgram.desc || '',
+                channel_id: channel.channel_id,
+                start_timestamp: this._toUnixTimestamp(currentProgram.start),
+                stop_timestamp: this._toUnixTimestamp(currentProgram.stop),
+                now_playing: 1,
+                has_archive: 0
+              }] : []),
+              ...(nextProgram ? [{
+                id: `${channel.channel_id}_${nextProgram.start.getTime()}`,
+                title: nextProgram.title,
+                lang: 'en',
+                start: this._toUnixTimestamp(nextProgram.start),
+                end: this._toUnixTimestamp(nextProgram.stop),
+                description: nextProgram.desc || '',
+                channel_id: channel.channel_id,
+                start_timestamp: this._toUnixTimestamp(nextProgram.start),
+                stop_timestamp: this._toUnixTimestamp(nextProgram.stop),
+                now_playing: 0,
+                has_archive: 0
+              }] : [])
+            ]
+          });
+        }
+      }
+
+      return epgData;
+    } catch (error) {
+      this.logger.error('Error getting short EPG:', error);
+      return [];
+    }
   }
 }
 

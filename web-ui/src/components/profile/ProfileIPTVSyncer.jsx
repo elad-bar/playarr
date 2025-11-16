@@ -5,16 +5,19 @@ import {
   Typography
 } from '@mui/material';
 
-const ProfileIPTVSyncer = ({ apiKey }) => {
+const ProfileIPTVSyncer = ({ apiKey, hideTitle = false }) => {
   return (
     <Paper elevation={3} sx={{ p: 3 }}>
-      <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 2 }}>
-        Strmarr Deployment
-      </Typography>
+      {!hideTitle && (
+        <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 2 }}>
+          Strmarr
+        </Typography>
+      )}
 
       <Typography variant="body1" sx={{ mb: 3, color: 'text.primary' }}>
-        Use this endpoint URL with Strmarr to sync your media files. The endpoint returns a JSON
-        mapping of file paths to stream URLs for all titles in your watchlist.{' '}
+        Strmarr is a tool that generates STRM files for media clients like Emby, Jellyfin, and Kodi.
+        It creates local STRM files that point to your Playarr stream URLs, allowing these clients to
+        display your watchlist content as if it were local media.{' '}
         <Typography
           component="a"
           href="https://github.com/elad-bar/strmarr"

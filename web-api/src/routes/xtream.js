@@ -71,10 +71,11 @@ class XtreamRouter extends BaseRouter {
    * @param {import('../managers/stream.js').StreamManager} streamManager - Stream manager instance
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
    */
-  constructor(xtreamManager, streamManager, middleware) {
+  constructor(xtreamManager, streamManager, middleware, liveTVManager = null) {
     super(middleware, 'XtreamRouter');
     this._xtreamManager = xtreamManager;
     this._streamManager = streamManager;
+    this._liveTVManager = liveTVManager;
     
     // Action handlers configuration map
     this._actionHandlers = {
@@ -85,7 +86,9 @@ class XtreamRouter extends BaseRouter {
       get_vod_info: this._handleGetVodInfo.bind(this),
       get_series_info: this._handleGetSeriesInfo.bind(this),
       get_short_epg: this._handleGetShortEpg.bind(this),
-      get_simple_data_table: this._handleGetSimpleDataTable.bind(this)
+      get_simple_data_table: this._handleGetSimpleDataTable.bind(this),
+      get_live_categories: this._handleGetLiveCategories.bind(this),
+      get_live_streams: this._handleGetLiveStreams.bind(this)
     };
 
     // Stream type handlers mapping (mount path -> handler method)
@@ -160,10 +163,26 @@ class XtreamRouter extends BaseRouter {
      * Handle stream requests (direct mounting at /movie or /series)
      * Format: /{username}/{password}/movies-{title_id}.mp4 or /{username}/{password}/{title_id}.mp4 for movies
      * Format: /{username}/{password}/tvshows-{title_id}-{season}-{episode}.mp4 or /{username}/{password}/{title_id}-{season}-{episode}.mp4 for series
+     * Format: /{username}/{password}/{channel_id}.m3u8 for Live TV channels
      */
     this.router.get('/:username/:password/:streamId', this.middleware.requireXtreamAuth, async (req, res) => {
       try {
         const { streamId } = req.params;
+
+        // Check if it's a Live TV channel (ends with .m3u8 or doesn't match movie/series pattern)
+        if (this._liveTVManager && req.user?.liveTV?.m3u_url) {
+          // Try to parse as Live TV channel
+          let channelId = streamId;
+          if (streamId.endsWith('.m3u8')) {
+            channelId = streamId.slice(0, -5);
+          }
+          
+          const channel = await this._liveTVManager.getChannel(req.user.username, channelId);
+          if (channel) {
+            this.logger.info(`Live TV stream request: username=${req.params.username}, channelId=${channelId}`);
+            return res.redirect(channel.url);
+          }
+        }
 
         // Get handler based on mount path (req.baseUrl)
         const handler = this._streamTypeHandlers[req.baseUrl];
@@ -268,11 +287,33 @@ class XtreamRouter extends BaseRouter {
    * @private
    * @param {Object} req - Express request object (contains req.user from middleware)
    * @param {string} baseUrl - Base URL
-   * @returns {Promise<Array>} Empty EPG array
+   * @returns {Promise<Array>} EPG array
    */
   async _handleGetShortEpg(req, baseUrl) {
-    // EPG not implemented, return empty array
-    return [];
+    return await this._xtreamManager.getShortEpg(req.user);
+  }
+
+  /**
+   * Handle get_live_categories action
+   * @private
+   * @param {Object} req - Express request object (contains req.user from middleware)
+   * @param {string} baseUrl - Base URL
+   * @returns {Promise<Array>} Live TV categories
+   */
+  async _handleGetLiveCategories(req, baseUrl) {
+    return await this._xtreamManager.getLiveCategories(req.user);
+  }
+
+  /**
+   * Handle get_live_streams action
+   * @private
+   * @param {Object} req - Express request object (contains req.user from middleware)
+   * @param {string} baseUrl - Base URL
+   * @returns {Promise<Array>} Live TV streams
+   */
+  async _handleGetLiveStreams(req, baseUrl) {
+    const categoryId = req.query.category_id ? parseInt(req.query.category_id, 10) : null;
+    return await this._xtreamManager.getLiveStreams(req.user, baseUrl, categoryId);
   }
 
   /**

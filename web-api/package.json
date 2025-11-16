@@ -18,6 +18,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@iptv/playlist": "^1.0.0",
+    "@iptv/xmltv": "^1.0.0",
     "axios": "^1.6.2",
     "bcrypt": "^5.1.0",
     "bottleneck": "^2.19.5",

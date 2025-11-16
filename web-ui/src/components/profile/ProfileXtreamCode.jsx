@@ -9,7 +9,7 @@ import {
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
-const ProfileXtreamCode = ({ apiKey, username, showApiKey, maskApiKey, onCopyUrl }) => {
+const ProfileXtreamCode = ({ apiKey, username, showApiKey, maskApiKey, onCopyUrl, hideTitle = false }) => {
   const baseUrl = window.location.origin;
   const xtreamUrl = baseUrl;
   
@@ -20,9 +20,11 @@ const ProfileXtreamCode = ({ apiKey, username, showApiKey, maskApiKey, onCopyUrl
 
   return (
     <Paper elevation={3} sx={{ p: 3, height: '100%' }}>
-      <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 3 }}>
-        Xtream Code API
-      </Typography>
+      {!hideTitle && (
+        <Typography variant="h6" gutterBottom sx={{ fontWeight: 'bold', mb: 3 }}>
+          Xtream Code API
+        </Typography>
+      )}
 
       <Typography variant="body1" sx={{ mb: 3, color: 'text.primary' }}>
         Access your movies and TV shows using Xtream Code API compatible clients like TiviMate, 

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import { Box, CircularProgress, CssBaseline, IconButton, Toolbar, Tooltip, Typography, AppBar, Menu, MenuItem } from '@mui/material';
-import { DarkMode as DarkModeIcon, LightMode as LightModeIcon, AccountCircle as AccountCircleIcon } from '@mui/icons-material';
+import { DarkMode as DarkModeIcon, LightMode as LightModeIcon, AccountCircle as AccountCircleIcon, VideoLibrary as VideoLibraryIcon, LiveTv as LiveTvIcon } from '@mui/icons-material';
 import { ThemeProvider as MUIThemeProvider } from '@mui/material/styles';
 import { selectTheme } from './store/slices/themeSlice';
 import { toggleTheme } from './store/slices/themeSlice';
@@ -22,6 +22,10 @@ const AppContent = () => {
     const [anchorEl, setAnchorEl] = useState(null);
     const [profileDialogOpen, setProfileDialogOpen] = useState(false);
     const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+    const [contentMode, setContentMode] = useState(() => {
+        const saved = localStorage.getItem('playarr_content_mode');
+        return saved || 'vod';
+    });
     const location = useLocation();
     const navigate = useNavigate();
     const { isAuthenticated, loading, user, logout } = useAuth();
@@ -184,6 +188,34 @@ const AppContent = () => {
                                         {mode === 'light' ? <DarkModeIcon /> : <LightModeIcon />}
                                     </IconButton>
                                 </Tooltip>
+                                {user?.liveTV?.m3u_url && (
+                                    <>
+                                        <Tooltip title="Video on Demand">
+                                            <IconButton
+                                                color="inherit"
+                                                onClick={() => {
+                                                    setContentMode('vod');
+                                                    localStorage.setItem('playarr_content_mode', 'vod');
+                                                }}
+                                                disabled={contentMode === 'vod'}
+                                            >
+                                                <VideoLibraryIcon />
+                                            </IconButton>
+                                        </Tooltip>
+                                        <Tooltip title="Live TV">
+                                            <IconButton
+                                                color="inherit"
+                                                onClick={() => {
+                                                    setContentMode('tv');
+                                                    localStorage.setItem('playarr_content_mode', 'tv');
+                                                }}
+                                                disabled={contentMode === 'tv'}
+                                            >
+                                                <LiveTvIcon />
+                                            </IconButton>
+                                        </Tooltip>
+                                    </>
+                                )}
                                 <Tooltip title="Account menu">
                                     <IconButton
                                         color="inherit"
@@ -238,7 +270,7 @@ const AppContent = () => {
                             path="/"
                             element={
                                 <PrivateRoute>
-                                    <Home />
+                                    <Home contentMode={contentMode} />
                                 </PrivateRoute>
                             }
                         />

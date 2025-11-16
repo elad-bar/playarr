@@ -7,10 +7,12 @@ import { BaseManager } from './BaseManager.js';
 class PlaylistManager extends BaseManager {
   /**
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
+   * @param {import('./liveTV.js').LiveTVManager} [liveTVManager] - Live TV manager instance (optional)
    */
-  constructor(titleRepo) {
+  constructor(titleRepo, liveTVManager = null) {
     super('PlaylistManager');
     this._titleRepo = titleRepo;
+    this._liveTVManager = liveTVManager;
   }
 
   /**
@@ -126,6 +128,20 @@ class PlaylistManager extends BaseManager {
       }
 
       mediaFiles[proxyPath] = streamUrl;
+    }
+
+    // Add Live TV channels if user has Live TV configured
+    if (user?.liveTV?.m3u_url && this._liveTVManager) {
+      try {
+        const channels = await this._liveTVManager.getUserChannels(user.username);
+        channels.forEach(channel => {
+          const channelId = encodeURIComponent(channel.channel_id);
+          mediaFiles[`livetv/${channel.channel_id}.m3u`] = 
+            `${baseUrl}/api/livetv/stream/${channelId}?api_key=${user.api_key}`;
+        });
+      } catch (error) {
+        this.logger.error(`Error adding Live TV channels to media files mapping: ${error.message}`);
+      }
     }
 
     return mediaFiles;
