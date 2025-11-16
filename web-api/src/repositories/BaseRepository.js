@@ -791,7 +791,7 @@ export class BaseRepository {
   /**
    * Initialize database indexes for this collection
    * Uses getIndexDefinitions() to get index configuration
-   * Automatically handles duplicate cleanup for unique indexes
+   * Creates indexes if they don't exist (MongoDB will auto-create collection if needed)
    * @returns {Promise<void>}
    */
   async initializeIndexes() {
@@ -805,125 +805,63 @@ export class BaseRepository {
 
       const collection = this.db.collection(this.collectionName);
       
-      // Get all existing indexes once to avoid repeated queries
-      // Note: In MongoDB, calling indexes() on a non-existent collection returns
-      // an array with just the default _id index - it does NOT throw an error.
-      // The try-catch below handles other potential errors (connection issues, permissions, etc.)
+      // Fetch indexes ONCE for the entire collection (not per index!)
       let indexes;
       try {
         indexes = await collection.indexes();
-        // If collection doesn't exist, indexes will be [{ key: { _id: 1 } }]
-        // MongoDB will automatically create the collection when we create the first index
       } catch (error) {
-        // Handle other errors (connection issues, permissions, etc.)
-        // Try to create collection explicitly as fallback
-        try {
-          const result = await collection.insertOne({ _temp: true });
-          await collection.deleteOne({ _id: result.insertedId });
-          logger.debug(`Created collection ${this.collectionName} for index initialization`);
-          indexes = await collection.indexes();
-        } catch (createError) {
-          logger.error(`Failed to create collection ${this.collectionName}: ${createError.message}`);
-          throw createError;
-        }
+        // Collection might not exist, that's fine - MongoDB will create it when we create first index
+        indexes = [];
       }
       
-      // Fast path: if we have at least as many indexes as definitions (excluding _id),
-      // build the map and check if all exist. If all exist, we're done.
-      // _id index is always present, so we check if indexes.length >= indexDefinitions.length + 1
-      const expectedMinIndexes = indexDefinitions.length + 1; // +1 for _id
-      const indexesToCreate = [];
-      
-      if (indexes.length >= expectedMinIndexes) {
-        // Build Map for O(1) lookup: keyString -> { unique: boolean }
-        const existingIndexesMap = new Map();
-        for (const index of indexes) {
-          const indexKeyStr = JSON.stringify(index.key);
-          existingIndexesMap.set(indexKeyStr, {
-            unique: index.unique === true
-          });
-        }
-        
-        // Check all indexes - if all exist, we can skip everything
-        let allExist = true;
-        for (const indexDef of indexDefinitions) {
-          const { key, options = {} } = indexDef;
-          const keySpecStr = JSON.stringify(key);
-          const existingIndex = existingIndexesMap.get(keySpecStr);
-          const optionsUnique = options.unique === true;
-          if (!existingIndex || existingIndex.unique !== optionsUnique) {
-            allExist = false;
-            indexesToCreate.push(indexDef);
-          }
-        }
-        
-        // Fast path: all indexes exist, we're done!
-        if (allExist) {
-          logger.debug(`${this.collectionName} indexes already exist, skipping initialization`);
-          return;
-        }
-        
-        // Some indexes missing - only process those
-        for (const indexDef of indexesToCreate) {
-          const { key, options = {}, duplicateKey, description } = indexDef;
-          
-          // For unique indexes, check and remove duplicates first
-          if (options.unique === true) {
-            const dupKey = duplicateKey || key;
-            await this._removeDuplicates(dupKey);
-          }
+      // Build a Map for fast lookup: keyString -> index info
+      const existingIndexesMap = new Map();
+      for (const index of indexes) {
+        const indexKeyStr = JSON.stringify(index.key);
+        existingIndexesMap.set(indexKeyStr, {
+          unique: index.unique === true,
+          name: index.name
+        });
+      }
 
-          // Create the index
-          const created = await this.createIndexIfNotExists(key, options);
-          const indexDesc = description || JSON.stringify(key);
-          if (created) {
-            logger.debug(`Created index in ${this.collectionName}: ${indexDesc}`);
-          } else {
-            logger.debug(`Index creation skipped in ${this.collectionName}: ${indexDesc}`);
-          }
-        }
-      } else {
-        // Not enough indexes - need to create them all
-        // Build Map for O(1) lookup
-        const existingIndexesMap = new Map();
-        for (const index of indexes) {
-          const indexKeyStr = JSON.stringify(index.key);
-          existingIndexesMap.set(indexKeyStr, {
-            unique: index.unique === true
-          });
+      // Create indexes that don't exist
+      for (const indexDef of indexDefinitions) {
+        const { key, options = {}, description } = indexDef;
+        const keySpecStr = JSON.stringify(key);
+        const existingIndex = existingIndexesMap.get(keySpecStr);
+        const optionsUnique = options.unique === true;
+        
+        // Check if index already exists with matching properties
+        if (existingIndex && existingIndex.unique === optionsUnique) {
+          // Index already exists, skip
+          continue;
         }
         
-        for (const indexDef of indexDefinitions) {
-          const { key, options = {}, duplicateKey, description } = indexDef;
+        // Index doesn't exist or has different properties - create it
+        try {
+          // If index exists with different properties, drop it first
+          if (existingIndex && existingIndex.name) {
+            try {
+              await collection.dropIndex(existingIndex.name);
+            } catch (dropError) {
+              // Ignore drop errors, continue with creation
+            }
+          }
           
-          // Check if index already exists using Map for O(1) lookup
-          const keySpecStr = JSON.stringify(key);
-          const existingIndex = existingIndexesMap.get(keySpecStr);
-          const optionsUnique = options.unique === true;
-          const indexAlreadyExists = existingIndex && existingIndex.unique === optionsUnique;
-          
-          if (indexAlreadyExists) {
-            // Index already exists, skip duplicate check and creation
-            const indexDesc = description || JSON.stringify(key);
-            logger.debug(`Index already exists in ${this.collectionName}: ${indexDesc}`);
+          await collection.createIndex(key, options);
+          const indexDesc = description || JSON.stringify(key);
+          logger.debug(`Created index in ${this.collectionName}: ${indexDesc}`);
+        } catch (error) {
+          // If index already exists (race condition), that's fine
+          if (error.message && (
+            error.message.includes('already exists') ||
+            error.message.includes('same name as the requested index')
+          )) {
+            // Index was created by another process, continue
             continue;
           }
-          
-          // Index doesn't exist - need to create it
-          // For unique indexes, check and remove duplicates first
-          if (options.unique === true) {
-            const dupKey = duplicateKey || key;
-            await this._removeDuplicates(dupKey);
-          }
-
-          // Create the index
-          const created = await this.createIndexIfNotExists(key, options);
-          const indexDesc = description || JSON.stringify(key);
-          if (created) {
-            logger.debug(`Created index in ${this.collectionName}: ${indexDesc}`);
-          } else {
-            logger.debug(`Index creation skipped in ${this.collectionName}: ${indexDesc}`);
-          }
+          // Re-throw other errors
+          throw error;
         }
       }
 
