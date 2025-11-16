@@ -61,7 +61,7 @@ class StremioManager extends BaseManager {
       if (!playarrType) return null;
       
       // Query MongoDB for title with matching imdb_id
-      const title = await this._titlesManager._titleRepo.findOneByQuery({
+      const title = await this._titlesManager.findTitleByQuery({
         type: playarrType,
         imdb_id: stremioId
       });
@@ -154,7 +154,7 @@ class StremioManager extends BaseManager {
       
       // Query all titles of this type (no watchlist filtering - handled by Stremio UI)
       const query = { type: playarrType };
-      const allTitles = await this._titlesManager._titleRepo.findByQuery(query, {
+      const allTitles = await this._titlesManager.findTitlesByQuery(query, {
         sort: { title: 1 }
       });
       

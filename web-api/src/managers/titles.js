@@ -652,6 +652,26 @@ class TitlesManager extends BaseManager {
   }
 
   /**
+   * Find a single title by query
+   * @param {Object} query - MongoDB query object
+   * @param {Object} [options] - Query options (projection, sort, etc.)
+   * @returns {Promise<Object|null>} Title document or null if not found
+   */
+  async findTitleByQuery(query, options = {}) {
+    return await this._titleRepo.findOneByQuery(query, options);
+  }
+
+  /**
+   * Find multiple titles by query
+   * @param {Object} query - MongoDB query object
+   * @param {Object} [options] - Query options (sort, limit, skip, projection, etc.)
+   * @returns {Promise<Array<Object>>} Array of title documents
+   */
+  async findTitlesByQuery(query, options = {}) {
+    return await this._titleRepo.findByQuery(query, options);
+  }
+
+  /**
    * Update watchlist status for multiple titles
    * Optimized to query MongoDB directly for only the titles we need to verify
    */
