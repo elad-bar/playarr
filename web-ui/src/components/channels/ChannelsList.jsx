@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
 import { useAuth } from '../../context/AuthContext';
 import {
   Box,
@@ -16,7 +15,7 @@ import {
 } from '@mui/material';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import { fetchChannels } from '../../store/slices/channelsSlice';
+import axiosInstance from '../../config/axios';
 import { API_URL } from '../../config';
 import { authService } from '../../services/auth';
 
@@ -34,17 +33,34 @@ const sanitizeImageUrl = (url) => {
  * ChannelsList component for displaying Live TV channels in a grid
  */
 const ChannelsList = () => {
-  const dispatch = useDispatch();
-  const { channels, loading, error } = useSelector(state => state.channels);
   const theme = useTheme();
   const { isAuthenticated, user } = useAuth();
   const [apiKey, setApiKey] = useState(null);
   const [copiedChannelId, setCopiedChannelId] = useState(null);
+  const [channels, setChannels] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Fetch channels on mount, but only if user is authenticated
+  // Fetch channels when component mounts or user changes
   useEffect(() => {
-    if (isAuthenticated) {
-      dispatch(fetchChannels());
+    if (isAuthenticated && user) {
+      // Fetch channels for the current user
+      const loadChannels = async () => {
+        setLoading(true);
+        setError(null);
+        try {
+          const response = await axiosInstance.get('/livetv/channels');
+          setChannels(response.data);
+        } catch (err) {
+          setError(err.response?.data?.error || 'Failed to fetch channels');
+          setChannels([]);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      loadChannels();
+
       // Load API key from user object or profile
       const loadApiKey = async () => {
         if (user?.api_key) {
@@ -59,8 +75,12 @@ const ChannelsList = () => {
         }
       };
       loadApiKey();
+    } else {
+      // Clear channels when user logs out
+      setChannels([]);
+      setError(null);
     }
-  }, [dispatch, isAuthenticated, user]);
+  }, [isAuthenticated, user]); // Re-fetch when user changes
 
   /**
    * Get stream URL for a channel

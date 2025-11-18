@@ -91,6 +91,18 @@ const AppContent = () => {
         }
     }, [isAuthenticated]);
 
+    // Validate contentMode when user changes - reset to 'vod' if user doesn't have live TV
+    useEffect(() => {
+        if (isAuthenticated && user) {
+            const savedMode = localStorage.getItem('playarr_content_mode');
+            // If user doesn't have live TV but contentMode is 'tv', reset to 'vod'
+            if (!user?.liveTV?.m3u_url && savedMode === 'tv') {
+                setContentMode('vod');
+                localStorage.setItem('playarr_content_mode', 'vod');
+            }
+        }
+    }, [isAuthenticated, user]);
+
     const handleThemeToggle = () => {
         dispatch(toggleTheme());
     };
@@ -127,6 +139,9 @@ const AppContent = () => {
     };
 
     const handleLogout = async () => {
+        // Reset contentMode to 'vod' and clear from localStorage
+        setContentMode('vod');
+        localStorage.removeItem('playarr_content_mode');
         await logout();
         navigate('/login');
         handleProfileMenuClose();
