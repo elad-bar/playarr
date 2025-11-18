@@ -43,23 +43,26 @@ class ProvidersManager extends BaseManager {
   }
 
   /**
-   * Trigger syncIPTVProviderTitles job
+   * Trigger syncIPTVProviderTitles job asynchronously (fire and forget)
    * @private
-   * @returns {Promise<void>}
+   * @returns {void}
    */
-  async _triggerSyncJob() {
+  _triggerSyncJob() {
     if (!this._triggerJob) {
       this.logger.warn('Trigger job function not available');
       return;
     }
     
-    try {
-      await this._triggerJob('syncIPTVProviderTitles');
-      this.logger.info('Triggered syncIPTVProviderTitles job');
-    } catch (error) {
-      this.logger.error(`Failed to trigger syncIPTVProviderTitles job: ${error.message}`);
-      // Don't throw - allow provider operation to continue even if job trigger fails
-    }
+    // Fire job asynchronously without blocking
+    setImmediate(async () => {
+      try {
+        await this._triggerJob('syncIPTVProviderTitles');
+        this.logger.info('Triggered syncIPTVProviderTitles job');
+      } catch (error) {
+        this.logger.error(`Failed to trigger syncIPTVProviderTitles job: ${error.message}`);
+        // Don't throw - allow provider operation to continue even if job trigger fails
+      }
+    });
   }
 
   /**
@@ -610,9 +613,9 @@ class ProvidersManager extends BaseManager {
       // Reload provider configs in provider instances
       await this._reloadProviderConfigs();
 
-      // Trigger sync job if provider is enabled
+      // Trigger sync job if provider is enabled (async, non-blocking)
       if (providerData.enabled !== false) {
-        await this._triggerSyncJob();
+        this._triggerSyncJob();
       }
 
       // Broadcast WebSocket event
@@ -713,8 +716,8 @@ class ProvidersManager extends BaseManager {
           this.logger.error(`Error resetting titles lastUpdated for provider ${providerId}: ${error.message}`);
         }
         
-        // Trigger sync job to fetch fresh data
-        await this._triggerSyncJob();
+        // Trigger sync job to fetch fresh data (async, non-blocking)
+        this._triggerSyncJob();
       }
 
       // Update in array and save
@@ -932,7 +935,6 @@ class ProvidersManager extends BaseManager {
       const now = new Date();
       
       await this._providerRepo.updateOne(
-        this._providerRepo.collectionName,
         { id: providerId },
         {
           $set: {
@@ -965,11 +967,16 @@ class ProvidersManager extends BaseManager {
         this.logger.error(`Error cleaning up categories for provider ${providerId}: ${error.message}`);
       }
 
-      // Reload provider configs in provider instances
-      await this._reloadProviderConfigs();
+      // Reload provider configs in provider instances (non-blocking - errors logged but don't fail the update)
+      try {
+        await this._reloadProviderConfigs();
+      } catch (error) {
+        this.logger.error(`Error reloading provider configs: ${error.message}`);
+        // Continue - config reload failure shouldn't prevent category update from succeeding
+      }
 
-      // Trigger sync job to fetch fresh data with new categories
-      await this._triggerSyncJob();
+      // Trigger sync job to fetch fresh data with new categories (async, non-blocking)
+      this._triggerSyncJob();
 
       // Broadcast WebSocket event
       this._webSocketService.broadcastEvent('provider_changed', {
