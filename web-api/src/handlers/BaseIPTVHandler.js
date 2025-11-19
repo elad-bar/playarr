@@ -273,18 +273,24 @@ export class BaseIPTVHandler extends BaseHandler {
       
       // Skip if exists and is ignored (generic check)
       if (existingTitle && existingTitle.ignored === true) {
-        this.logger.debug(`${type}: Skipping ignored title ${titleId}: ${existingTitle.ignored_reason || 'Unknown reason'}`);
         return false;
       }
       
       // Skip if category is disabled or missing (generic check - only if provider supports categories)
-      if (this.supportsCategories) {
+      if (this.supportsCategories) {        
         // Skip if title has no category_id when categories are supported
         if (!title.category_id) {
           return false;
         }
+
+        const title_type_enabled_categories = this.providerData.enabled_categories[type];
+
+        const category_key = generateCategoryKey(type, title.category_id);
+        
+        const is_category_enabled = title_type_enabled_categories.includes(category_key);
+        
         // Skip if category is disabled
-        if (!this.isCategoryEnabled(type, title.category_id)) {
+        if (!is_category_enabled) {
           return false;
         }
       }
@@ -292,7 +298,7 @@ export class BaseIPTVHandler extends BaseHandler {
       // Call provider-specific shouldSkip (no category check here)
       return !config.shouldSkip(title, existingTitle);
     });
-    
+
     this.logger.debug(`${type}: Filtered to ${filteredTitles.length} titles to process`);
 
     return filteredTitles;

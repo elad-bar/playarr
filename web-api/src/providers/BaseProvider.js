@@ -234,7 +234,7 @@ export class BaseProvider {
 
   /**
    * Get cached data from disk
-   * @private
+   * @protected
    * @param {string} providerId - Provider ID
    * @param {string} type - Media type
    * @param {string} endpoint - Endpoint type
@@ -512,10 +512,22 @@ export class BaseProvider {
 
     // Make API call with rate limiting
     const axios = (await import('axios')).default;
+    const totalStartTime = Date.now();
+    const cacheKey = cacheParams.titleId ? `/${cacheParams.titleId}` : '';
+    this.logger.debug(`API request starting: ${endpoint} ${providerId}/${type}${cacheKey}`);
+    
+    let requestDuration = 0;
     const data = await limiter.schedule(async () => {
+      const requestStartTime = Date.now();
       const response = await axios.get(url, { headers, timeout });
+      requestDuration = Date.now() - requestStartTime;
+      this.logger.debug(`API request completed: ${endpoint} ${providerId}/${type}${cacheKey} - ${requestDuration}ms (HTTP ${response.status})`);
       return response.data;
     });
+    
+    const totalDuration = Date.now() - totalStartTime;
+    const waitTime = totalDuration - requestDuration;
+    this.logger.debug(`API call total time (including rate limiter wait): ${endpoint} ${providerId}/${type}${cacheKey} - ${totalDuration}ms (request: ${requestDuration}ms, wait: ${waitTime}ms)`);
 
     // Transform data if transform function provided
     const finalData = transform ? transform(data) : data;

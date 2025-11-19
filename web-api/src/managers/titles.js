@@ -2,6 +2,25 @@ import { BaseManager } from './BaseManager.js';
 import { DatabaseCollections, toCollectionName } from '../config/collections.js';
 
 /**
+ * @typedef {Object} MediaStreamSource
+ * @property {string} provider_id - Provider identifier
+ * @property {string} provider_title_id - Provider's original title ID
+ * @property {string} provider_url - Stream URL from provider
+ */
+
+/**
+ * @typedef {Object} MediaStream
+ * @property {string} name - Stream name ('main' for movies, episode name for TV shows)
+ * @property {string} proxy_path - File path for the STRM file
+ * @property {Array<MediaStreamSource>} sources - Array of provider sources
+ * @property {number} [season] - Season number (TV shows only)
+ * @property {number} [episode] - Episode number (TV shows only)
+ * @property {string} [air_date] - Episode air date (TV shows only)
+ * @property {string} [overview] - Episode overview (TV shows only)
+ * @property {string} [still_path] - Episode still image path (TV shows only)
+ */
+
+/**
  * @typedef {Object} MainTitle
  * @property {string} title_key - Unique key combining type and title_id: {type}-{title_id}
  * @property {number|string} title_id - TMDB ID for the title
@@ -16,20 +35,10 @@ import { DatabaseCollections, toCollectionName } from '../config/collections.js'
  * @property {Array<{name: string}|string>} [genres] - Array of genre objects or strings
  * @property {number} [runtime] - Runtime in minutes (movies only)
  * @property {string} [imdb_id] - IMDB ID (e.g., "tt0133093") if available
- * @property {Object<string, StreamData>} streams - Stream data object
+ * @property {Array<MediaStream>} media - Array of media streams with sources
  * @property {string[]} [similar_titles] - Array of title_key strings for similar titles
  * @property {string} [createdAt] - ISO timestamp when title was first created
  * @property {string} [lastUpdated] - ISO timestamp when title was last updated
- */
-
-/**
- * @typedef {Object} StreamData
- * @property {string[]} [sources] - Array of provider IDs that have this stream
- * @property {string[]} [main] - Array of provider IDs (legacy format, used directly as value for movies)
- * 
- * Stream data structure:
- * - For movies: streams.main can be either string[] OR { sources: string[] }
- * - For TV shows: streams["S01-E01"] contains stream data objects
  */
 
 /**
@@ -178,44 +187,6 @@ class TitlesManager extends BaseManager {
     return false;
   }
 
-  /**
-   * Calculate number of seasons and episodes from streams data
-   * Only counts streams that have active sources (enabled providers)
-   */
-  async _getShowInfo(streams) {
-    if (!streams || typeof streams !== 'object') {
-      return { seasons: 0, episodes: 0 };
-    }
-
-    const enabledProviders = await this._getEnabledProviders();
-    const uniqueSeasons = new Set();
-    let totalEpisodes = 0;
-
-    for (const [key, streamData] of Object.entries(streams)) {
-      // Skip if no active sources
-      if (!this._hasActiveSource(streamData, enabledProviders)) {
-        continue;
-      }
-
-      // For shows, key is like S01-E01
-      const match = key.match(/^S(\d+)-E(\d+)$/i);
-      if (match) {
-        uniqueSeasons.add(parseInt(match[1], 10));
-        totalEpisodes += 1;
-      } else if (key === 'main') {
-        // For movies, just one 'main' key
-        continue;
-      } else {
-        // Unknown format, count as episode if has active source
-        totalEpisodes += 1;
-      }
-    }
-
-    return {
-      seasons: uniqueSeasons.size,
-      episodes: totalEpisodes,
-    };
-  }
 
   /**
    * Parse year filter string
@@ -421,25 +392,16 @@ class TitlesManager extends BaseManager {
         const titleId = titleData.title_id || '';
         const releaseDate = titleData.release_date || '';
 
-        // Count streams - handle both array and object formats
-        const streams = titleData.streams || {};
+        // Count streams - media is now an array of media items
+        const media = titleData.media || [];
         let streamsCount = 0;
         
-        for (const [streamKey, streamGroup] of Object.entries(streams)) {
-          if (Array.isArray(streamGroup)) {
-            // Handle: { "main": [array] }
-            streamsCount += streamGroup.filter(id => enabledProviders.has(id)).length;
-          } else if (typeof streamGroup === 'object' && streamGroup !== null) {
-            // Handle: { "main": { "sources": [array] } } or { "S01-E01": {...} }
-            if (streamGroup.sources && Array.isArray(streamGroup.sources)) {
-              streamsCount += streamGroup.sources.filter(id => enabledProviders.has(id)).length;
-            } else {
-              // For TV shows, count each episode as 1 stream if has active source
-              if (this._hasActiveSource(streamGroup, enabledProviders)) {
-                streamsCount += 1;
-              }
-            }
-          }
+        if (titleType === 'movies') {
+          // Movies: count 1 if there's a media item with name === 'main'
+          streamsCount = media.some(m => m.name === 'main') ? 1 : 0;
+        } else {
+          // TV shows: count is the number of available episodes (media array length)
+          streamsCount = media.length;
         }
 
         // Get TMDB data - fields are at root level
@@ -461,9 +423,14 @@ class TitlesManager extends BaseManager {
 
         // Add show-specific fields
         if (titleType === 'tvshows') {
-          const { seasons, episodes } = await this._getShowInfo(streams);
-          titleResponse.number_of_seasons = seasons;
-          titleResponse.number_of_episodes = episodes;
+          const uniqueSeasons = new Set();
+          media.forEach(m => {
+            if (m.season !== null && m.season !== undefined) {
+              uniqueSeasons.add(m.season);
+            }
+          });
+          titleResponse.number_of_seasons = uniqueSeasons.size;
+          titleResponse.number_of_episodes = media.length;
         }
 
         items.push(titleResponse);
@@ -521,60 +488,49 @@ class TitlesManager extends BaseManager {
 
       // TMDB fields are at root level
       const mediaType = titleData.type || '';
-      const streams = titleData.streams || {};
-      const enabledProviders = await this._getEnabledProviders();
+      const media = titleData.media || [];
 
-      // Get seasons and episodes count for tvshows (from streams with active sources)
+      // Get seasons and episodes count for tvshows (from media array)
       let numSeasons = null;
       let numEpisodes = null;
       if (mediaType === 'tvshows') {
-        const showInfo = await this._getShowInfo(streams);
-        numSeasons = showInfo.seasons;
-        numEpisodes = showInfo.episodes;
+        const uniqueSeasons = new Set();
+        media.forEach(m => {
+          if (m.season !== null && m.season !== undefined) {
+            uniqueSeasons.add(m.season);
+          }
+        });
+        numSeasons = uniqueSeasons.size;
+        numEpisodes = media.length;
       }
 
       const posterPath = titleData.poster_path;
       const backdropPath = titleData.backdrop_path;
 
-      // Build streams list - parse season/episode from key
+      // Build streams list - iterate media array
       const flatStreams = [];
-      for (const [streamId, streamData] of Object.entries(streams)) {
-        let season = null;
-        let episode = null;
-        
-        // Parse season/episode from key (e.g., "S01-E01")
-        if (streamId !== 'main') {
-          const match = streamId.match(/^S(\d+)-E(\d+)$/i);
-          if (match) {
-            season = parseInt(match[1], 10);
-            episode = parseInt(match[2], 10);
-          }
-        }
-        
-        // Check if stream has active sources
-        const hasActiveSource = this._hasActiveSource(streamData, enabledProviders);
-        
-        // Extract episode details if available (for TV shows)
+      for (const mediaItem of media) {
+        // Extract episode details from media item
         const episodeDetails = {
-          id: streamId,
-          season: season,
-          episode: episode,
-          has_active_source: hasActiveSource,
+          id: mediaType === 'movies' ? 'main' : `S${String(mediaItem.season).padStart(2, '0')}-E${String(mediaItem.episode).padStart(2, '0')}`,
+          season: mediaItem.season || null,
+          episode: mediaItem.episode || null,
+          has_stream: true, // All items in media array have sources
         };
 
-        // Add episode metadata if available (name, air_date, overview, still_path)
-        if (streamData && typeof streamData === 'object' && !Array.isArray(streamData)) {
-          if (streamData.name) {
-            episodeDetails.name = streamData.name;
+        // Add episode metadata from media item (for TV shows)
+        if (mediaType === 'tvshows') {
+          if (mediaItem.name) {
+            episodeDetails.name = mediaItem.name;
           }
-          if (streamData.air_date) {
-            episodeDetails.air_date = streamData.air_date;
+          if (mediaItem.air_date) {
+            episodeDetails.air_date = mediaItem.air_date;
           }
-          if (streamData.overview) {
-            episodeDetails.overview = streamData.overview;
+          if (mediaItem.overview) {
+            episodeDetails.overview = mediaItem.overview;
           }
-          if (streamData.still_path) {
-            episodeDetails.still_path = this._getPosterPath(streamData.still_path);
+          if (mediaItem.still_path) {
+            episodeDetails.still_path = this._getPosterPath(mediaItem.still_path);
           }
         }
         

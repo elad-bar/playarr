@@ -5,14 +5,13 @@ This document describes the MongoDB schema for Playarr, including entity structu
 ## Table of Contents
 
 1. [titles](#titles)
-2. [title_streams](#title_streams)
-3. [provider_titles](#provider_titles)
-4. [provider_categories](#provider_categories)
-5. [users](#users)
-6. [iptv_providers](#iptv_providers)
-7. [settings](#settings)
-8. [stats](#stats)
-9. [job_history](#job_history)
+2. [provider_titles](#provider_titles)
+3. [provider_categories](#provider_categories)
+4. [users](#users)
+5. [iptv_providers](#iptv_providers)
+6. [settings](#settings)
+7. [stats](#stats)
+8. [job_history](#job_history)
 
 ---
 
@@ -37,12 +36,35 @@ Main titles collection containing TMDB movie and TV show metadata.
   backdrop_path: String,             // TMDB backdrop image path
   genres: Array,                     // Array of genre objects: [{ id: Number, name: String }]
   runtime: Number,                   // Runtime in minutes (movies only, optional)
+  imdb_id: String,                   // IMDB ID (e.g., "tt0133093") if available
   similar_titles: Array,             // Array of title_key strings for similar titles
-  streams: Object,                   // Embedded streams summary
-                                     // Movies: { "main": ["agtv", "digitalizard"] }
-                                     // TV shows: { "S01-E01": { air_date: "1999-02-09", name: "Episode Name", overview: "...", still_path: "/path.jpg", sources: ["agtv"] } }
+  media: Array,                      // Array of MediaStream objects (see below)
   createdAt: ISODate,                // Document creation timestamp
   lastUpdated: ISODate               // Last update timestamp
+}
+```
+
+**MediaStream Object Structure:**
+```javascript
+{
+  name: String,                      // Stream name: "main" for movies, episode name for TV shows
+  proxy_path: String,                // File path for the STRM file
+  sources: Array,                    // Array of MediaStreamSource objects (see below)
+  // TV shows only:
+  season: Number,                    // Season number (TV shows only)
+  episode: Number,                   // Episode number (TV shows only)
+  air_date: String,                  // Episode air date (TV shows only)
+  overview: String,                  // Episode overview (TV shows only)
+  still_path: String                 // Episode still image path (TV shows only)
+}
+```
+
+**MediaStreamSource Object Structure:**
+```javascript
+{
+  provider_id: String,               // Provider identifier (e.g., "agtv", "digitalizard")
+  provider_title_id: String,         // Provider's original title ID
+  provider_url: String               // Stream URL from provider
 }
 ```
 
@@ -55,17 +77,16 @@ Main titles collection containing TMDB movie and TV show metadata.
 | `{ title: "text" }` | Text | Full-text search on title names. |
 | `{ release_date: 1 }` | Standard | Sort and filter by release date. |
 | `{ type: 1, release_date: 1 }` | Compound | Efficient filtering by type and sorting by release date. |
+| `{ type: 1, imdb_id: 1 }` | Sparse | Stremio IMDB ID lookups (type + imdb_id). |
+| `{ "media.sources.provider_id": 1 }` | Standard | Provider-based queries on media sources. |
+| `{ type: 1, "media.sources.provider_id": 1 }` | Compound | Type + provider combination queries. |
 
 ### Relations
-
-- **Related to `title_streams`**: 
-  - `title_key` → `title_streams.title_key` (one-to-many)
-  - The `streams` field contains a summary of providers available for each stream_id
-  - Full stream details (with URLs) are stored in `title_streams` collection
 
 - **Related to `provider_titles`**: 
   - `title_key` → `provider_titles.title_key` (one-to-many)
   - Multiple providers can have the same title
+  - Stream sources are extracted from `provider_titles.streams` and embedded in `media` array
 
 - **Related to `users`**: 
   - `title_key` referenced in `users.watchlist` array (many-to-many via array)
@@ -86,70 +107,27 @@ db.titles.find({ $text: { $search: "Avengers" } })
 db.titles.find({ type: "movies", release_date: { $gte: "2020-01-01" } })
 
 // Find titles with streams from specific provider
-db.titles.find({ "streams.main": { $in: ["agtv"] } })
+db.titles.find({ "media.sources.provider_id": "agtv" })
+
+// Find titles with available media
+db.titles.find({ media: { $exists: true, $ne: [] } })
+
+// Find TV show episodes for a specific season
+db.titles.find({ 
+  title_key: "tvshows-67890",
+  "media.season": 1
+})
 ```
 
 ---
 
 ## title_streams
 
-Detailed stream information for titles, including provider URLs.
+**⚠️ DEPRECATED: This collection has been removed.**
 
-### Schema
+Stream information is now embedded directly in the `titles.media` array. The `title_streams` collection is no longer used.
 
-```javascript
-{
-  _id: ObjectId,                     // MongoDB auto-generated ID
-  title_key: String,                  // Reference to titles.title_key: "movies-{tmdbId}" or "tvshows-{tmdbId}"
-  stream_id: String,                 // Stream identifier: "main" for movies, "S01-E01" for TV episodes
-  provider_id: String,               // Provider identifier (e.g., "agtv", "digitalizard")
-  proxy_url: String,                 // Stream URL/proxy path
-  createdAt: ISODate,                // Document creation timestamp
-  lastUpdated: ISODate               // Last update timestamp
-}
-```
-
-### Indexes
-
-| Index | Type | Purpose |
-|-------|------|---------|
-| `{ title_key: 1, stream_id: 1 }` | Compound | Find all providers for a specific title and stream. |
-| `{ provider_id: 1 }` | Standard | Find all streams from a specific provider. |
-| `{ title_key: 1, provider_id: 1 }` | Compound | Find all streams for a title from a specific provider. |
-
-### Relations
-
-- **Related to `titles`**: 
-  - `title_key` → `titles.title_key` (many-to-one)
-  - Each stream entry belongs to one title
-  - The `titles.streams` field contains a summary of this data
-
-- **Related to `iptv_providers`**: 
-  - `provider_id` → `iptv_providers.id` (many-to-one)
-  - Links streams to their provider configuration
-
-- **Related to `provider_titles`**: 
-  - `title_key` + `provider_id` → `provider_titles.title_key` + `provider_titles.provider_id` (many-to-one)
-  - Streams are sourced from provider titles
-
-### Query Examples
-
-```javascript
-// Get all streams for a title
-db.title_streams.find({ title_key: "movies-12345" })
-
-// Get all streams for a specific episode
-db.title_streams.find({ title_key: "tvshows-67890", stream_id: "S01-E01" })
-
-// Find all streams from a provider
-db.title_streams.find({ provider_id: "agtv" })
-
-// Get stream URLs for a title from specific provider
-db.title_streams.find({ 
-  title_key: "movies-12345", 
-  provider_id: "agtv" 
-})
-```
+**Migration Note:** If you have existing data in `title_streams`, you will need to migrate it to the new `titles.media` structure before using the updated codebase. The new structure consolidates all stream information into the `titles` collection for better performance and simpler queries.
 
 ---
 
@@ -193,10 +171,8 @@ Provider-specific title information, including provider URLs and ignored status.
   - `title_key` → `titles.title_key` (many-to-one)
   - `tmdb_id` → `titles.title_id` (many-to-one)
   - Multiple providers can have the same title
-
-- **Related to `title_streams`**: 
-  - `title_key` + `provider_id` → `title_streams.title_key` + `title_streams.provider_id` (one-to-many)
-  - Provider titles are the source of stream URLs
+  - Stream sources from `provider_titles.streams` are extracted and embedded in `titles.media` array
+  - Provider titles are the source of stream URLs that get consolidated into main titles
 
 - **Related to `provider_categories`**: 
   - `provider_id` + `category_id` → `provider_categories.provider_id` + `provider_categories.category_id` (many-to-one)
@@ -363,9 +339,9 @@ IPTV provider configurations and settings.
   - `id` → `provider_categories.provider_id` (one-to-many)
   - Provider has many categories
 
-- **Related to `title_streams`**: 
-  - `id` → `title_streams.provider_id` (one-to-many)
-  - Provider has many streams
+- **Related to `titles`**: 
+  - `id` → `titles.media[].sources[].provider_id` (one-to-many via embedded media array)
+  - Provider streams are embedded in titles.media array
 
 ### Query Examples
 
@@ -543,25 +519,26 @@ db.job_history.updateOne(
 ### Primary Relationships
 
 ```
-titles (1) ──< (many) title_streams
 titles (1) ──< (many) provider_titles
 titles (1) ──< (many) users.watchlist (via array)
 
 iptv_providers (1) ──< (many) provider_titles
 iptv_providers (1) ──< (many) provider_categories
-iptv_providers (1) ──< (many) title_streams
 
-provider_titles (1) ──< (many) title_streams
 provider_categories (1) ──< (many) provider_titles
 ```
 
 ### Key Design Decisions
 
-1. **Embedded Streams Summary**: The `titles.streams` field contains a lightweight summary to avoid joins for common queries. For movies: `{ stream_id: [provider_ids] }`. For TV shows: `{ stream_id: { air_date, name, overview, still_path, sources: [provider_ids] } }` (preserves episode metadata). Full stream details are in `title_streams`.
+1. **Embedded Media Array**: The `titles.media` field contains all stream information directly embedded in the title document. Each media item includes:
+   - For movies: One media item with `name: "main"` and its sources
+   - For TV shows: One media item per available episode with season/episode numbers and episode metadata (air_date, name, overview, still_path)
+   - Each media item contains an array of `sources` with provider information (provider_id, provider_title_id, provider_url)
+   - This design eliminates the need for a separate `title_streams` collection and simplifies queries
 
 2. **One Document Per Key**: `settings` uses one document per key-value pair for efficient individual key lookups.
 
-3. **Title Key as Foreign Key**: `title_key` is used consistently across collections (`titles`, `title_streams`, `provider_titles`, `users.watchlist`) as the primary relationship key.
+3. **Title Key as Foreign Key**: `title_key` is used consistently across collections (`titles`, `provider_titles`, `users.watchlist`) as the primary relationship key.
 
 4. **Ignored Titles Merged**: Ignored titles are stored as flags (`ignored`, `ignored_reason`) in `provider_titles` rather than a separate collection for efficient filtering.
 
@@ -579,8 +556,9 @@ provider_categories (1) ──< (many) provider_titles
 ### Compound Indexes
 Used for common query patterns:
 - Filtering by provider and type
-- Finding streams by title and provider
+- Finding titles with streams from specific providers
 - Filtering ignored titles per provider
+- Type + provider combination queries
 
 ### Text Index
 - `titles.title`: Enables full-text search on title names

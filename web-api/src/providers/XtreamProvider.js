@@ -227,7 +227,7 @@ export class XtreamProvider extends BaseIPTVProvider {
           const dirPath = path.join(cacheDir, providerId, 'extended', type);
           return path.join(dirPath, `${params.titleId}.json`);
         },
-        ttl: 6 // 6 hours for tvshows
+        ttl: 48 // 6 hours for tvshows
       }
     };
   }

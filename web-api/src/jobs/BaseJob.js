@@ -25,13 +25,12 @@ export class BaseJob {
    * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
    * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/TitleStreamRepository.js').TitleStreamRepository} titleStreamRepo - Title stream repository
    * @param {import('../repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository
    * @param {import('../managers/providers.js').ProvidersManager} providersManager - Providers manager for direct API calls
    * @param {import('../managers/tmdb.js').TMDBManager} tmdbManager - TMDB manager (for API key management, kept for routes)
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
    */
-  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, titleStreamRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
+  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
     if (this.constructor === BaseJob) {
       throw new Error('BaseJob is an abstract class and cannot be instantiated directly');
     }
@@ -40,7 +39,6 @@ export class BaseJob {
     this.providerRepo = providerRepo;
     this.providerTitleRepo = providerTitleRepo;
     this.titleRepo = titleRepo;
-    this.titleStreamRepo = titleStreamRepo;
     this.jobHistoryRepo = jobHistoryRepo;
     this.providersManager = providersManager;
     this.tmdbManager = tmdbManager;
@@ -76,9 +74,6 @@ export class BaseJob {
     }
     if (!this.titleRepo) {
       throw new Error('TitleRepository is required');
-    }
-    if (!this.titleStreamRepo) {
-      throw new Error('TitleStreamRepository is required');
     }
     if (!this.jobHistoryRepo) {
       throw new Error('JobHistoryRepository is required');
@@ -174,7 +169,7 @@ export class BaseJob {
       }
     };
     
-    return new TMDBHandler(providerData, this.titleRepo, this.titleStreamRepo, this.tmdbProvider, this.providerTitleRepo);
+    return new TMDBHandler(providerData, this.titleRepo, this.tmdbProvider, this.providerTitleRepo);
   }
 
   /**

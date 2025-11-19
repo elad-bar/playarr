@@ -35,11 +35,6 @@ export class ProgramRepository extends BaseRepository {
         key: { username: 1, channel_id: 1 },
         options: {},
         description: 'User channel programs lookup'
-      },
-      {
-        key: { username: 1, channel_id: 1, start: 1, stop: 1 },
-        options: {},
-        description: 'Program time range lookup'
       }
     ];
   }

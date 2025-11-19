@@ -17,12 +17,11 @@ class ProvidersManager extends BaseManager {
    * @param {import('./titles.js').TitlesManager} titlesManager - Titles manager instance
    * @param {Object<string, import('../providers/BaseIPTVProvider.js').BaseIPTVProvider>} providerTypeMap - Map of provider type to provider instance
    * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider titles repository
-   * @param {import('../repositories/TitleStreamRepository.js').TitleStreamRepository} titleStreamRepo - Title streams repository
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Titles repository
    * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
    * @param {Function<string>} triggerJob - Function to trigger jobs by name
    */
-  constructor(webSocketService, titlesManager, providerTypeMap, providerTitleRepo, titleStreamRepo, titleRepo, providerRepo, triggerJob) {
+  constructor(webSocketService, titlesManager, providerTypeMap, providerTitleRepo, titleRepo, providerRepo, triggerJob) {
     super('ProvidersManager');
     this._webSocketService = webSocketService;
     this._titlesManager = titlesManager;
@@ -31,7 +30,6 @@ class ProvidersManager extends BaseManager {
     
     // Repositories for composite operations
     this._providerTitleRepo = providerTitleRepo;
-    this._titleStreamRepo = titleStreamRepo;
     this._titleRepo = titleRepo;
     this._providerRepo = providerRepo;
     
@@ -160,15 +158,16 @@ class ProvidersManager extends BaseManager {
   }
 
   /**
-   * Remove provider from all title sources (composite operation)
-   * Coordinates: ProviderTitleRepository → TitleStreamRepository → TitleRepository
+   * Remove provider from titles (main titles and optionally provider titles)
+   * Coordinates: ProviderTitleRepository → TitleRepository (media array)
    * @private
    * @param {string} providerId - Provider ID
    * @param {boolean} isEnabled - Whether provider is enabled
-   * @param {Object} enabledCategories - Enabled categories object with movies and tvshows arrays
-   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number, titleKeys: Array<string>, providerTitlesDeleted: number}>}
+   * @param {Object} enabledCategories - Enabled categories object
+   * @param {boolean} [deleteProviderTitles=true] - Whether to delete provider titles (default: true for backward compatibility)
+   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number, titleKeys: Array, providerTitlesDeleted: number, emptyTitlesDeleted: number}>}
    */
-  async _removeProviderFromTitles(providerId, isEnabled, enabledCategories) {
+  async _removeProviderFromTitles(providerId, isEnabled, enabledCategories, deleteProviderTitles = true) {
     try {
       if (!enabledCategories || typeof enabledCategories !== 'object') {
         throw new Error('enabledCategories must be provided and must be an object');
@@ -224,7 +223,7 @@ class ProvidersManager extends BaseManager {
       const providerTitles = await this._providerTitleRepo.findByQuery(query);
 
       if (providerTitles.length === 0) {
-        return { titlesUpdated: 0, streamsRemoved: 0, titleKeys: [], providerTitlesDeleted: 0 };
+        return { titlesUpdated: 0, streamsRemoved: 0, titleKeys: [], providerTitlesDeleted: 0, emptyTitlesDeleted: 0 };
       }
 
       // Step 2: Build title_keys from provider titles
@@ -235,51 +234,46 @@ class ProvidersManager extends BaseManager {
       )];
 
       if (titleKeys.length === 0) {
-        return { titlesUpdated: 0, streamsRemoved: 0, titleKeys: [], providerTitlesDeleted: 0 };
+        return { titlesUpdated: 0, streamsRemoved: 0, titleKeys: [], providerTitlesDeleted: 0, emptyTitlesDeleted: 0 };
       }
 
-      // Step 3: Delete provider titles from provider_titles collection
-      const deletedProviderTitles = await this._providerTitleRepo.deleteManyByQuery(query);
+      // Step 3: Delete provider titles from provider_titles collection (only if deleteProviderTitles is true)
+      let deletedProviderTitles = { deletedCount: 0 };
+      if (deleteProviderTitles) {
+        deletedProviderTitles = await this._providerTitleRepo.deleteManyByQuery(query);
+      }
 
-      // Step 4: Delete title_streams using TitleStreamRepository
-      const deletedStreams = await this._titleStreamRepo.deleteByProviderAndTitleKeys(providerId, titleKeys);
+      // Step 4: Remove provider sources from titles.media[].sources using MongoDB $pull
+      const collection = this._titleRepo.db.collection(this._titleRepo.collectionName);
+      const pullResult = await collection.updateMany(
+        { title_key: { $in: titleKeys } },
+        { $pull: { 'media.$[].sources': { provider_id: providerId } } }
+      );
 
-      // Step 5: Update titles.streams using TitleRepository
-      const { titlesUpdated, streamsRemoved } = await this._titleRepo.removeProviderFromStreams(providerId, titleKeys);
+      // Step 5: Remove empty media items (media items with no sources)
+      await collection.updateMany(
+        { title_key: { $in: titleKeys } },
+        { $pull: { media: { sources: { $size: 0 } } } }
+      );
+
+      // Step 6: Delete titles that have no media items left
+      const deleteResult = await collection.deleteMany({
+        title_key: { $in: titleKeys },
+        $or: [
+          { media: { $size: 0 } },
+          { media: { $exists: false } }
+        ]
+      });
 
       return {
-        titlesUpdated,
-        streamsRemoved: deletedStreams.deletedCount || 0,
+        titlesUpdated: pullResult.modifiedCount || 0,
+        streamsRemoved: pullResult.modifiedCount || 0,
         titleKeys,
-        providerTitlesDeleted: deletedProviderTitles.deletedCount || 0
+        providerTitlesDeleted: deletedProviderTitles.deletedCount || 0,
+        emptyTitlesDeleted: deleteResult.deletedCount || 0
       };
     } catch (error) {
       this.logger.error(`Error removing provider ${providerId} from titles: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Delete titles without streams (composite operation)
-   * Coordinates: TitleStreamRepository → TitleRepository
-   * @private
-   * @param {Array<string>} titleKeys - Title keys to check
-   * @returns {Promise<number>} Number of deleted titles
-   */
-  async _deleteTitlesWithoutStreams(titleKeys) {
-    if (!titleKeys || titleKeys.length === 0) {
-      return 0;
-    }
-
-    try {
-      // Step 1: Check title_streams using TitleStreamRepository
-      const titleStreams = await this._titleStreamRepo.findByTitleKeys(titleKeys);
-      const titleKeysWithStreams = new Set(titleStreams.map(ts => ts.title_key));
-
-      // Step 2 & 3: Check titles.streams and delete empty titles using TitleRepository
-      return await this._titleRepo.deleteWithoutStreams(titleKeys, titleKeysWithStreams);
-    } catch (error) {
-      this.logger.error(`Error deleting titles without streams: ${error.message}`);
       throw error;
     }
   }
@@ -714,31 +708,21 @@ class ProvidersManager extends BaseManager {
 
       // Handle enable/disable cleanup
       if (enabledChanged && !willBeEnabled) {
-        // Provider being disabled - perform cleanup
+        // Provider being disabled - keep provider titles, only remove from main titles
         try {
-          const { titlesUpdated, streamsRemoved, titleKeys, providerTitlesDeleted } = 
-            await this._removeProviderFromTitles(providerId, willBeEnabled, updatedProvider.enabled_categories);
-          
-          // removeProviderFromTitles already deletes title_streams, so no need to call deleteProviderTitleStreams
-          const deletedEmptyTitles = await this._deleteTitlesWithoutStreams(titleKeys);
+          const { titlesUpdated, streamsRemoved, titleKeys, providerTitlesDeleted, emptyTitlesDeleted } = 
+            await this._removeProviderFromTitles(providerId, willBeEnabled, updatedProvider.enabled_categories, false);
           
           this.logger.info(
-            `Provider ${providerId} disabled cleanup: ${providerTitlesDeleted} provider titles deleted, ` +
-            `${titlesUpdated} titles updated, ${streamsRemoved} streams removed, ${deletedEmptyTitles} empty titles deleted`
+            `Provider ${providerId} disabled cleanup: provider titles kept, ` +
+            `${titlesUpdated} titles updated, ${streamsRemoved} streams removed, ${emptyTitlesDeleted} empty titles deleted`
           );
         } catch (error) {
           this.logger.error(`Error cleaning up disabled provider ${providerId}: ${error.message}`);
         }
       } else if (enabledChanged && willBeEnabled) {
-        // Provider being enabled - reset titles lastUpdated
-        try {
-          const updatedCount = await this._providerTitleRepo.resetLastUpdated(providerId);
-          this.logger.info(`Reset lastUpdated for ${updatedCount} provider titles for ${providerId}`);
-        } catch (error) {
-          this.logger.error(`Error resetting titles lastUpdated for provider ${providerId}: ${error.message}`);
-        }
-        
-        // Trigger sync job to fetch fresh data (async, non-blocking)
+        // Provider being enabled - incremental sync will work automatically since titles are kept
+        // Trigger sync job to fetch updates (async, non-blocking)
         this._triggerSyncJob();
       }
 
@@ -795,16 +779,13 @@ class ProvidersManager extends BaseManager {
       try {
         // 1. Remove provider from titles.streams (and delete title_streams)
         const isProviderEnabled = provider.enabled !== false;
-        const { titlesUpdated, streamsRemoved, titleKeys } = 
+        const { titlesUpdated, streamsRemoved, titleKeys, emptyTitlesDeleted } = 
           await this._removeProviderFromTitles(providerId, isProviderEnabled, provider.enabled_categories);
         
         // 2. Delete all provider_titles for this provider (only on delete, not disable)
         const deletedTitles = await this._providerTitleRepo.deleteByProvider(providerId);
         
-        // 3. Delete titles without streams (optional, can be async/background)
-        const deletedEmptyTitles = await this._deleteTitlesWithoutStreams(titleKeys);
-        
-        // 4. Clear provider API cache (disk storage)
+        // 3. Clear provider API cache (disk storage)
         // Get storage from any provider instance (they all share the same storage)
         const firstProvider = Object.values(this._providerTypeMap)[0];
         if (firstProvider && firstProvider._storage) {
@@ -814,7 +795,7 @@ class ProvidersManager extends BaseManager {
         this.logger.info(
           `Provider ${providerId} cleanup: ${titlesUpdated} titles updated, ` +
           `${streamsRemoved} streams removed, ${deletedTitles} provider titles deleted, ` +
-          `${deletedEmptyTitles} empty titles deleted`
+          `${emptyTitlesDeleted} empty titles deleted`
         );
       } catch (error) {
         // Log error but don't fail the provider deletion
@@ -979,15 +960,12 @@ class ProvidersManager extends BaseManager {
       try {
         // Remove provider from titles for disabled categories
         const isProviderEnabled = provider.enabled !== false;
-        const { titlesUpdated, streamsRemoved, titleKeys, providerTitlesDeleted } = 
+        const { titlesUpdated, streamsRemoved, titleKeys, providerTitlesDeleted, emptyTitlesDeleted } = 
           await this._removeProviderFromTitles(providerId, isProviderEnabled, enabledCategories);
-        
-        // Delete titles without streams
-        const deletedEmptyTitles = await this._deleteTitlesWithoutStreams(titleKeys);
         
         this.logger.info(
           `Provider ${providerId} categories changed cleanup: ${providerTitlesDeleted} provider titles deleted, ` +
-          `${titlesUpdated} titles updated, ${streamsRemoved} streams removed, ${deletedEmptyTitles} empty titles deleted`
+          `${titlesUpdated} titles updated, ${streamsRemoved} streams removed, ${emptyTitlesDeleted} empty titles deleted`
         );
       } catch (error) {
         this.logger.error(`Error cleaning up categories for provider ${providerId}: ${error.message}`);

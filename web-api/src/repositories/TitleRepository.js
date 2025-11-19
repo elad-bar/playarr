@@ -105,6 +105,16 @@ export class TitleRepository extends BaseRepository {
         key: { type: 1, imdb_id: 1 },
         options: { sparse: true }, // Sparse index since imdb_id may be null for some titles
         description: 'Stremio IMDB ID lookups (type + imdb_id)'
+      },
+      {
+        key: { 'media.sources.provider_id': 1 },
+        options: {},
+        description: 'Provider-based queries on media sources'
+      },
+      {
+        key: { type: 1, 'media.sources.provider_id': 1 },
+        options: {},
+        description: 'Type + provider combination queries'
       }
     ];
   }
@@ -172,131 +182,30 @@ export class TitleRepository extends BaseRepository {
 
   /**
    * Remove provider from titles.streams
-   * Updates titles to remove provider from stream sources
+   * This method is no longer used - provider removal is handled directly via MongoDB $pull operations
+   * Kept for backward compatibility but returns zero counts
    * @param {string} providerId - Provider ID to remove
    * @param {Array<string>} titleKeys - Array of title_key values
    * @returns {Promise<{titlesUpdated: number, streamsRemoved: number}>}
    */
   async removeProviderFromStreams(providerId, titleKeys) {
-    if (!titleKeys || titleKeys.length === 0) {
-      return { titlesUpdated: 0, streamsRemoved: 0 };
-    }
-
-    const titles = await super.findByKeys(titleKeys, 'title_key');
-    
-    if (titles.length === 0) {
-      return { titlesUpdated: 0, streamsRemoved: 0 };
-    }
-
-    let titlesUpdated = 0;
-    let streamsRemoved = 0;
-    const bulkOps = [];
-
-    for (const title of titles) {
-      const streamsObj = title.streams || {};
-      let titleModified = false;
-      const updatedStreams = { ...streamsObj };
-      
-      for (const [streamKey, streamValue] of Object.entries(streamsObj)) {
-        if (streamValue && typeof streamValue === 'object' && Array.isArray(streamValue.sources)) {
-          const originalLength = streamValue.sources.length;
-          const filteredSources = streamValue.sources.filter(id => id !== providerId);
-          
-          if (filteredSources.length !== originalLength) {
-            streamsRemoved += (originalLength - filteredSources.length);
-            
-            if (filteredSources.length > 0) {
-              updatedStreams[streamKey] = {
-                ...streamValue,
-                sources: filteredSources
-              };
-            } else {
-              updatedStreams[streamKey] = undefined;
-            }
-            titleModified = true;
-          }
-        }
-      }
-      
-      // Remove undefined entries
-      for (const key in updatedStreams) {
-        if (updatedStreams[key] === undefined) {
-          delete updatedStreams[key];
-        }
-      }
-      
-      if (titleModified) {
-        titlesUpdated++;
-        bulkOps.push({
-          updateOne: {
-            filter: { title_key: title.title_key },
-            update: {
-              $set: {
-                streams: updatedStreams,
-                lastUpdated: new Date()
-              }
-            }
-          }
-        });
-      }
-    }
-    
-    if (bulkOps.length > 0) {
-      await this.bulkWrite(bulkOps, { batch: true, ordered: false });
-    }
-
-    return { titlesUpdated, streamsRemoved };
+    // This method is no longer used - provider removal is handled in ProvidersManager
+    // using MongoDB $pull operations on titles.media[].sources
+    return { titlesUpdated: 0, streamsRemoved: 0 };
   }
 
   /**
    * Delete titles without streams
-   * Checks both title_streams collection and titles.streams to ensure they're empty
+   * This method is no longer used - title deletion is handled directly in ProvidersManager
+   * Kept for backward compatibility
    * @param {Array<string>} titleKeys - Array of title_key values to check
-   * @param {Set<string>} titleKeysWithStreams - Set of title_keys that have streams (from title_streams collection)
+   * @param {Set<string>} titleKeysWithStreams - Set of title_keys that have streams (unused)
    * @returns {Promise<number>} Number of deleted titles
    */
   async deleteWithoutStreams(titleKeys, titleKeysWithStreams) {
-    if (!titleKeys || titleKeys.length === 0) {
-      return 0;
-    }
-
-    // Filter out title_keys that have streams in title_streams
-    const titleKeysWithoutStreams = titleKeys.filter(key => !titleKeysWithStreams.has(key));
-    
-    if (titleKeysWithoutStreams.length === 0) {
-      return 0;
-    }
-
-    // Also check titles.streams to ensure they're empty
-    const titles = await super.findByKeys(titleKeysWithoutStreams, 'title_key');
-    
-    const titlesToDelete = titles.filter(title => {
-      const streams = title.streams || {};
-      const streamEntries = Object.entries(streams);
-      
-      if (streamEntries.length === 0) {
-        return true;
-      }
-      
-      // Check if all stream sources are empty
-      return streamEntries.every(([key, value]) => {
-        if (!value || typeof value !== 'object' || !Array.isArray(value.sources)) {
-          return true;
-        }
-        return value.sources.length === 0;
-      });
-    });
-
-    if (titlesToDelete.length === 0) {
-      return 0;
-    }
-
-    const titleKeysToDelete = titlesToDelete.map(t => t.title_key);
-    const result = await this.deleteManyByQuery({
-      title_key: { $in: titleKeysToDelete }
-    });
-
-    return result.deletedCount || 0;
+    // This method is no longer used - title deletion is handled in ProvidersManager
+    // by querying titles.media array directly
+    return 0;
   }
 }
 

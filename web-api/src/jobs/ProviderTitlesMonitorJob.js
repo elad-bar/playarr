@@ -12,14 +12,13 @@ export class ProviderTitlesMonitorJob extends BaseJob {
    * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
    * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/TitleStreamRepository.js').TitleStreamRepository} titleStreamRepo - Title stream repository
    * @param {import('../repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository
    * @param {import('../managers/providers.js').ProvidersManager} providersManager - Providers manager for direct API calls
    * @param {import('../managers/tmdb.js').TMDBManager} tmdbManager - TMDB manager for direct API calls
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
    */
-  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, titleStreamRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
-    super(jobName, providerRepo, providerTitleRepo, titleRepo, titleStreamRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider);
+  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
+    super(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider);
   }
 
   /**

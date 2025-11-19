@@ -7,6 +7,9 @@ import { createGunzip } from 'zlib';
 import { pipeline } from 'stream/promises';
 import { parseM3U } from '@iptv/playlist';
 import { parseXmltv } from '@iptv/xmltv';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const sax = require('sax');
 
 /**
  * Live TV Manager for handling user-configured M3U playlists and EPG data
@@ -145,106 +148,328 @@ export class LiveTVManager extends BaseManager {
   }
 
   /**
-   * Parse EPG XML file and extract programs using @iptv/xmltv library
+   * Parse EPG XML file and extract programs using streaming parser for large files
+   * Deduplicates programs by username, channel_id, start, and stop
+   * Processes in batches to prevent memory issues and stack overflow
    * @param {string} filePath - Path to EPG XML file
    * @param {string} username - Username
-   * @returns {Promise<Array>} Array of program objects
+   * @returns {Promise<Array>} Array of program objects (deduplicated)
    */
   async parseEPG(filePath, username) {
     try {
-      const content = await fs.readFile(filePath, 'utf8');
-      const epg = parseXmltv(content);
-      const programs = [];
+      // Check file size - use streaming parser for files > 10MB
+      const stats = await fs.stat(filePath);
+      const useStreaming = stats.size > 10 * 1024 * 1024; // 10MB threshold
 
-      // Build channel ID mapping
-      const channelMap = new Map();
-      if (epg.channels) {
-        for (const channel of epg.channels) {
-          if (channel.id) {
-            channelMap.set(channel.id, channel.id);
+      if (useStreaming) {
+        this.logger.info(`EPG file for ${username} is large (${(stats.size / 1024 / 1024).toFixed(2)}MB), using streaming parser`);
+        return await this._parseEPGStreaming(filePath, username);
+      } else {
+        // Try standard parser first for smaller files
+        try {
+          return await this._parseEPGStandard(filePath, username);
+        } catch (error) {
+          // If standard parser fails with stack overflow, fall back to streaming
+          if (error.message.includes('stack') || error.message.includes('Maximum call stack')) {
+            this.logger.warn(`Standard parser failed for ${username}, falling back to streaming parser`);
+            return await this._parseEPGStreaming(filePath, username);
           }
+          throw error;
         }
       }
-
-      // Parse programmes
-      if (epg.programmes) {
-        for (const prog of epg.programmes) {
-          const channelId = prog.channel;
-          if (!channelId || !channelMap.has(channelId)) continue;
-
-          const start = prog.start instanceof Date ? prog.start : new Date(prog.start);
-          const stop = prog.stop instanceof Date ? prog.stop : new Date(prog.stop);
-
-          // Extract title - can be array of objects with _value and lang, or string
-          let title = 'Unknown';
-          if (prog.title) {
-            if (Array.isArray(prog.title) && prog.title.length > 0) {
-              title = prog.title[0]._value || prog.title[0] || 'Unknown';
-            } else if (typeof prog.title === 'string') {
-              title = prog.title;
-            } else if (prog.title._value) {
-              title = prog.title._value;
-            }
-          }
-
-          // Extract description
-          let desc = null;
-          if (prog.desc) {
-            if (Array.isArray(prog.desc) && prog.desc.length > 0) {
-              desc = prog.desc[0]._value || prog.desc[0] || null;
-            } else if (typeof prog.desc === 'string') {
-              desc = prog.desc;
-            } else if (prog.desc._value) {
-              desc = prog.desc._value;
-            }
-          }
-
-          // Extract category
-          let category = null;
-          if (prog.category) {
-            if (Array.isArray(prog.category) && prog.category.length > 0) {
-              category = prog.category[0]._value || prog.category[0] || null;
-            } else if (typeof prog.category === 'string') {
-              category = prog.category;
-            } else if (prog.category._value) {
-              category = prog.category._value;
-            }
-          }
-
-          // Extract icon
-          let icon = null;
-          if (prog.icon && Array.isArray(prog.icon) && prog.icon.length > 0) {
-            icon = prog.icon[0].src || null;
-          }
-
-          // Extract episode number
-          let episode = null;
-          if (prog.episodeNum && Array.isArray(prog.episodeNum) && prog.episodeNum.length > 0) {
-            episode = prog.episodeNum[0]._value || null;
-          }
-
-          const program = {
-            username,
-            channel_id: channelId,
-            start: start,
-            stop: stop,
-            title: title,
-            desc: desc,
-            category: category,
-            icon: icon,
-            episode: episode,
-            createdAt: new Date(),
-            lastUpdated: new Date()
-          };
-          programs.push(program);
-        }
-      }
-
-      return programs;
     } catch (error) {
       this.logger.error(`Error parsing EPG file ${filePath}: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Parse EPG using standard @iptv/xmltv library (for smaller files)
+   * @private
+   * @param {string} filePath - Path to EPG XML file
+   * @param {string} username - Username
+   * @returns {Promise<Array>} Array of program objects
+   */
+  async _parseEPGStandard(filePath, username) {
+    const content = await fs.readFile(filePath, 'utf8');
+    const epg = parseXmltv(content);
+    const programs = [];
+    const programKeys = new Set();
+    const BATCH_SIZE = 5000; // Process in batches
+
+    // Build channel ID mapping
+    const channelMap = new Map();
+    if (epg.channels) {
+      for (const channel of epg.channels) {
+        if (channel.id) {
+          channelMap.set(channel.id, channel.id);
+        }
+      }
+    }
+
+    // Process programmes in batches to avoid memory issues
+    if (epg.programmes) {
+      const totalProgrammes = epg.programmes.length;
+      this.logger.debug(`Processing ${totalProgrammes} programmes for ${username} in batches of ${BATCH_SIZE}`);
+
+      for (let i = 0; i < epg.programmes.length; i += BATCH_SIZE) {
+        const batch = epg.programmes.slice(i, i + BATCH_SIZE);
+        
+        for (const prog of batch) {
+          const program = this._extractProgram(prog, username, channelMap, programKeys);
+          if (program) {
+            programs.push(program);
+          }
+        }
+
+        if ((i + BATCH_SIZE) % (BATCH_SIZE * 10) === 0) {
+          this.logger.debug(`Processed ${Math.min(i + BATCH_SIZE, totalProgrammes)}/${totalProgrammes} programmes for ${username}`);
+        }
+      }
+    }
+
+    return programs;
+  }
+
+  /**
+   * Parse EPG using streaming SAX parser (for large files)
+   * @private
+   * @param {string} filePath - Path to EPG XML file
+   * @param {string} username - Username
+   * @returns {Promise<Array>} Array of program objects
+   */
+  async _parseEPGStreaming(filePath, username) {
+    return new Promise((resolve, reject) => {
+      const programs = [];
+      const programKeys = new Set();
+      const channelMap = new Map();
+      let currentProgram = null;
+      let currentElement = null;
+      let currentText = '';
+      let elementStack = [];
+
+      const parser = sax.createStream(true, { trim: true, normalize: true });
+      const stream = createReadStream(filePath, { encoding: 'utf8' });
+
+      parser.onopentag = (node) => {
+        elementStack.push(node.name);
+        currentElement = node.name;
+
+        if (node.name === 'programme') {
+          currentProgram = {
+            channel: node.attributes.channel || null,
+            start: node.attributes.start || null,
+            stop: node.attributes.stop || null,
+            title: null,
+            desc: null,
+            category: null,
+            icon: null,
+            episode: null
+          };
+          currentText = '';
+        } else if (node.name === 'channel') {
+          const channelId = node.attributes.id || null;
+          if (channelId) {
+            channelMap.set(channelId, channelId);
+          }
+        } else if (node.name === 'icon' && currentProgram) {
+          currentProgram.icon = node.attributes.src || null;
+        }
+      };
+
+      parser.ontext = (text) => {
+        if (currentProgram) {
+          currentText += text;
+        }
+      };
+
+      parser.onclosetag = (tagName) => {
+        if (tagName === 'programme' && currentProgram) {
+          // Process the completed programme
+          const channelId = currentProgram.channel;
+          if (channelId && channelMap.has(channelId)) {
+            try {
+              const start = currentProgram.start ? new Date(currentProgram.start) : null;
+              const stop = currentProgram.stop ? new Date(currentProgram.stop) : null;
+
+              if (start && stop && !isNaN(start.getTime()) && !isNaN(stop.getTime())) {
+                const programKey = `${username}-${channelId}-${start.getTime()}-${stop.getTime()}`;
+                
+                if (!programKeys.has(programKey)) {
+                  programKeys.add(programKey);
+
+                  const program = {
+                    username,
+                    channel_id: channelId,
+                    start: start,
+                    stop: stop,
+                    title: currentProgram.title || 'Unknown',
+                    desc: currentProgram.desc || null,
+                    category: currentProgram.category || null,
+                    icon: currentProgram.icon || null,
+                    episode: currentProgram.episode || null,
+                    createdAt: new Date(),
+                    lastUpdated: new Date()
+                  };
+                  programs.push(program);
+
+                  // Note: We collect all programs and return them at the end
+                  // The calling code will handle batch insertion to the database
+                }
+              }
+            } catch (error) {
+              // Skip invalid program
+              this.logger.debug(`Skipping invalid program: ${error.message}`);
+            }
+          }
+          currentProgram = null;
+          currentText = '';
+        } else if (currentProgram && tagName === 'title') {
+          currentProgram.title = currentText.trim() || 'Unknown';
+          currentText = '';
+        } else if (currentProgram && tagName === 'desc') {
+          currentProgram.desc = currentText.trim() || null;
+          currentText = '';
+        } else if (currentProgram && tagName === 'category') {
+          currentProgram.category = currentText.trim() || null;
+          currentText = '';
+        } else if (currentProgram && tagName === 'episode-num') {
+          currentProgram.episode = currentText.trim() || null;
+          currentText = '';
+        }
+
+        elementStack.pop();
+        if (elementStack.length === 0) {
+          currentElement = null;
+        }
+      };
+
+      parser.onerror = (error) => {
+        this.logger.error(`Streaming parser error for ${username}: ${error.message}`);
+        reject(error);
+      };
+
+      parser.onend = () => {
+        // Save any remaining programs
+        if (programs.length > 0) {
+          this.logger.debug(`Streaming parser completed: ${programs.length} programs extracted for ${username}`);
+        }
+        resolve(programs);
+      };
+
+      stream.pipe(parser);
+    });
+  }
+
+  /**
+   * Extract program data from parsed programme object
+   * @private
+   * @param {Object} prog - Programme object from parser
+   * @param {string} username - Username
+   * @param {Map} channelMap - Map of valid channel IDs
+   * @param {Set} programKeys - Set of already processed program keys
+   * @returns {Object|null} Program object or null if invalid/duplicate
+   */
+  _extractProgram(prog, username, channelMap, programKeys) {
+    const channelId = prog.channel;
+    if (!channelId || !channelMap.has(channelId)) return null;
+
+    // Parse dates safely
+    let start, stop;
+    try {
+      if (prog.start instanceof Date) {
+        start = prog.start;
+      } else if (typeof prog.start === 'string' || typeof prog.start === 'number') {
+        start = new Date(prog.start);
+        if (isNaN(start.getTime())) return null;
+      } else {
+        return null;
+      }
+
+      if (prog.stop instanceof Date) {
+        stop = prog.stop;
+      } else if (typeof prog.stop === 'string' || typeof prog.stop === 'number') {
+        stop = new Date(prog.stop);
+        if (isNaN(stop.getTime())) return null;
+      } else {
+        return null;
+      }
+    } catch (dateError) {
+      return null;
+    }
+
+    // Create unique key for deduplication
+    const startTime = start.getTime();
+    const stopTime = stop.getTime();
+    const programKey = `${username}-${channelId}-${startTime}-${stopTime}`;
+
+    // Skip if we've already seen this program
+    if (programKeys.has(programKey)) {
+      return null;
+    }
+    programKeys.add(programKey);
+
+    // Extract title - can be array of objects with _value and lang, or string
+    let title = 'Unknown';
+    if (prog.title) {
+      if (Array.isArray(prog.title) && prog.title.length > 0) {
+        title = prog.title[0]._value || prog.title[0] || 'Unknown';
+      } else if (typeof prog.title === 'string') {
+        title = prog.title;
+      } else if (prog.title._value) {
+        title = prog.title._value;
+      }
+    }
+
+    // Extract description
+    let desc = null;
+    if (prog.desc) {
+      if (Array.isArray(prog.desc) && prog.desc.length > 0) {
+        desc = prog.desc[0]._value || prog.desc[0] || null;
+      } else if (typeof prog.desc === 'string') {
+        desc = prog.desc;
+      } else if (prog.desc._value) {
+        desc = prog.desc._value;
+      }
+    }
+
+    // Extract category
+    let category = null;
+    if (prog.category) {
+      if (Array.isArray(prog.category) && prog.category.length > 0) {
+        category = prog.category[0]._value || prog.category[0] || null;
+      } else if (typeof prog.category === 'string') {
+        category = prog.category;
+      } else if (prog.category._value) {
+        category = prog.category._value;
+      }
+    }
+
+    // Extract icon
+    let icon = null;
+    if (prog.icon && Array.isArray(prog.icon) && prog.icon.length > 0) {
+      icon = prog.icon[0].src || null;
+    }
+
+    // Extract episode number
+    let episode = null;
+    if (prog.episodeNum && Array.isArray(prog.episodeNum) && prog.episodeNum.length > 0) {
+      episode = prog.episodeNum[0]._value || null;
+    }
+
+    return {
+      username,
+      channel_id: channelId,
+      start: start,
+      stop: stop,
+      title: title,
+      desc: desc,
+      category: category,
+      icon: icon,
+      episode: episode,
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    };
   }
 
   /**
@@ -343,8 +568,14 @@ export class LiveTVManager extends BaseManager {
 
       await Promise.all(epgFetchPromises);
 
-      // Process each user's data
-      const results = await Promise.all(
+      // Collect all data from all users first (aggregate in memory)
+      const allChannels = [];
+      const allPrograms = [];
+      const usernamesToSync = [];
+      const results = [];
+
+      // Process each user's data and collect channels/programs
+      await Promise.all(
         users.map(async (user) => {
           try {
             // Skip if liveTV is null/undefined (valid - user hasn't configured it)
@@ -355,11 +586,12 @@ export class LiveTVManager extends BaseManager {
             // Warn only if liveTV object exists but m3u_url property is missing (corrupted data)
             if (!('m3u_url' in user.liveTV)) {
               this.logger.warn(`Skipping user ${user.username}: liveTV object exists but m3u_url property is missing (corrupted data)`);
-              return {
+              results.push({
                 username: user.username,
                 success: false,
                 error: 'Live TV configuration is corrupted (m3u_url property missing)'
-              };
+              });
+              return null;
             }
 
             // Skip if m3u_url is null or empty (valid - user cleared their configuration)
@@ -385,13 +617,9 @@ export class LiveTVManager extends BaseManager {
               user.username
             );
 
-            // Delete old channels for this user
-            await this._channelRepo.deleteMany({ username: user.username });
-
-            // Insert new channels
-            if (channels.length > 0) {
-              await this._channelRepo.insertMany(channels, { batch: true });
-            }
+            // Collect channels
+            allChannels.push(...channels);
+            usernamesToSync.push(user.username);
 
             // Handle EPG if configured
             let programsCount = 0;
@@ -405,14 +633,9 @@ export class LiveTVManager extends BaseManager {
                   await fs.writeFile(path.join(cacheDir, 'epg.xml'), epgData.content, 'utf8');
                   const programs = await this.parseEPG(path.join(cacheDir, 'epg.xml'), user.username);
 
-                  // Delete old programs for this user
-                  await this._programRepo.deleteMany({ username: user.username });
-
-                  // Insert new programs
-                  if (programs.length > 0) {
-                    await this._programRepo.insertMany(programs, { batch: true });
-                    programsCount = programs.length;
-                  }
+                  // Collect programs
+                  allPrograms.push(...programs);
+                  programsCount = programs.length;
                 } else if (epgData && epgData.isGzipped && epgData.response) {
                   // Handle gzipped EPG per user
                   const tempPath = path.join(cacheDir, 'epg.tmp');
@@ -426,36 +649,55 @@ export class LiveTVManager extends BaseManager {
                   
                   const programs = await this.parseEPG(path.join(cacheDir, 'epg.xml'), user.username);
 
-                  // Delete old programs for this user
-                  await this._programRepo.deleteMany({ username: user.username });
-
-                  // Insert new programs
-                  if (programs.length > 0) {
-                    await this._programRepo.insertMany(programs, { batch: true });
-                    programsCount = programs.length;
-                  }
+                  // Collect programs
+                  allPrograms.push(...programs);
+                  programsCount = programs.length;
                 }
               } catch (error) {
                 this.logger.error(`Error processing EPG for ${user.username}: ${error.message}`);
               }
             }
 
-            return {
+            results.push({
               username: user.username,
               channels: channels.length,
               programs: programsCount,
               success: true
-            };
+            });
+            return null;
           } catch (error) {
             this.logger.error(`Error syncing Live TV for ${user.username}: ${error.message}`);
-            return {
+            results.push({
               username: user.username,
               success: false,
               error: error.message
-            };
+            });
+            return null;
           }
         })
       );
+
+      // Delete all old data for all users in one operation (faster and safer)
+      if (usernamesToSync.length > 0) {
+        const uniqueUsernames = [...new Set(usernamesToSync)];
+        this.logger.debug(`Deleting old data for ${uniqueUsernames.length} user(s)...`);
+        
+        await Promise.all([
+          this._channelRepo.deleteMany({ username: { $in: uniqueUsernames } }),
+          this._programRepo.deleteMany({ username: { $in: uniqueUsernames } })
+        ]);
+      }
+
+      // Insert all collected data in one bulk operation (faster and safer)
+      if (allChannels.length > 0) {
+        this.logger.debug(`Inserting ${allChannels.length} channel(s)...`);
+        await this._channelRepo.insertMany(allChannels, { batch: true });
+      }
+
+      if (allPrograms.length > 0) {
+        this.logger.debug(`Inserting ${allPrograms.length} program(s)...`);
+        await this._programRepo.insertMany(allPrograms, { batch: true });
+      }
 
       // Filter out null results (users who don't have liveTV configured - not errors)
       const filteredResults = results.filter(result => result !== null);

@@ -20,13 +20,13 @@ const STREAM_HEADERS = {
  */
 class StreamManager extends BaseManager {
   /**
-   * @param {import('../repositories/TitleStreamRepository.js').TitleStreamRepository} titleStreamRepo - Title stream repository
+   * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
    * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
    * @param {import('./providers.js').ProvidersManager} [providersManager] - Providers manager instance (optional, can be set later via setter)
    */
-  constructor(titleStreamRepo, providerRepo, providersManager = null) {
+  constructor(titleRepo, providerRepo, providersManager = null) {
     super('StreamManager');
-    this._titleStreamRepo = titleStreamRepo;
+    this._titleRepo = titleRepo;
     this._providerRepo = providerRepo;
     this._providersManager = providersManager;
     this._timeout = 7500; // 7.5 seconds timeout for URL checks
@@ -113,29 +113,43 @@ class StreamManager extends BaseManager {
    */
   async _getSources(titleId, mediaType, seasonNumber = null, episodeNumber = null) {
     try {
-      // Build stream ID suffix
-      let streamIdSuffix = 'main';
-      if (mediaType === 'tvshows') {
-        const seasonNum = this._getSeasonNumber(seasonNumber);
-        const episodeNum = this._getEpisodeNumber(episodeNumber);
-        streamIdSuffix = `${seasonNum}-${episodeNum}`;
-      }
-      
-      // Build title_key for MongoDB query
-      const titleKey = `${mediaType}-${titleId}`;
-      
-      // Query MongoDB title_streams collection directly
-      const streams = await this._titleStreamRepo.findByQuery({
-        title_key: titleKey,
-        stream_id: streamIdSuffix
+      // Find title by tmdb_id and type
+      const title = await this._titleRepo.findByQuery({
+        title_id: parseInt(titleId, 10),
+        type: mediaType
       });
       
-      if (!streams || streams.length === 0) {
-        this.logger.warn(`No streams found for title ${titleKey}, stream ${streamIdSuffix}`);
+      if (!title || title.length === 0) {
+        this.logger.warn(`No title found for ${mediaType} ${titleId}`);
+        return [];
+      }
+      
+      const titleData = title[0];
+      const media = titleData.media || [];
+      
+      if (media.length === 0) {
+        this.logger.warn(`No media found for ${mediaType} ${titleId}`);
         return [];
       }
 
-      this.logger.debug(`Found ${streams.length} stream(s) for title ${titleKey}, stream ${streamIdSuffix}`);
+      // Find the matching media item
+      let mediaItem = null;
+      if (mediaType === 'movies') {
+        // For movies, find media item with name === 'main'
+        mediaItem = media.find(m => m.name === 'main');
+      } else {
+        // For TV shows, find media item matching season and episode
+        const season = parseInt(seasonNumber, 10);
+        const episode = parseInt(episodeNumber, 10);
+        mediaItem = media.find(m => m.season === season && m.episode === episode);
+      }
+      
+      if (!mediaItem || !mediaItem.sources || mediaItem.sources.length === 0) {
+        this.logger.warn(`No sources found for ${mediaType} ${titleId}, season ${seasonNumber}, episode ${episodeNumber}`);
+        return [];
+      }
+
+      this.logger.debug(`Found ${mediaItem.sources.length} source(s) for ${mediaType} ${titleId}`);
 
       // Get providers data to access streams_urls for base URL concatenation
       // Filter to only enabled providers
@@ -157,14 +171,14 @@ class StreamManager extends BaseManager {
 
       const sources = [];
       
-      for (const streamEntry of streams) {
-        const proxyUrl = streamEntry.proxy_url;
-        if (!proxyUrl) {
-          this.logger.debug(`Stream for provider ${streamEntry.provider_id} has no proxy_url, skipping`);
+      for (const sourceEntry of mediaItem.sources) {
+        const providerUrl = sourceEntry.provider_url;
+        if (!providerUrl) {
+          this.logger.debug(`Source for provider ${sourceEntry.provider_id} has no provider_url, skipping`);
           continue;
         }
 
-        const providerId = streamEntry.provider_id;
+        const providerId = sourceEntry.provider_id;
         const provider = providersMap.get(providerId);
 
           // Skip if provider is not found (disabled or deleted)
@@ -173,39 +187,39 @@ class StreamManager extends BaseManager {
             continue;
           }
 
-          this.logger.debug(`Processing stream for provider ${providerId}, proxy_url: ${proxyUrl}`);
+          this.logger.debug(`Processing stream for provider ${providerId}, provider_url: ${providerUrl}`);
           
           // Get provider type for optimized URL checking
           const providerType = provider.type || null;
 
           // Check if URL is already absolute (has base URL)
-          if (proxyUrl.startsWith('http://') || proxyUrl.startsWith('https://')) {
+          if (providerUrl.startsWith('http://') || providerUrl.startsWith('https://')) {
             // Already absolute, use as-is
-            this.logger.debug(`Using absolute URL: ${proxyUrl}`);
-            sources.push({ url: proxyUrl, providerType });
-          } else if (proxyUrl.startsWith('/')) {
+            this.logger.debug(`Using absolute URL: ${providerUrl}`);
+            sources.push({ url: providerUrl, providerType });
+          } else if (providerUrl.startsWith('/')) {
             // Relative URL - need to concatenate with base URLs
             if (provider && provider.streams_urls && Array.isArray(provider.streams_urls) && provider.streams_urls.length > 0) {
               this.logger.debug(`Provider ${providerId} has ${provider.streams_urls.length} stream URL(s) configured`);
               // For each base URL in streams_urls, create a full URL
               for (const baseUrl of provider.streams_urls) {
                 if (baseUrl && typeof baseUrl === 'string' && baseUrl.trim()) {
-                  // Remove trailing slash from baseUrl if present, then add proxyUrl
+                  // Remove trailing slash from baseUrl if present, then add providerUrl
                   const cleanBaseUrl = baseUrl.replace(/\/$/, '');
-                  const fullUrl = `${cleanBaseUrl}${proxyUrl}`;
+                  const fullUrl = `${cleanBaseUrl}${providerUrl}`;
                   this.logger.debug(`Constructed full URL: ${fullUrl}`);
                   sources.push({ url: fullUrl, providerType });
                 }
               }
             } else {
               // No streams_urls configured, log warning but still try the relative URL
-              this.logger.warn(`Provider ${providerId} has relative stream URL but no streams_urls configured. Using relative URL: ${proxyUrl}`);
-              sources.push({ url: proxyUrl, providerType });
+              this.logger.warn(`Provider ${providerId} has relative stream URL but no streams_urls configured. Using relative URL: ${providerUrl}`);
+              sources.push({ url: providerUrl, providerType });
             }
           } else {
             // Neither absolute nor relative (unexpected format), use as-is
-            this.logger.warn(`Unexpected stream URL format for ${providerId}: ${proxyUrl}`);
-            sources.push({ url: proxyUrl, providerType });
+            this.logger.warn(`Unexpected stream URL format for ${providerId}: ${providerUrl}`);
+            sources.push({ url: providerUrl, providerType });
           }
       }
 

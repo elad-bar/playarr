@@ -393,6 +393,7 @@ export class AGTVHandler extends BaseIPTVHandler {
     }
 
     return {
+      provider_id: this.providerId,
       title_id: title[config.idField] || null,
       title: title.name,
       tmdb_id: title.tmdb_id || null,

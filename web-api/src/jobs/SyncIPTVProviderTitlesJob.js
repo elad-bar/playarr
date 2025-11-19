@@ -12,14 +12,13 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
    * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
    * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/TitleStreamRepository.js').TitleStreamRepository} titleStreamRepo - Title stream repository
    * @param {import('../repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository
    * @param {import('../managers/providers.js').ProvidersManager} providersManager - Providers manager for direct API calls
    * @param {import('../managers/tmdb.js').TMDBManager} tmdbManager - TMDB manager for direct API calls
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
    */
-  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, titleStreamRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
-    super(jobName, providerRepo, providerTitleRepo, titleRepo, titleStreamRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider);
+  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
+    super(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider);
   }
 
   /**
@@ -53,12 +52,28 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
         return [];
       }
 
-      // Fetch metadata from all providers
+      // Filter to only enabled, non-deleted providers
+      const enabledHandlers = Array.from(this.handlers.entries())
+        .filter(([id, handler]) => {
+          const config = handler.providerData;
+          return config.enabled && !config.deleted;
+        });
+
+      if (enabledHandlers.length === 0) {
+        this.logger.warn('No enabled providers found. Skipping metadata fetch.');
+        await this.setJobStatus('completed', {
+          providers_processed: 0,
+          results: []
+        });
+        return [];
+      }
+
+      // Fetch metadata from enabled providers only
       // Note: fetchMetadata() will load all provider titles internally for comparison
-      this.logger.info(`Starting metadata fetch process for ${this.handlers.size} provider(s)...`);
+      this.logger.info(`Starting metadata fetch process for ${enabledHandlers.length} enabled provider(s) (${this.handlers.size} total)...`);
       
       const results = await Promise.all(
-        Array.from(this.handlers.entries()).map(async ([providerId, handler]) => {
+        enabledHandlers.map(async ([providerId, handler]) => {
           try {
             this.logger.debug(`[${providerId}] Processing provider (${handler.getProviderType()})`);
             this.logger.info(`Fetching metadata from provider ${providerId}...`);
@@ -94,7 +109,7 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
 
       // Set status to completed on success with result
       await this.setJobStatus('completed', {
-        providers_processed: this.handlers.size,
+        providers_processed: enabledHandlers.length,
         results: results
       });
 

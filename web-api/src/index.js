@@ -23,7 +23,6 @@ import { MongoClient } from 'mongodb';
 
 // Import repositories
 import { ProviderTitleRepository } from './repositories/ProviderTitleRepository.js';
-import { TitleStreamRepository } from './repositories/TitleStreamRepository.js';
 import { TitleRepository } from './repositories/TitleRepository.js';
 import { ProviderRepository } from './repositories/ProviderRepository.js';
 import { JobHistoryRepository } from './repositories/JobHistoryRepository.js';
@@ -137,7 +136,6 @@ async function initialize() {
 
     // 2. Create all repository instances
     const providerTitleRepo = new ProviderTitleRepository(mongoClient);
-    const titleStreamRepo = new TitleStreamRepository(mongoClient);
     const titleRepo = new TitleRepository(mongoClient);
     const providerRepo = new ProviderRepository(mongoClient);
     const jobHistoryRepo = new JobHistoryRepository(mongoClient);
@@ -154,7 +152,6 @@ async function initialize() {
       await Promise.all([
         titleRepo.initializeIndexes(),
         providerTitleRepo.initializeIndexes(),
-        titleStreamRepo.initializeIndexes(),
         userRepo.initializeIndexes(),
         providerRepo.initializeIndexes(),
         jobHistoryRepo.initializeIndexes(),
@@ -236,7 +233,6 @@ async function initialize() {
       titlesManager,
       providerTypeMap,
       providerTitleRepo,
-      titleStreamRepo,
       titleRepo,
       providerRepo,
       triggerJob
@@ -245,7 +241,7 @@ async function initialize() {
     // Resolve circular dependency: inject ProvidersManager into TitlesManager and StreamManager
     titlesManager.setProvidersManager(providersManager);
     
-    const streamManager = new StreamManager(titleStreamRepo, providerRepo);
+    const streamManager = new StreamManager(titleRepo, providerRepo);
     streamManager.setProvidersManager(providersManager);
     const liveTVManager = new LiveTVManager(userRepo, channelRepo, programRepo);
     const playlistManager = new PlaylistManager(titleRepo, liveTVManager);
@@ -260,7 +256,6 @@ async function initialize() {
       providerRepo,
       providerTitleRepo,
       titleRepo,
-      titleStreamRepo,
       jobHistoryRepo,
       providersManager,
       tmdbManager,
@@ -271,7 +266,6 @@ async function initialize() {
       providerRepo,
       providerTitleRepo,
       titleRepo,
-      titleStreamRepo,
       jobHistoryRepo,
       providersManager,
       tmdbManager,

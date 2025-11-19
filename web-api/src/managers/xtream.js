@@ -228,7 +228,7 @@ class XtreamManager extends BaseManager {
           category_id: this._getCategoryId(title.genres),
           category_name: this._getCategoryName(title.genres),
           backdrop_path: title.backdrop_path ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}` : '',
-          num: this._getEpisodeCount(title.streams)
+          num: this._getEpisodeCount(title.media)
         };
 
         series.push(seriesObj);
@@ -338,58 +338,61 @@ class XtreamManager extends BaseManager {
       const episodesBySeason = {};
       const seasonsMap = new Map();
 
-      // Build episodes from streams
-      if (title.streams && typeof title.streams === 'object') {
-        for (const [streamId, streamData] of Object.entries(title.streams)) {
-          // Stream ID format: S01-E01
-          const match = streamId.match(/S(\d+)-E(\d+)/);
-          if (match) {
-            const season = parseInt(match[1], 10);
-            const episode = parseInt(match[2], 10);
-            
-            // Track unique seasons with all required fields
-            if (!seasonsMap.has(season)) {
-              seasonsMap.set(season, {
-                season_number: season,
-                air_date: '',
-                name: `Season ${season}`,
-                overview: '',
-                cover: '',
-                cover_big: '',
-                episode_count: 0,
-                id: season,
-                vote_average: 0
-              });
-            }
-            
-            // Initialize season array if needed
-            if (!episodesBySeason[season]) {
-              episodesBySeason[season] = [];
-            }
-            
-            // Format season and episode numbers with padding (S01E01)
-            const seasonPadded = String(season).padStart(2, '0');
-            const episodePadded = String(episode).padStart(2, '0');
-
-            episodesBySeason[season].push({
-              id: `tvshows-${title.title_id}-${season}-${episode}`,
-              episode_num: episode,
-              season_num: season,
-              season: season,
-              title: `S${seasonPadded}E${episodePadded}`,
-              episode_name: `S${seasonPadded}E${episodePadded}`,
-              container_extension: 'mp4',
-              info: {
-                plot: '',
-                release_date: '',
-                duration: ''
-              }
-            });
-            
-            // Update episode count for this season
-            const seasonData = seasonsMap.get(season);
-            seasonData.episode_count = episodesBySeason[season].length;
+      // Build episodes from media array (only available episodes)
+      const media = title.media || [];
+      if (Array.isArray(media) && media.length > 0) {
+        for (const mediaItem of media) {
+          // Skip movies (they don't have season/episode)
+          if (mediaItem.season === null || mediaItem.season === undefined ||
+              mediaItem.episode === null || mediaItem.episode === undefined) {
+            continue;
           }
+
+          const season = mediaItem.season;
+          const episode = mediaItem.episode;
+          
+          // Track unique seasons with all required fields
+          if (!seasonsMap.has(season)) {
+            seasonsMap.set(season, {
+              season_number: season,
+              air_date: '',
+              name: `Season ${season}`,
+              overview: '',
+              cover: '',
+              cover_big: '',
+              episode_count: 0,
+              id: season,
+              vote_average: 0
+            });
+          }
+          
+          // Initialize season array if needed
+          if (!episodesBySeason[season]) {
+            episodesBySeason[season] = [];
+          }
+          
+          // Format season and episode numbers with padding (S01E01)
+          const seasonPadded = String(season).padStart(2, '0');
+          const episodePadded = String(episode).padStart(2, '0');
+
+          episodesBySeason[season].push({
+            id: `tvshows-${title.title_id}-${season}-${episode}`,
+            episode_num: episode,
+            season_num: season,
+            season: season,
+            title: mediaItem.name || `S${seasonPadded}E${episodePadded}`,
+            episode_name: mediaItem.name || `S${seasonPadded}E${episodePadded}`,
+            container_extension: 'mp4',
+            info: {
+              plot: mediaItem.overview || '',
+              release_date: mediaItem.air_date || '',
+              duration: ''
+            }
+          });
+          
+          // Update episode count for this season
+          const seasonData = seasonsMap.get(season);
+          seasonData.episode_count = episodesBySeason[season].length;
         }
       }
 
@@ -496,9 +499,9 @@ class XtreamManager extends BaseManager {
    * @param {Object} streams - Streams object
    * @returns {number} Episode count
    */
-  _getEpisodeCount(streams) {
-    if (!streams || typeof streams !== 'object') return 0;
-    return Object.keys(streams).length;
+  _getEpisodeCount(media) {
+    if (!media || !Array.isArray(media)) return 0;
+    return media.length;
   }
 
   /**

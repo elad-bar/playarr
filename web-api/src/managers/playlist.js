@@ -56,41 +56,39 @@ class PlaylistManager extends BaseManager {
     for (const titleKey of watchlistTitleKeys) {
       // Get title from titles map
       const title = titlesMap.get(titleKey);
-      if (!title || !title.streams) {
+      if (!title) {
         continue;
       }
 
-      // Extract unique stream IDs from title.streams
-      // For movies: "main"
-      // For tvshows: "S01-E01", "S01-E02", etc.
-      for (const [streamId, streamData] of Object.entries(title.streams)) {
-        // Skip if stream has no sources
-        const hasSources = Array.isArray(streamData) 
-          ? streamData.length > 0 
-          : (streamData?.sources && Array.isArray(streamData.sources) && streamData.sources.length > 0);
-        
-        if (!hasSources) {
-          continue;
-        }
+      // Check media array (all items in array have sources available)
+      const media = title.media || [];
+      if (media.length === 0) {
+        continue; // Skip titles without media
+      }
 
-        // Parse season/episode from stream ID for TV shows
-        let seasonNumber = null;
-        let episodeNumber = null;
-        
-        if (mediaType === 'tvshows' && streamId !== 'main') {
-          const match = streamId.match(/^S(\d+)-E(\d+)$/i);
-          if (match) {
-            seasonNumber = parseInt(match[1], 10);
-            episodeNumber = parseInt(match[2], 10);
-          }
+      // For movies: find media item with name === 'main'
+      if (mediaType === 'movies') {
+        const mainMedia = media.find(m => m.name === 'main');
+        if (mainMedia) {
+          relevantStreams.push({
+            title,
+            mediaItem: mainMedia,
+            streamId: 'main',
+            seasonNumber: null,
+            episodeNumber: null
+          });
         }
-
-        relevantStreams.push({
-          title,
-          streamId,
-          seasonNumber,
-          episodeNumber
-        });
+      } else {
+        // For TV shows: iterate media array (only available episodes)
+        for (const mediaItem of media) {
+          relevantStreams.push({
+            title,
+            mediaItem,
+            streamId: `S${String(mediaItem.season).padStart(2, '0')}-E${String(mediaItem.episode).padStart(2, '0')}`,
+            seasonNumber: mediaItem.season,
+            episodeNumber: mediaItem.episode
+          });
+        }
       }
     }
 
@@ -106,17 +104,11 @@ class PlaylistManager extends BaseManager {
     const relevantStreams = await this._getWatchlistStreams(mediaType, user);
 
     // Build output format: { proxyPath: streamUrl }
-    for (const { title, streamId, seasonNumber, episodeNumber } of relevantStreams) {
-      // Build proxy path
-      let proxyPath = '';
-      const year = title.release_date ? new Date(title.release_date).getFullYear() : '';
-      
-      if (mediaType === 'movies') {
-        proxyPath = `${mediaType}/${title.title} (${year}) [tmdb=${title.title_id}]/${title.title} (${year}).strm`;
-      } else {
-        // TV show
-        const seasonStr = `Season ${seasonNumber}`;
-        proxyPath = `${mediaType}/${title.title} (${year}) [tmdb=${title.title_id}]/${seasonStr}/${title.title} (${year}) ${streamId}.strm`;
+    for (const { title, mediaItem, streamId, seasonNumber, episodeNumber } of relevantStreams) {
+      // Get proxy path from mediaItem.proxy_path
+      const proxyPath = mediaItem?.proxy_path;
+      if (!proxyPath) {
+        continue; // Skip if no stream path
       }
 
       // Build stream URL

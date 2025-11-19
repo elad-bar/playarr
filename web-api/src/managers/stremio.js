@@ -320,29 +320,27 @@ class StremioManager extends BaseManager {
         return { meta: null };
       }
 
-      // Get title details
-      const result = await this._titlesManager.getTitleDetails(titleKey, user);
+      // Get title directly from repository to access media array
+      const title = await this._titlesManager._titleRepo.findOneByQuery({ title_key: titleKey });
       
-      // getTitleDetails returns details directly in result.response, not result.response.title
-      if (result.statusCode !== 200 || !result.response) {
+      if (!title) {
         return { meta: null };
       }
 
-      // Normalize the response from getTitleDetails to match what _titleToStremioMeta expects
-      const details = result.response;
+      // Normalize the title to match what _titleToStremioMeta expects
       const normalizedTitle = {
-        title_key: details.key || titleKey,
-        title: details.name || '',
-        release_date: details.release_date,
-        poster_path: details.poster_path,
-        backdrop_path: details.backdrop_path,
-        overview: details.overview,
-        vote_average: details.vote_average,
-        genres: details.genres || [],
-        runtime: details.runtime,
-        imdb_id: details.imdb_id || null,
-        // Reconstruct streams object from flatStreams for episode extraction
-        streams: this._reconstructStreamsFromFlat(details.streams || [])
+        title_key: title.title_key || titleKey,
+        title: title.title || '',
+        release_date: title.release_date,
+        poster_path: title.poster_path,
+        backdrop_path: title.backdrop_path,
+        overview: title.overview,
+        vote_average: title.vote_average,
+        genres: title.genres || [],
+        runtime: title.runtime,
+        imdb_id: title.imdb_id || null,
+        // Get media array from title data
+        media: title.media || []
       };
 
       const meta = this._titleToStremioMeta(normalizedTitle, type, true);
@@ -583,8 +581,8 @@ class StremioManager extends BaseManager {
       runtime: isMovie && title.runtime ? `${title.runtime} min` : undefined
     };
 
-    // For series, add episodes info if available
-    if (isSeries && includeDetails && title.streams) {
+    // For series, add episodes info if available (use media array to determine available episodes)
+    if (isSeries && includeDetails && title.media && Array.isArray(title.media) && title.media.length > 0) {
       const episodes = this._extractEpisodes(title);
       if (episodes.length > 0) {
         meta.episodes = episodes;
@@ -595,19 +593,26 @@ class StremioManager extends BaseManager {
   }
 
   /**
-   * Reconstruct streams object from flatStreams array for episode extraction
+   * Reconstruct streams array from flatStreams array
    * @private
    * @param {Array} flatStreams - Array of stream objects from getTitleDetails
-   * @returns {Object} Streams object with "S01-E01" keys
+   * @returns {Array<string>} Array of stream IDs
    */
-  _reconstructStreamsFromFlat(flatStreams) {
-    const streams = {};
+  _reconstructStreamsArray(flatStreams) {
+    return flatStreams.map(stream => stream.id).filter(Boolean);
+  }
+
+  /**
+   * Reconstruct episodes object from flatStreams array
+   * @private
+   * @param {Array} flatStreams - Array of stream objects from getTitleDetails
+   * @returns {Object} Episodes object with "S01-E01" keys
+   */
+  _reconstructEpisodes(flatStreams) {
+    const episodes = {};
     for (const stream of flatStreams) {
-      if (stream.season !== null && stream.episode !== null) {
-        const seasonStr = String(stream.season).padStart(2, '0');
-        const episodeStr = String(stream.episode).padStart(2, '0');
-        const streamId = `S${seasonStr}-E${episodeStr}`;
-        streams[streamId] = {
+      if (stream.id && stream.season !== null && stream.episode !== null) {
+        episodes[stream.id] = {
           name: stream.name,
           overview: stream.overview,
           air_date: stream.air_date,
@@ -615,7 +620,7 @@ class StremioManager extends BaseManager {
         };
       }
     }
-    return streams;
+    return episodes;
   }
 
   /**
@@ -632,28 +637,36 @@ class StremioManager extends BaseManager {
   }
 
   /**
-   * Extract episodes from title streams
+   * Extract episodes from title media array
+   * Only includes episodes that have sources available
    * @private
    * @param {Object} title - Playarr title object
    * @returns {Array<Object>} Array of episode objects
    */
   _extractEpisodes(title) {
-    if (!title.streams || typeof title.streams !== 'object') {
+    // Media is now an array of media items that have sources available
+    const media = title.media || [];
+
+    if (!Array.isArray(media) || media.length === 0) {
       return [];
     }
 
-    const episodes = [];
-    for (const [streamId, streamData] of Object.entries(title.streams)) {
-      // Parse streamId like "S01-E01"
-      const match = streamId.match(/^S(\d+)-E(\d+)$/);
-      if (!match) continue;
+    const episodeList = [];
+    for (const mediaItem of media) {
+      // Skip movies (they don't have season/episode)
+      if (mediaItem.season === null || mediaItem.season === undefined ||
+          mediaItem.episode === null || mediaItem.episode === undefined) {
+        continue;
+      }
 
-      const [, season, episode] = match;
+      const season = mediaItem.season;
+      const episode = mediaItem.episode;
+      
       // Handle still_path - might be full URL or relative path
-      const thumbnailUrl = streamData.still_path
-        ? (streamData.still_path.startsWith('http') 
-            ? streamData.still_path 
-            : `https://image.tmdb.org/t/p/w300${streamData.still_path}`)
+      const thumbnailUrl = mediaItem.still_path
+        ? (mediaItem.still_path.startsWith('http') 
+            ? mediaItem.still_path 
+            : `https://image.tmdb.org/t/p/w300${mediaItem.still_path}`)
         : undefined;
 
       // Extract title_id from title_key (e.g., "tvshows-101200" -> "101200")
@@ -668,7 +681,7 @@ class StremioManager extends BaseManager {
       
       if (title.imdb_id) {
         // Use IMDB ID with colon format: "tt0295064:2:4"
-        episodeId = `${title.imdb_id}:${parseInt(season, 10)}:${parseInt(episode, 10)}`;
+        episodeId = `${title.imdb_id}:${season}:${episode}`;
       } else if (titleId) {
         // Fallback to TMDB format: "15183-S02-E04"
         episodeId = `${titleId}-S${seasonStr}-E${episodeStr}`;
@@ -679,18 +692,18 @@ class StremioManager extends BaseManager {
       
       const episodeObj = {
         id: episodeId,
-        season: parseInt(season, 10),
-        episode: parseInt(episode, 10),
-        title: streamData.name || `Episode ${episode}`,
-        overview: streamData.overview || undefined,
-        released: streamData.air_date || undefined,
+        season: season,
+        episode: episode,
+        title: mediaItem.name || `Episode ${episode}`,
+        overview: mediaItem.overview || undefined,
+        released: mediaItem.air_date || undefined,
         thumbnail: thumbnailUrl
       };
 
-      episodes.push(episodeObj);
+      episodeList.push(episodeObj);
     }
 
-    return episodes.sort((a, b) => {
+    return episodeList.sort((a, b) => {
       if (a.season !== b.season) return a.season - b.season;
       return a.episode - b.episode;
     });

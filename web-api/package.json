@@ -33,6 +33,7 @@
     "jsonwebtoken": "^9.0.0",
     "mongodb": "^6.3.0",
     "playarr": "file:..",
+    "sax": "^1.4.3",
     "slugify": "^1.6.5",
     "socket.io": "^4.8.1",
     "winston": "^3.10.0",

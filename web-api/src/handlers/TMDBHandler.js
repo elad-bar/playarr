@@ -11,17 +11,13 @@ export class TMDBHandler extends BaseHandler {
    * Constructor
    * @param {Object} providerData - Provider configuration data
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/TitleStreamRepository.js').TitleStreamRepository} titleStreamRepo - Title stream repository
    * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
    * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository (required for fetching all provider titles)
    */
-  constructor(providerData, titleRepo, titleStreamRepo, tmdbProvider, providerTitleRepo) {
+  constructor(providerData, titleRepo, tmdbProvider, providerTitleRepo) {
     super(providerData, 'TMDB');
     if (!titleRepo) {
       throw new Error('TitleRepository is required');
-    }
-    if (!titleStreamRepo) {
-      throw new Error('TitleStreamRepository is required');
     }
     if (!tmdbProvider) {
       throw new Error('TMDBProvider is required');
@@ -30,7 +26,6 @@ export class TMDBHandler extends BaseHandler {
       throw new Error('ProviderTitleRepository is required');
     }
     this.titleRepo = titleRepo;
-    this.titleStreamRepo = titleStreamRepo;
     this.tmdbProvider = tmdbProvider;
     this.providerTitleRepo = providerTitleRepo;
     
@@ -45,12 +40,10 @@ export class TMDBHandler extends BaseHandler {
      */
     this._typeConfig = {
       movies: {
-        buildStreams: this._buildMovieStreams.bind(this),
         tvgType: 'movie',
         tmdbType: 'movie'
       },
       tvshows: {
-        buildStreams: this._buildTVShowStreams.bind(this),
         tvgType: 'series',
         tmdbType: 'tv'
       }
@@ -63,6 +56,43 @@ export class TMDBHandler extends BaseHandler {
    */
   getProviderType() {
     return 'tmdb';
+  }
+
+  /**
+   * Get title and release date fields from TMDB API data based on type
+   * @private
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @param {Object} apiData - TMDB API response data
+   * @returns {{title: string, release_date: string}} Object with title and release_date
+   */
+  _getTitleField(type, apiData) {
+    const typeFieldMap = {
+      movies: {
+        title: apiData.title,
+        release_date: apiData.release_date
+      },
+      tvshows: {
+        title: apiData.name,
+        release_date: apiData.first_air_date
+      }
+    };
+    
+    return typeFieldMap[type] || { title: '', release_date: '' };
+  }
+
+  /**
+   * Get counter key for type-based counting
+   * @private
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @returns {string} Counter key ('movies' or 'tvShows')
+   */
+  _getTypeCounterKey(type) {
+    const counterKeyMap = {
+      movies: 'movies',
+      tvshows: 'tvShows'
+    };
+    
+    return counterKeyMap[type] || 'movies';
   }
 
   /**
@@ -477,15 +507,9 @@ export class TMDBHandler extends BaseHandler {
       return;
     }
     
-    try {
-      const result = await this.titleStreamRepo.deleteManyByQuery({
-        title_key: { $in: titleKeys }
-      });
-      this.logger.debug(`Cleaned up ${result.deletedCount || 0} stream entries for ${titleKeys.length} title(s)`);
-    } catch (error) {
-      this.logger.error(`Error cleaning up title streams: ${error.message}`);
-      throw error;
-    }
+    // Title streams are now embedded in titles.media, so no separate cleanup needed
+    // Media cleanup is handled by ProvidersManager when providers are removed
+    this.logger.debug(`Skipping title streams cleanup - media is now embedded in titles`);
   }
 
   /**
@@ -674,7 +698,6 @@ export class TMDBHandler extends BaseHandler {
     const mainTitles = [];
     let processedCount = 0;
     const processedCountByType = { movies: 0, tvShows: 0 };
-    const allStreams = [];
     const totalTitles = titlesToProcess.length;
     const failedTitles = []; // Track titles that failed to get TMDB details
 
@@ -709,14 +732,9 @@ export class TMDBHandler extends BaseHandler {
             
             mainTitles.push(mainTitle);
             
-            // Convert streams dictionary to stream documents
-            if (result.streamsDict) {
-              allStreams.push(...Object.values(result.streamsDict));
-            }
-            
             processedCount++;
-            if (type === 'movies') processedCountByType.movies++;
-            else if (type === 'tvshows') processedCountByType.tvShows++;
+            const counterKey = this._getTypeCounterKey(type);
+            processedCountByType[counterKey]++;
           } else {
             // TMDB details not found - mark for ignoring
             failedTitles.push({ type, tmdbId });
@@ -733,12 +751,6 @@ export class TMDBHandler extends BaseHandler {
             await this._saveMainTitles(mainTitles, existingMainTitleMap);
             this.logger.debug(`Saved ${mainTitles.length} main titles (periodic save)`);
             mainTitles.length = 0;
-          }
-          
-          if (allStreams.length > 0) {
-            const streamResult = await this.titleStreamRepo.bulkSave(allStreams, { addTimestamps: true });
-            this.logger.debug(`Saved ${streamResult.inserted + streamResult.updated} stream entries (periodic save)`);
-            allStreams.length = 0;
           }
 
           // Log progress
@@ -758,11 +770,6 @@ export class TMDBHandler extends BaseHandler {
       if (mainTitles.length > 0) {
         await this._saveMainTitles(mainTitles, existingMainTitleMap);
         this.logger.debug(`Saved ${mainTitles.length} main titles (final save)`);
-      }
-      
-      if (allStreams.length > 0) {
-        const streamResult = await this.titleStreamRepo.bulkSave(allStreams, { addTimestamps: true });
-        this.logger.debug(`Saved ${streamResult.inserted + streamResult.updated} stream entries (final save)`);
       }
 
       // Final progress log
@@ -1035,9 +1042,6 @@ export class TMDBHandler extends BaseHandler {
     let processedCount = 0;
     const processedCountByType = { movies: 0, tvShows: 0 };
 
-    // Accumulate streams as array of stream documents
-    const allStreams = [];
-
     // Track remaining titles for progress
     let totalRemaining = titlesToProcess.length;
 
@@ -1054,17 +1058,6 @@ export class TMDBHandler extends BaseHandler {
         }
       }
       
-      // Save streams to MongoDB
-      if (allStreams.length > 0) {
-        try {
-          const result = await this.titleStreamRepo.bulkSave(allStreams, { addTimestamps: true });
-          this.logger.debug(`Saved ${result.inserted + result.updated} accumulated stream entries via progress callback (${result.inserted} inserted, ${result.updated} updated)`);
-          // Clear saved streams
-          allStreams.length = 0;
-        } catch (error) {
-          this.logger.error(`Error saving accumulated streams: ${error.message}`);
-        }
-      }
     };
 
     // Register for progress tracking
@@ -1083,6 +1076,7 @@ export class TMDBHandler extends BaseHandler {
             providerTitleGroups
           );
 
+          // Only create main title if streams exist (result is not null)
           if (result && result.mainTitle) {
             const mainTitle = result.mainTitle;
             
@@ -1099,16 +1093,11 @@ export class TMDBHandler extends BaseHandler {
             
             mainTitles.push(mainTitle);
             
-            // Convert streams dictionary to stream documents and accumulate
-            if (result.streamsDict) {
-              allStreams.push(...Object.values(result.streamsDict));
-            }
-            
             processedCount++;
             
             // Track by type for return value
-            if (type === 'movies') processedCountByType.movies++;
-            else if (type === 'tvshows') processedCountByType.tvShows++;
+            const counterKey = this._getTypeCounterKey(type);
+            processedCountByType[counterKey]++;
           }
         }));
 
@@ -1135,140 +1124,9 @@ export class TMDBHandler extends BaseHandler {
       await this._saveMainTitles(mainTitles, existingMainTitleMap);
     }
 
-    // Final save of streams to MongoDB
-    if (allStreams.length > 0) {
-      try {
-        const result = await this.titleStreamRepo.bulkSave(allStreams, { addTimestamps: true });
-        this.logger.info(`Saved ${result.inserted + result.updated} stream entries to MongoDB (${result.inserted} inserted, ${result.updated} updated)`);
-      } catch (error) {
-        this.logger.error(`Error saving streams to MongoDB: ${error.message}`);
-      }
-    }
-
     return processedCountByType;
   }
 
-  /**
-   * Extract streams dictionary entries for a single main title
-   * @private
-   * @param {Object} mainTitle - Main title object
-   * @param {Array<Object>} providerTitleGroups - Array of objects with { providerId, title } structure
-   * @returns {Object} Dictionary of stream entries
-   */
-  _extractMainTitleStreamsDict(mainTitle, providerTitleGroups) {
-    const { type, title_id, title, release_date, poster_path, genres, streams } = mainTitle;
-    
-    const streamsDict = {};
-    
-    if (!streams || Object.keys(streams).length === 0) {
-      return streamsDict;
-    }
-
-    // Extract year from release_date
-    const year = release_date ? release_date.split('-')[0] : '';
-    const titleWithYear = year ? `${title} (${year})` : title;
-    
-    // Extract genre names from objects with id and name
-    const genreNames = (genres || [])
-      .map(g => g.name)
-      .filter(Boolean)
-      .join(', ');
-    
-    // Process each stream
-    for (const [streamId, streamData] of Object.entries(streams)) {
-      // Get provider IDs from stream data
-      let providerIds = [];
-      if (Array.isArray(streamData)) {
-        providerIds = streamData;
-      } else if (streamData && typeof streamData === 'object' && streamData.sources) {
-        providerIds = streamData.sources;
-      }
-      
-      if (providerIds.length === 0) {
-        continue;
-      }
-
-      // Extract season/episode for TV shows
-      const titleKey = generateTitleKey(type, title_id);
-      let tvgId = `tmdb-${title_id}`;
-      let tvgName = titleWithYear;
-      const tvgType = this._typeConfig[type].tvgType;
-
-      const streamSeasonEpisode = {
-        season: null,
-        seasonNumber: null,
-        episode: null,
-        episodeNumber: null,
-        cleanStreamId: null
-      }
-
-      const tvShowStreamObj = {}
-      
-      if (type === 'tvshows' && streamId !== 'main') {
-        // Parse Sxx-Exx format
-        const match = streamId.match(/^S(\d+)-E(\d+)$/);
-        if (match) {
-          streamSeasonEpisode.season = match[1];
-          streamSeasonEpisode.episode = match[2];
-          streamSeasonEpisode.seasonNumber = parseInt(match[1], 10);
-          streamSeasonEpisode.episodeNumber = parseInt(match[2], 10);
-          streamSeasonEpisode.cleanStreamId = streamId.replace("-", "");
-          
-          tvgId = `tmdb-${title_id}-${streamSeasonEpisode.cleanStreamId}`;
-          tvgName = `${titleWithYear} ${streamSeasonEpisode.cleanStreamId}`;
-
-          tvShowStreamObj['tvg-season-num'] = streamSeasonEpisode.seasonNumber;
-          tvShowStreamObj['tvg-episode-num'] = streamSeasonEpisode.episodeNumber;
-        }
-      }
-
-      // Process each provider for this stream
-      for (const providerId of providerIds) {
-        // Find provider title from providerTitleGroups
-        const providerGroup = providerTitleGroups.find(group => group.providerId === providerId);
-        
-        if (!providerGroup || !providerGroup.title || 
-            !providerGroup.title.streams || 
-            !providerGroup.title.streams[streamId]) {
-          continue;
-        }
-
-        const streamUrl = providerGroup.title.streams[streamId];
-        
-        // Generate key: type-tmdb_id-stream_id-provider
-        const streamKey = `${type}-${title_id}-${streamId}-${providerId}`;
-
-        // Generate proxy_path
-        let proxyPath = '';
-        if (type === 'movies') {
-          proxyPath = `${type}/${title} (${year}) [tmdb=${title_id}]/${title} (${year}).strm`;
-        } else {
-          // TV show
-          const seasonStr = `Season ${streamSeasonEpisode.season}`;
-          proxyPath = `${type}/${title} (${year}) [tmdb=${title_id}]/${seasonStr}/${title} (${year}) ${streamId}.strm`;
-        }
-
-        // Build stream object
-        const streamObj = {
-          title_key: titleKey,
-          stream_id: streamId,
-          provider_id: providerId,
-          'tvg-id': tvgId,
-          'tvg-name': tvgName,
-          'tvg-type': tvgType,
-          'tvg-logo': poster_path || '',
-          'group-title': genreNames,
-          'proxy_url': streamUrl,
-          'proxy_path': proxyPath,
-          ...tvShowStreamObj
-        };
-
-        streamsDict[streamKey] = streamObj;
-      }
-    }
-    
-    return streamsDict;
-  }
 
   /**
    * Save main titles to MongoDB
@@ -1403,7 +1261,7 @@ export class TMDBHandler extends BaseHandler {
    * @param {number} tmdbId - TMDB ID
    * @param {string} type - Media type ('movies' or 'tvshows')
    * @param {Array<Object>} providerTitleGroups - Array of objects with { providerId, title } structure
-   * @returns {Promise<{mainTitle: Object, streamsDict: Object}|null>} Object with main title and streams dictionary, or null if API call fails
+   * @returns {Promise<{mainTitle: Object}|null>} Object with main title (including media array), or null if no streams found or API call fails
    */
   async generateMainTitle(tmdbId, type, providerTitleGroups) {
     const tmdbType = this._typeConfig[type]?.tmdbType;
@@ -1428,146 +1286,324 @@ export class TMDBHandler extends BaseHandler {
         imdbId = apiData.external_ids.imdb_id;
       }
       
-      // Build base main title structure
+      // Get type-specific fields
+      const { title: titleField, release_date: releaseDateField } = this._getTitleField(type, apiData);
+      
+      // Build base main title structure (metadata only)
       const mainTitle = {
         title_id: tmdbId,
         type: type,
         title_key: generateTitleKey(type, tmdbId),
-        title: type === 'movies' ? apiData.title : apiData.name,
-        release_date: type === 'movies' ? apiData.release_date : apiData.first_air_date,
+        title: titleField,
+        release_date: releaseDateField,
         vote_average: apiData.vote_average || null,
         vote_count: apiData.vote_count || null,
         overview: apiData.overview || null,
         poster_path: apiData.poster_path || null,
         genres: apiData.genres || [],
         imdb_id: imdbId,
-        streams: {},
+        media: [], // Will be populated with media streams
         createdAt: now,
         lastUpdated: now
       };
 
-      // Process streams based on type
-      const typeConfig = this._typeConfig[type];
-      if (typeConfig && typeConfig.buildStreams) {
-        await typeConfig.buildStreams(mainTitle, tmdbId, providerTitleGroups);
+      // Build media streams from ALL provider_titles
+      const { media } = await this._buildMediaStreams(tmdbId, type, mainTitle);
+
+      // If no media streams found, don't create main title
+      if (!media || media.length === 0) {
+        this.logger.debug(`No media streams found for ${type} ${tmdbId}, skipping main title creation`);
+        return null;
       }
 
-      // Extract streams dictionary
-      const streamsDict = this._extractMainTitleStreamsDict(mainTitle, providerTitleGroups);
+      // Set media array
+      mainTitle.media = media;
 
-      return { mainTitle, streamsDict };
+      return { mainTitle };
     } catch (error) {
       this.logger.error(`Error generating main title for ${tmdbType} ID ${tmdbId}: ${error.message}`);
       return null;
     }
   }
 
-  /**
-   * Build movie streams by collecting provider IDs that have "main" stream
-   * @private
-   * @param {Object} mainTitle - Main title object to populate
-   * @param {number} tmdbId - TMDB movie ID (unused, kept for signature consistency)
-   * @param {Array<Object>} providerTitleGroups - Array of objects with { providerId, title } structure
-   */
-  _buildMovieStreams(mainTitle, tmdbId, providerTitleGroups) {
-    // Collect provider IDs that have "main" stream
-    const providersWithMainStream = providerTitleGroups
-      .filter(group => group.title.streams && group.title.streams.main)
-      .map(group => group.providerId);
-    
-    if (providersWithMainStream.length > 0) {
-      mainTitle.streams.main = { sources: providersWithMainStream };
-    }
-  }
 
   /**
-   * Build TV show streams by fetching seasons/episodes from TMDB and matching with provider streams
+   * Build media streams from ALL provider_titles with matching tmdb_id and type
+   * Groups provider sources by media item (main for movies, season/episode for TV shows)
    * @private
-   * @param {Object} mainTitle - Main title object to populate
-   * @param {number} tmdbId - TMDB TV show ID
-   * @param {Array<Object>} providerTitleGroups - Array of objects with { providerId, title } structure
-   * @returns {Promise<void>}
+   * @param {number} tmdbId - TMDB ID
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @param {Object} mainTitle - Main title object (for metadata like title, release_date, etc.)
+   * @returns {Promise<{media: Array}>} Object with media array
    */
-  async _buildTVShowStreams(mainTitle, tmdbId, providerTitleGroups) {
+  async _buildMediaStreams(tmdbId, type, mainTitle) {
+    const media = [];
+    const mediaMap = new Map(); // Key: 'main' for movies, 'S{season}-E{episode}' for TV shows
+
     try {
-      // Build streams object based on provider data only
-      const streamsMap = new Map();
+      // Fetch ALL provider_titles with matching tmdb_id and type from database
+      const providerTitles = await this.providerTitleRepo.findByQuery({
+        tmdb_id: tmdbId,
+        type: type,
+        ignored: false
+      });
 
-      // First, collect all stream keys from all providers
-      providerTitleGroups.forEach(group => {
-        const providerId = group.providerId;
-        const providerStreams = group.title.streams || {};
-        
-        Object.keys(providerStreams).forEach(streamKey => {
-          // Only process valid Sxx-Exx format stream keys
-          if (!streamKey.match(/^S\d{2}-E\d{2}$/)) {
+      if (!providerTitles || providerTitles.length === 0) {
+        this.logger.debug(`No provider titles found for ${type} ${tmdbId}`);
+        return { media };
+      }
+
+      // Extract metadata from mainTitle
+      const title = mainTitle.title || '';
+      const releaseDate = mainTitle.release_date || '';
+      const year = releaseDate ? releaseDate.split('-')[0] : '';
+
+      // Type-specific handlers
+      const typeHandlers = {
+        movies: {
+          validateStreamId: (streamId) => streamId === 'main',
+          createMediaItem: (streamId, title, year, tmdbId, type) => {
+            const proxyPath = `${type}/${title} (${year}) [tmdb=${tmdbId}]/${title} (${year}).strm`;
+            return {
+              name: 'main',
+              proxy_path: proxyPath,
+              sources: []
+            };
+          },
+          enrichMetadata: async () => {
+            // Movies don't need episode metadata enrichment
             return;
           }
-          
-          // Create or update stream entry
-          if (!streamsMap.has(streamKey)) {
-            streamsMap.set(streamKey, {
+        },
+        tvshows: {
+          validateStreamId: (streamId) => streamId === 'main' || streamId.match(/^S\d{2}-E\d{2}$/),
+          createMediaItem: (streamId, title, year, tmdbId, type) => {
+            const match = streamId.match(/^S(\d+)-E(\d+)$/);
+            if (!match) {
+              return null; // Invalid stream ID
+            }
+            const seasonNumber = parseInt(match[1], 10);
+            const episodeNumber = parseInt(match[2], 10);
+            const seasonStrPath = `Season ${seasonNumber}`;
+            const proxyPath = `${type}/${title} (${year}) [tmdb=${tmdbId}]/${seasonStrPath}/${title} (${year}) ${streamId}.strm`;
+            
+            return {
+              name: '', // Will be populated from TMDB
+              proxy_path: proxyPath,
+              season: seasonNumber,
+              episode: episodeNumber,
               air_date: null,
-              name: null,
               overview: null,
               still_path: null,
               sources: []
-            });
+            };
+          },
+          enrichMetadata: async (mediaMap, tmdbId) => {
+            await this._enrichTVShowMetadata(mediaMap, tmdbId);
           }
-          
-          const streamData = streamsMap.get(streamKey);
-          if (!streamData.sources.includes(providerId)) {
-            streamData.sources.push(providerId);
-          }
-        });
-      });
-
-      // Optionally enrich with TMDB metadata if available (but don't require it)
-      try {
-        const tvShowDetails = await this.getTVShowDetails(tmdbId);
-        
-        if (tvShowDetails && tvShowDetails.seasons) {
-          // Fetch all seasons in parallel
-          const seasonPromises = tvShowDetails.seasons
-            .filter(season => season.season_number >= 0) // Filter out specials
-            .map(season => this.getTVShowSeasonDetails(tmdbId, season.season_number));
-          
-          const seasonsData = await Promise.all(seasonPromises);
-          
-          // Enrich existing stream entries with TMDB metadata
-          seasonsData.forEach(seasonData => {
-            if (seasonData && seasonData.episodes) {
-              seasonData.episodes.forEach(episode => {
-                const seasonStr = String(episode.season_number).padStart(2, '0');
-                const episodeStr = String(episode.episode_number).padStart(2, '0');
-                const streamKey = `S${seasonStr}-E${episodeStr}`;
-                
-                // Only enrich if stream already exists (from providers)
-                if (streamsMap.has(streamKey)) {
-                  const streamData = streamsMap.get(streamKey);
-                  // Only set metadata if not already set (preserve provider data)
-                  if (!streamData.air_date) streamData.air_date = episode.air_date || null;
-                  if (!streamData.name) streamData.name = episode.name || null;
-                  if (!streamData.overview) streamData.overview = episode.overview || null;
-                  if (!streamData.still_path) streamData.still_path = episode.still_path || null;
-                }
-              });
-            }
-          });
         }
-      } catch (error) {
-        // TMDB enrichment failed, but continue with provider data only
-        this.logger.debug(`Could not enrich TV show ${tmdbId} with TMDB metadata: ${error.message}`);
+      };
+
+      const handler = typeHandlers[type];
+      if (!handler) {
+        this.logger.warn(`Unknown type: ${type}`);
+        return { media };
       }
 
-      // Convert map to object - include all episodes that have at least one provider
-      streamsMap.forEach((streamData, streamKey) => {
-        if (streamData.sources.length > 0) {
-          mainTitle.streams[streamKey] = streamData;
+      // Collect all provider sources grouped by media item
+      for (const providerTitle of providerTitles) {
+        const providerId = providerTitle.provider_id;
+        const providerTitleId = providerTitle.title_id;
+        const providerStreams = providerTitle.streams || {};
+
+        for (const [streamId, streamUrl] of Object.entries(providerStreams)) {
+          // Validate stream ID using type-specific handler
+          if (!handler.validateStreamId(streamId)) {
+            continue;
+          }
+
+          // Get or create media item
+          let mediaItem = mediaMap.get(streamId);
+          if (!mediaItem) {
+            // Create media item using type-specific handler
+            mediaItem = handler.createMediaItem(streamId, title, year, tmdbId, type);
+            if (!mediaItem) {
+              continue; // Skip invalid stream ID
+            }
+            mediaMap.set(streamId, mediaItem);
+          }
+
+          // Add provider source
+          mediaItem.sources.push({
+            provider_id: providerId,
+            provider_title_id: providerTitleId,
+            provider_url: streamUrl
+          });
         }
-      });
+      }
+
+      // Enrich metadata using type-specific handler
+      if (mediaMap.size > 0) {
+        await handler.enrichMetadata(mediaMap, tmdbId);
+      }
+
+      // Convert map to array
+      media.push(...Array.from(mediaMap.values()));
+
+      this.logger.debug(`Built ${media.length} media items from ${providerTitles.length} provider titles for ${type} ${tmdbId}`);
     } catch (error) {
-      this.logger.error(`Error building TV show streams for ID ${tmdbId}: ${error.message}`);
+      this.logger.error(`Error building media streams for ${type} ${tmdbId}: ${error.message}`);
+    }
+
+    return { media };
+  }
+
+  /**
+   * Enrich TV show episode metadata from TMDB cache and API
+   * Implements cache-checking optimization: checks cache first, only fetches missing/incomplete seasons
+   * @private
+   * @param {Map<string, Object>} mediaMap - Map of media items keyed by stream ID
+   * @param {number} tmdbId - TMDB TV show ID
+   * @returns {Promise<void>}
+   */
+  async _enrichTVShowMetadata(mediaMap, tmdbId) {
+    try {
+      // Step 1: Collect required episodes and seasons from providers
+      const requiredEpisodes = new Map(); // Map<seasonNum, Set<episodeNum>>
+      const seasonsToProcess = new Set();
+      
+      for (const streamId of mediaMap.keys()) {
+        if (streamId !== 'main') {
+          const match = streamId.match(/^S(\d+)-E(\d+)$/);
+          if (match) {
+            const seasonNum = parseInt(match[1], 10);
+            const episodeNum = parseInt(match[2], 10);
+            seasonsToProcess.add(seasonNum);
+            
+            if (!requiredEpisodes.has(seasonNum)) {
+              requiredEpisodes.set(seasonNum, new Set());
+            }
+            requiredEpisodes.get(seasonNum).add(episodeNum);
+          }
+        }
+      }
+
+      // Step 1.5: Validate seasons against TMDB's available seasons
+      // Fetch TV show details to get the list of available seasons
+      let availableSeasons = new Set();
+      try {
+        const tvShowDetails = await this.getTVShowDetails(tmdbId);
+        if (tvShowDetails && Array.isArray(tvShowDetails.seasons)) {
+          // Extract season numbers from TMDB's seasons array
+          availableSeasons = new Set(
+            tvShowDetails.seasons
+              .map(season => season.season_number)
+              .filter(seasonNum => seasonNum !== null && seasonNum !== undefined)
+          );
+          
+          // Filter seasonsToProcess to only include seasons that exist in TMDB
+          const invalidSeasons = [];
+          for (const seasonNum of seasonsToProcess) {
+            if (!availableSeasons.has(seasonNum)) {
+              invalidSeasons.push(seasonNum);
+              this.logger.debug(`Season ${seasonNum} not available in TMDB for TV show ${tmdbId}, skipping`);
+            }
+          }
+          
+          // Remove invalid seasons from seasonsToProcess and requiredEpisodes
+          for (const invalidSeason of invalidSeasons) {
+            seasonsToProcess.delete(invalidSeason);
+            requiredEpisodes.delete(invalidSeason);
+          }
+          
+          if (invalidSeasons.length > 0) {
+            this.logger.debug(`Filtered out ${invalidSeasons.length} invalid season(s) [${invalidSeasons.join(', ')}] for TV show ${tmdbId} (TMDB has ${availableSeasons.size} seasons)`);
+          }
+        }
+      } catch (error) {
+        // If fetching TV show details fails, log warning but continue with all seasons
+        // This provides fallback behavior in case of API issues
+        this.logger.warn(`Failed to fetch TV show details for ${tmdbId} to validate seasons: ${error.message}. Proceeding with all requested seasons.`);
+      }
+
+      // Step 2: Try to get seasons from cache first, check if they have all needed episodes
+      const seasonsData = [];
+      const seasonsToFetch = [];
+      
+      for (const seasonNum of seasonsToProcess) {
+        // Try to get from cache first (read-only, doesn't trigger fetch)
+        const cachedSeason = this.tmdbProvider._getCache('tmdb', 'tv', 'tmdb-season', {
+          tmdbId,
+          seasonNumber: seasonNum
+        });
+        
+        if (cachedSeason && cachedSeason.episodes) {
+          // Check if cached season has all required episodes
+          const requiredEps = requiredEpisodes.get(seasonNum);
+          const cachedEpisodes = new Set(
+            cachedSeason.episodes.map(ep => ep.episode_number)
+          );
+          
+          const hasAllEpisodes = Array.from(requiredEps).every(epNum => 
+            cachedEpisodes.has(epNum)
+          );
+          
+          if (hasAllEpisodes) {
+            // Cache has all episodes we need, use it
+            this.logger.debug(`Using cached season ${seasonNum} for TV show ${tmdbId}`);
+            seasonsData.push(cachedSeason);
+          } else {
+            // Cache exists but missing some episodes, need to fetch
+            this.logger.debug(`Cached season ${seasonNum} missing episodes, will fetch from API`);
+            seasonsToFetch.push(seasonNum);
+          }
+        } else {
+          // No cache or expired, need to fetch
+          this.logger.debug(`No cache for season ${seasonNum}, will fetch from API`);
+          seasonsToFetch.push(seasonNum);
+        }
+      }
+
+      // Step 3: Fetch only seasons that are missing or incomplete
+      if (seasonsToFetch.length > 0) {
+        // Use Promise.allSettled to handle individual season fetch failures gracefully
+        // This prevents one failing season from breaking the entire operation
+        const seasonPromises = seasonsToFetch.map(async (seasonNum) => {
+          try {
+            return await this.getTVShowSeasonDetails(tmdbId, seasonNum);
+          } catch (error) {
+            // Log error but don't throw - we'll skip this season
+            this.logger.warn(`Failed to fetch season ${seasonNum} for TV show ${tmdbId}: ${error.message}`);
+            return null; // Return null to indicate failure
+          }
+        });
+        
+        const seasonResults = await Promise.all(seasonPromises);
+        // Filter out null results (failed fetches) and add successful ones
+        const fetchedSeasons = seasonResults.filter(season => season !== null);
+        seasonsData.push(...fetchedSeasons);
+      }
+
+      // Step 4: Populate episode metadata from all seasons (cached + fetched)
+      for (const seasonData of seasonsData) {
+        if (seasonData && seasonData.episodes) {
+          for (const episode of seasonData.episodes) {
+            const seasonStr = String(episode.season_number).padStart(2, '0');
+            const episodeStr = String(episode.episode_number).padStart(2, '0');
+            const streamKey = `S${seasonStr}-E${episodeStr}`;
+            
+            const mediaItem = mediaMap.get(streamKey);
+            if (mediaItem) {
+              mediaItem.name = episode.name || '';
+              mediaItem.air_date = episode.air_date || null;
+              mediaItem.overview = episode.overview || null;
+              mediaItem.still_path = episode.still_path || null;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Error fetching episode metadata for TV show ${tmdbId}: ${error.message}`);
     }
   }
 

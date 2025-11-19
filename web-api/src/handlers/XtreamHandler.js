@@ -68,10 +68,12 @@ export class XtreamHandler extends BaseIPTVHandler {
     }
     
     // Skip if not modified since last update
+    // Xtream metadata response contains last_modified field per item (Unix timestamp in seconds as string)
     if (existingTitle.lastUpdated) {
-      const showModified = title.info?.modified || title.modified;
+      const showModified = title.last_modified;
       if (showModified) {
-        const showModifiedTime = new Date(showModified).getTime();
+        // Convert Unix timestamp string (seconds) to milliseconds
+        const showModifiedTime = parseInt(showModified, 10) * 1000;
         const existingUpdatedTime = new Date(existingTitle.lastUpdated).getTime();
         if (showModifiedTime <= existingUpdatedTime) {
           return true; // Skip if not modified
@@ -133,12 +135,7 @@ export class XtreamHandler extends BaseIPTVHandler {
    */
   _parseExtendedInfoTVShows(title, extResponse) {
     const config = this._typeConfig.tvshows;
-    const seasonsData = extResponse.seasons;
-
-    if(!seasonsData) {
-      throw new Error('No seasons data found in extended info response');
-    }
-
+    
     const extInfo = extResponse.info;
 
     if(!extInfo) {
@@ -189,7 +186,8 @@ export class XtreamHandler extends BaseIPTVHandler {
       });
     }
 
-    // Extract and store metadata fields directly on title object (only release_date for TV shows)
+    title.tmdb_id = null;
+    title.name = extInfo.name;
     title.release_date = extInfo.releaseDate;
   }
 
@@ -242,8 +240,10 @@ export class XtreamHandler extends BaseIPTVHandler {
     }
 
     // Fetch metadata from providersManager (rate limiting handled by provider)
+    const metadataStartTime = Date.now();
     this.logger.debug(`Fetching metadata from providersManager: ${this.providerId}/${type}`);
     const response = await this.providersManager.fetchMetadata(this.providerId, type);
+    const metadataDuration = Date.now() - metadataStartTime;
     
     // Extract array from response (Xtream API may return object with dataKey or array directly)
     let titles = [];
@@ -255,7 +255,7 @@ export class XtreamHandler extends BaseIPTVHandler {
       throw new Error(`Unexpected response format from providersManager for ${type}: expected array or object with ${config.dataKey}`);
     }
     
-    this.logger.info(`${type}: Loaded ${titles.length} titles`);
+    this.logger.info(`${type}: Loaded ${titles.length} titles in ${metadataDuration}ms`);
 
     return titles;
   }
@@ -285,11 +285,14 @@ export class XtreamHandler extends BaseIPTVHandler {
       titleData.type = type;
     } else {
       try {
+        const fetchStartTime = Date.now();
         this.logger.debug(`${type}: Fetching extended info for title ${titleId}`);
 
         // Fetch extended info from providersManager (rate limiting handled by provider)
         this.logger.debug(`Fetching extended info from providersManager: ${this.providerId}/${type}/${titleId}`);
         const fullResponseData = await this.providersManager.fetchExtendedInfo(this.providerId, type, titleId);
+        const fetchDuration = Date.now() - fetchStartTime;
+        this.logger.debug(`${type}: Extended info fetched for title ${titleId} - ${fetchDuration}ms`);
 
         if (config.parseExtendedInfo) {
           config.parseExtendedInfo(titleData, fullResponseData);
@@ -342,6 +345,7 @@ export class XtreamHandler extends BaseIPTVHandler {
     }
 
     return {
+      provider_id: this.providerId,
       title_id: title[config.idField] || null,
       title: title.name,
       tmdb_id: title.tmdb_id || null,
