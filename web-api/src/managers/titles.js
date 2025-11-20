@@ -356,8 +356,6 @@ class TitlesManager extends BaseManager {
       
       findOptions.skip = (page - 1) * perPage;
       findOptions.limit = perPage;
-
-      this.logger.info(`Mongo query: ${JSON.stringify(mongoQuery)}`);
       
       const titlesData = await this._titleRepo.findMany(mongoQuery, findOptions);
 
