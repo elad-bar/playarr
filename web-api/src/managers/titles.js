@@ -250,8 +250,16 @@ class TitlesManager extends BaseManager {
    * @param {Object} filters - Filter options
    * @returns {Object} MongoDB query object
    */
-  _buildTitlesQuery({ mediaType, searchQuery, yearConfig, startsWith }) {
+  _buildTitlesQuery({ mediaType, searchQuery, yearConfig, startsWith, inWatchlist, watchlistTitleKeys }) {
     const query = {};
+
+    if (inWatchlist !== null) {
+      if (inWatchlist === 'true') {
+        query.title_key = { $in: watchlistTitleKeys };
+      } else {
+        query.title_key = { $nin: watchlistTitleKeys };
+      }
+    }
 
     // Media type filter
     if (mediaType) {
@@ -316,7 +324,7 @@ class TitlesManager extends BaseManager {
     perPage = 50,
     searchQuery = '',
     yearFilter = '',
-    watchlist = null,
+    inWatchlist = null,
     mediaType = null,
     startsWith = '',
   }) {
@@ -331,23 +339,17 @@ class TitlesManager extends BaseManager {
 
       // Parse year filter
       const yearConfig = this._parseYearFilter(yearFilter);
+      let watchlistTitleKeys = [];
+      
+      if (inWatchlist !== null) {
+        const userData = await this._userManager.getUserByUsername(user.username);
+        watchlistTitleKeys = userData.watchlist || [];
 
-      // Get user watchlist if needed
-      let userWatchlist = new Set();
-      if (user || watchlist !== null) {
-        if (user) {
-          const userData = await this._userManager.getUserByUsername(user.username);
-          if (userData && userData.watchlist) {
-            userWatchlist = new Set(userData.watchlist);
-          }
-        }
+        this.logger.info(`Watchlist title keys: ${watchlistTitleKeys}`);
       }
 
-      // Get enabled providers once
-      const enabledProviders = await this._getEnabledProviders();
-
       // Build MongoDB query
-      const mongoQuery = this._buildTitlesQuery({ mediaType, searchQuery, yearConfig, startsWith });
+      const mongoQuery = this._buildTitlesQuery({ mediaType, searchQuery, yearConfig, startsWith, inWatchlist, watchlistTitleKeys });
 
       // Get total count for pagination (before watchlist filter, as watchlist is applied in memory)
       let totalCount = await this._titleRepo.count(mongoQuery);
@@ -357,33 +359,18 @@ class TitlesManager extends BaseManager {
         sort: { title: 1 }
       };
       
-      // If watchlist filter is active, we need to load all matching titles to filter in memory
-      // Otherwise, we can paginate at MongoDB level for better performance
-      if (watchlist === null) {
-        // No watchlist filter - use MongoDB pagination
-        findOptions.skip = (page - 1) * perPage;
-        findOptions.limit = perPage;
-      }
-      // If watchlist filter is active, load all matching titles (no limit) to filter in memory
+      findOptions.skip = (page - 1) * perPage;
+      findOptions.limit = perPage;
 
+      this.logger.info(`Mongo query: ${JSON.stringify(mongoQuery)}`);
+      
       const titlesData = await this._titleRepo.findMany(mongoQuery, findOptions);
-
-      // Filter by watchlist if needed
-      let filteredTitles = titlesData;
-      if (watchlist !== null) {
-        filteredTitles = titlesData.filter(title => {
-          const titleKey = title.title_key || `${title.type}-${title.title_id}`;
-          const isInWatchlist = userWatchlist.has(titleKey);
-          return watchlist === isInWatchlist;
-        });
-        totalCount = filteredTitles.length;
-      }
 
       // Process titles and build response
       const items = [];
-      const startIdx = watchlist === null ? 0 : (page - 1) * perPage;
-      const endIdx = watchlist === null ? filteredTitles.length : startIdx + perPage;
-      const titlesToProcess = filteredTitles.slice(startIdx, endIdx);
+      const startIdx = inWatchlist === null ? 0 : (page - 1) * perPage;
+      const endIdx = inWatchlist === null ? titlesData.length : startIdx + perPage;
+      const titlesToProcess = titlesData.slice(startIdx, endIdx);
 
       for (const titleData of titlesToProcess) {
         const titleKey = titleData.title_key || `${titleData.type}-${titleData.title_id}`;
@@ -416,7 +403,7 @@ class TitlesManager extends BaseManager {
           image: this._getPosterPath(posterPath),
           release_date: releaseDate,
           streams_count: streamsCount,
-          watchlist: userWatchlist.has(titleKey),
+          watchlist: watchlistTitleKeys.includes(titleKey),
           vote_average: parseFloat(titleData.vote_average || 0),
           vote_count: parseInt(titleData.vote_count || 0, 10),
         };

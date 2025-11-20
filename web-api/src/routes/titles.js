@@ -33,13 +33,15 @@ class TitlesRouter extends BaseRouter {
           starts_with = '',
         } = req.query;
 
+        this.logger.info(`Watchlist: ${watchlist}`);
+
         const result = await this._titlesManager.getTitles({
           user: req.user,
           page: parseInt(page, 10),
           perPage: parseInt(per_page, 10),
           searchQuery: search,
           yearFilter: year,
-          watchlist: watchlist === 'true' ? true : watchlist === 'false' ? false : null,
+          inWatchlist: watchlist,
           mediaType: media_type,
           startsWith: starts_with,
         });
