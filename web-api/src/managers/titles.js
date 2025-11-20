@@ -266,15 +266,36 @@ class TitlesManager extends BaseManager {
       query.type = mediaType;
     }
 
+    // Build title filters (searchQuery and startsWith can be combined)
+    const titleFilters = [];
+    
     // Search query filter (case-insensitive regex)
     if (searchQuery) {
-      query.title = { $regex: searchQuery, $options: 'i' };
+      titleFilters.push({ title: { $regex: searchQuery, $options: 'i' } });
+    }
+
+    // Starts with filter
+    if (startsWith) {
+      if (startsWith === 'special') {
+        // Special characters: not starting with A-Z or 0-9
+        titleFilters.push({ title: { $not: { $regex: '^[A-Z0-9]', $options: 'i' } } });
+      } else {
+        // Specific letter
+        titleFilters.push({ title: { $regex: `^${startsWith}`, $options: 'i' } });
+      }
+    }
+
+    // Combine title filters using $and if multiple, otherwise set directly
+    if (titleFilters.length === 1) {
+      Object.assign(query, titleFilters[0]);
+    } else if (titleFilters.length > 1) {
+      query.$and = titleFilters;
     }
 
     // Year filter
     if (yearConfig) {
       const { type, years } = yearConfig;
-      if (type === 'range') {
+      if (type === 'range' && years.length >= 2) {
         // Range: match years between start and end
         const startYear = `${years[0]}-01-01`;
         const endYear = `${years[1]}-12-31`;
@@ -282,31 +303,23 @@ class TitlesManager extends BaseManager {
           $gte: startYear,
           $lte: endYear
         };
-      } else if (type === 'list') {
-        // List: match any of the years
-        const yearRegex = years.map(y => `^${y}-`).join('|');
-        query.release_date = { $regex: yearRegex };
-      } else if (type === 'single') {
-        // Single year
-        const yearRegex = `^${years[0]}-`;
-        query.release_date = { $regex: yearRegex };
-      }
-    }
 
-    // Starts with filter
-    if (startsWith) {
-      if (startsWith === 'special') {
-        // Special characters: not starting with A-Z or 0-9
-        query.title = {
-          ...(query.title || {}),
-          $not: { $regex: '^[A-Z0-9]', $options: 'i' }
-        };
-      } else {
-        // Specific letter
-        query.title = {
-          ...(query.title || {}),
-          $regex: `^${startsWith}`,
-          $options: 'i'
+      } else if (type === 'list' && years.length > 0) {
+        // List: match any of the years using $or with range queries
+        query.$or = years.map(year => ({
+          release_date: {
+            $gte: `${year}-01-01`,
+            $lte: `${year}-12-31`
+          }
+        }));
+
+      } else if (type === 'single' && years.length > 0) {
+        // Single year
+        const startYear = `${years[0]}-01-01`;
+        const endYear = `${years[0]}-12-31`;
+        query.release_date = {
+          $gte: startYear,
+          $lte: endYear
         };
       }
     }
