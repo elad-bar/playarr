@@ -3,25 +3,24 @@
     {
       "name": "syncIPTVProviderTitles",
       "jobHistoryName": "SyncIPTVProviderTitlesJob",
-      "interval": "1h",
-      "timeout": "1s",
+      "interval": "6h",
+      "delay": "1m",
       "description": "Fetch metadata from IPTV providers and match TMDB IDs",
-      "schedule": "Every 1 hour",
+      "schedule": "1 minute after startup and Every 6 hours",
       "postExecute": ["providerTitlesMonitor"]
     },
     {
       "name": "providerTitlesMonitor",
       "jobHistoryName": "ProviderTitlesMonitorJob",
       "description": "Monitor provider titles for changes and process main titles (triggered by syncIPTVProviderTitles)",
-      "schedule": "Triggered by syncIPTVProviderTitles completion"
+      "schedule": "Manually triggered"
     },
     {
       "name": "syncLiveTV",
       "jobHistoryName": "SyncLiveTVJob",
-      "interval": "6h",
-      "timeout": "6h",
+      "interval": "12h",
       "description": "Sync Live TV channels and EPG from user-configured M3U and EPG URLs",
-      "schedule": "Every 6 hours"
+      "schedule": "On startup and Every 12 hours"
     }
   ]
 }

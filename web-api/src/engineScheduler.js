@@ -23,11 +23,12 @@ export class EngineScheduler {
     this._jobsManager = null;
     this._intervalIds = new Map(); // Map of jobName -> intervalId
     this._runningJobs = new Map();
+    this._scheduledJobs = []; // Store scheduled jobs for later starting
     this.logger = createLogger('EngineScheduler');
   }
 
   /**
-   * Initialize and start the scheduler
+   * Initialize the scheduler (setup only, does not start jobs)
    * @returns {Promise<void>}
    */
   async initialize() {
@@ -47,12 +48,36 @@ export class EngineScheduler {
     const scheduledJobs = jobsConfig.jobs.filter(job => job.interval);
     this._jobsManager = new JobsManager(jobsConfig, this._jobHistoryRepo);
 
+    // Store scheduled jobs configuration for later starting
+    this._scheduledJobs = scheduledJobs.map(job => ({
+      name: job.name,
+      interval: job.interval,
+      delay: job.delay || '0',
+      intervalMs: this._parseTime(job.interval),
+      delayMs: this._parseTime(job.delay || '0')
+    }));
+
+    if (scheduledJobs.length > 0) {
+      this.logger.info(`Scheduler initialized with ${scheduledJobs.length} job(s) (not started yet)`);
+    }
+
+    this.logger.info('EngineScheduler initialized');
+  }
+
+  /**
+   * Start the scheduler and begin executing jobs
+   * @returns {Promise<void>}
+   */
+  async start() {
+    if (this._scheduledJobs.length === 0) {
+      this.logger.info('No scheduled jobs to start');
+      return;
+    }
+
+    this.logger.info('Starting job scheduler...');
+
     // Set up individual intervals for each scheduled job
-    // Run jobs immediately, then set up interval for subsequent runs
-    scheduledJobs.forEach(job => {
-      const intervalMs = this._parseTime(job.interval);
-      const timeout = this._parseTime(job.timeout || '0');
-      
+    this._scheduledJobs.forEach(job => {
       // Function to run the job
       const runJobAsync = async () => {
         try {
@@ -63,18 +88,18 @@ export class EngineScheduler {
       };
       
       // Set up interval for recurring execution
-      const intervalId = setInterval(runJobAsync, intervalMs);
+      const intervalId = setInterval(runJobAsync, job.intervalMs);
       this._intervalIds.set(job.name, intervalId);
       this.logger.debug(`Scheduled job '${job.name}' to run every ${job.interval}`);
       
-      // Run job immediately on startup (with optional timeout delay)
+      // Run job on startup (with optional delay)
       // This ensures jobs run right away instead of waiting for the first interval
       (async () => {
-        if (timeout > 0) {
-          await new Promise(resolve => setTimeout(resolve, timeout));
+        if (job.delayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, job.delayMs));
         }
         try {
-          this.logger.info(`Running job '${job.name}' on startup${timeout > 0 ? ` (after ${job.timeout} delay)` : ''}`);
+          this.logger.info(`Running job '${job.name}' on startup${job.delayMs > 0 ? ` (after ${job.delay} delay)` : ''}`);
           await runJobAsync();
         } catch (error) {
           this.logger.error(`Error running job '${job.name}' on startup: ${error.message}`);
@@ -82,11 +107,7 @@ export class EngineScheduler {
       })();
     });
 
-    if (scheduledJobs.length > 0) {
-      this.logger.info(`Scheduler started with ${scheduledJobs.length} job(s) at their configured intervals`);
-    }
-
-    this.logger.info('EngineScheduler initialized');
+    this.logger.info(`Scheduler started with ${this._scheduledJobs.length} job(s) at their configured intervals`);
   }
 
   /**

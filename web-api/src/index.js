@@ -500,6 +500,9 @@ async function initialize() {
       logger.info(`Server running on port ${PORT}`);
       logger.info(`API available at http://localhost:${PORT}/api`);
       logger.info(`Socket.IO available at ws://localhost:${PORT}/socket.io`);
+      
+      // Start job scheduler after server is ready
+      await jobScheduler.start();
     });
   } catch (error) {
     logger.error('Failed to initialize application:', error);
