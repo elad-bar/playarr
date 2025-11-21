@@ -37,6 +37,58 @@ function getBaseUrl(req) {
 }
 
 /**
+ * Convert various timestamp representations to Unix seconds
+ * @param {number|string|Date|null|undefined} value - Incoming timestamp representation
+ * @param {number|null} [fallbackSeconds] - Fallback Unix seconds if value is invalid
+ * @returns {number} Unix timestamp in seconds
+ */
+function toUnixSeconds(value, fallbackSeconds = null) {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (value === undefined || value === null || value === '') {
+    return fallbackSeconds !== null ? fallbackSeconds : nowSeconds;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Assume milliseconds when it's too large
+    return value > 1e12 ? Math.floor(value / 1000) : Math.floor(value);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') {
+      return fallbackSeconds !== null ? fallbackSeconds : nowSeconds;
+    }
+    const numeric = Number(trimmed);
+    if (!Number.isNaN(numeric)) {
+      return trimmed.length >= 13 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+    }
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return fallbackSeconds !== null ? fallbackSeconds : nowSeconds;
+  }
+  return Math.floor(date.getTime() / 1000);
+}
+
+/**
+ * Format Unix timestamp into Xtream-compatible human-readable time
+ * @param {number} timestampSeconds - Unix timestamp seconds
+ * @returns {string} Formatted time string (YYYY-MM-DD HH:mm:ss)
+ */
+function formatServerTime(timestampSeconds) {
+  const date = new Date(timestampSeconds * 1000);
+  const pad = (num) => String(num).padStart(2, '0');
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+/**
  * Build server_info object for Xtream Codes API compliance
  * @param {Object} req - Express request object
  * @returns {Object} server_info object with url, port, https_port, server_protocol, timezone, timestamp_now
@@ -49,14 +101,20 @@ function buildServerInfo(req) {
   const port = urlObj.port ? parseInt(urlObj.port, 10) : (scheme === 'https' ? 443 : 80);
   const httpsPort = scheme === 'https' ? port : 443;
   const httpPort = scheme === 'http' ? port : 80;
+  const timezone = process.env.SERVER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const timestampNow = Math.floor(Date.now() / 1000);
+  const timeNow = formatServerTime(timestampNow);
   
   return {
     url: hostname,
-    port: httpPort,
-    https_port: httpsPort,
+    port: httpPort.toString(),
+    https_port: httpsPort.toString(),
     server_protocol: scheme,
-    timezone: 'UTC',
-    timestamp_now: Math.floor(Date.now() / 1000)
+    rtmp_port: '0',
+    timezone,
+    timestamp_now: timestampNow.toString(),
+    time_now: timeNow,
+    server_time_now: timeNow
   };
 }
 
@@ -137,18 +195,25 @@ class XtreamRouter extends BaseRouter {
         }
 
         // Default: return user info if no action or unknown action
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const createdAtSeconds = toUnixSeconds(req.user?.created_at || req.user?.createdAt, nowSeconds);
+        const expDateSeconds =
+          req.user?.expires_at || req.user?.exp_date
+            ? toUnixSeconds(req.user.expires_at || req.user.exp_date, 0)
+            : 0;
+
         return res.status(200).json({
           user_info: {
             username: username,
             password: password,
             message: 'Active',
-            auth: 1,
+            auth: '1',
             status: 'Active',
-            exp_date: 'Unlimited',
-            is_trial: 0,
-            active_cons: 0,
-            created_at: req.user.createdAt || null,
-            max_connections: 1,
+            exp_date: expDateSeconds.toString(),
+            is_trial: (req.user?.is_trial ? '1' : '0'),
+            active_cons: (req.user?.active_cons ?? 0).toString(),
+            created_at: createdAtSeconds.toString(),
+            max_connections: (req.user?.max_connections ?? 1).toString(),
             allowed_output_formats: ['m3u8', 'ts']
           },
           server_info: buildServerInfo(req)
