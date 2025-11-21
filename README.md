@@ -1,427 +1,214 @@
 # Playarr - IPTV Playlist Manager
 
-IPTV Playlist Manager ecosystem for fetching and managing IPTV content. Includes the data fetching engine, web API, and web UI components.
+**Playarr** is a powerful IPTV Playlist Manager that helps you aggregate, organize, and access content from multiple IPTV providers in one unified platform. Think of it as your personal media library manager for IPTV content.
 
-## About the Engine
+## What Does Playarr Do?
 
-The Playarr Engine is a robust data fetching and processing system designed to aggregate, enrich, and normalize IPTV content metadata from multiple providers. It serves as the foundation for building a comprehensive IPTV content management platform.
+Playarr solves the problem of managing content from multiple IPTV providers by:
 
-### Business Capabilities
+### 🎬 **Unified Content Library**
+- **Aggregates Content**: Combines movies and TV shows from multiple IPTV providers (AGTV and Xtream Codec) into one searchable library
+- **Smart Deduplication**: Intelligently handles overlapping content from different providers using priority-based processing
+- **Organized Categories**: Automatically organizes content by type (movies vs. TV shows) and provider-specific categories
 
-The engine provides the following core business capabilities:
+### 🎨 **Rich Metadata**
+- **TMDB Integration**: Enriches your content with high-quality metadata from The Movie Database (TMDB), including:
+  - Movie posters and backdrops
+  - Descriptions and plot summaries
+  - Cast and crew information
+  - Ratings and release dates
+- **Intelligent Matching**: Automatically matches provider titles with TMDB entries using IMDB IDs and fuzzy title matching
+- **Normalized Data**: Standardizes metadata across different providers into a consistent format
 
-#### 1. **Multi-Provider Content Aggregation**
-- **Connect to Multiple IPTV Providers**: Supports multiple provider types simultaneously (AGTV and Xtream Codec)
-- **Priority-Based Processing**: Process providers in priority order to handle overlapping content intelligently
-- **Provider Management**: Enable or disable providers dynamically without code changes
-- **Configuration-Driven**: Simple JSON-based provider configuration for easy setup and maintenance
+### 🔄 **Automated Updates**
+- **Scheduled Sync**: Automatically fetches new content from your providers:
+  - Provider content sync: Every 1 hour
+  - Content aggregation: Every 5 minutes
+- **Update Detection**: Automatically detects and processes updates for TV shows
+- **Smart Caching**: Efficient caching system minimizes API calls and improves performance
 
-#### 2. **Content Discovery & Categorization**
-- **Category Fetching**: Automatically discovers and fetches available categories for movies and TV shows from each provider
-- **Category Organization**: Organizes content by media type (movies vs. TV shows) and provider-specific categories
-- **Structured Data Storage**: Stores categorized content in organized, queryable formats
+### 🌐 **Web Interface**
+- **Easy Management**: User-friendly web interface for managing your IPTV setup
+- **Content Browsing**: Browse and search through all your aggregated content
+- **Provider Management**: Add, edit, enable/disable, and prioritize IPTV providers
+- **Settings Configuration**: Configure TMDB API keys, rate limits, and other settings
+- **User Management**: Create and manage user accounts with different permission levels
+- **System Monitoring**: Monitor system health and job status
 
-#### 3. **Metadata Enrichment & Normalization**
-- **TMDB Integration**: Enriches content with high-quality metadata from The Movie Database (TMDB)
-- **TMDB ID Matching**: Intelligently matches provider titles with TMDB entries using multiple strategies:
-  - Direct IMDB ID matching (for AGTV providers)
-  - Title-based search with fuzzy matching
-- **Metadata Normalization**: Standardizes metadata across different providers into a unified format
-- **Main Title Generation**: Creates aggregated "main titles" that combine data from multiple providers, enriched with TMDB metadata
+### 📺 **Multiple Client Support**
+Playarr supports a wide variety of media clients through different protocols:
 
-#### 4. **Content Processing & Quality Control**
-- **Title Cleanup**: Applies provider-specific regex patterns to clean up title names (removes language tags, quality indicators, etc.)
-- **Content Filtering**: Supports ignore patterns to exclude unwanted or low-quality content
-- **Update Detection**: Automatically detects and processes updates for TV shows (Xtream providers)
-- **Progress Tracking**: Real-time progress monitoring with automatic saving of processed titles
+- **Stremio Addon**: Use Playarr as a Stremio addon to access all your movies and TV shows directly in Stremio
+  - Live TV channels are also available if configured
+  - Seamless streaming with automatic source selection
 
-#### 5. **Performance & Reliability**
-- **Intelligent Caching**: Multi-layer caching system to minimize API calls and improve performance
-  - Raw API response caching
-  - Processed data caching
-  - Automatic cache purging to manage disk space
-- **Rate Limiting**: Configurable rate limiting per provider to respect API constraints
-- **Concurrent Processing**: Efficient parallel processing of movies and TV shows
-- **Error Handling**: Robust error handling with detailed logging and recovery mechanisms
+- **M3U8 Playlist Support**: Generate M3U8 playlists for movies and TV shows
+  - Compatible with any M3U8-based IPTV player
+  - Includes rich metadata (posters, genres, descriptions)
+  - Supports watchlist-based filtering
 
-#### 6. **Data Management**
-- **Structured Storage**: Organizes data into logical directories:
-  - Provider-specific titles and categories
-  - Main aggregated titles
-  - Ignored titles tracking
-- **Data Persistence**: Persistent storage of all processed data for offline access
-- **Incremental Updates**: Only processes new or updated content to minimize processing time
+- **Xtream Code API**: Full Xtream Code API compatibility
+  - Works with any Xtream Code API compatible client
+  - Supports VOD (movies), series, and Live TV
+  - Standard Xtream Code API endpoints and authentication
 
-#### 7. **Operational Excellence**
-- **Automated Job Scheduling**: Uses Bree.js for reliable job scheduling with configurable intervals:
-  - Provider title processing: Every 1 hour
-  - Main title aggregation: Every 30 minutes (first run 5 minutes after startup)
-  - Cache purging: Every 15 minutes
-- **Comprehensive Logging**: Detailed logging with configurable log levels (debug, info, error)
-- **Progress Monitoring**: Real-time progress updates for long-running operations
-- **Health Monitoring**: Health check support for containerized deployments
-- **Extensible Architecture**: Plugin-based provider system for easy extension to new provider types
+- **Strmarr Integration**: Integration with Strmarr for Emby, Jellyfin, and Kodi
+  - Generates STRM files that point to your Playarr streams
+  - Allows Emby, Jellyfin, and Kodi to display your watchlist as local media
+  - Automatic synchronization with your Playarr watchlist
 
-### Use Cases
+### 🎯 **Key Features**
 
-The engine is designed for:
-- **IPTV Service Providers**: Aggregating content from multiple sources
-- **Content Managers**: Building unified content catalogs from diverse IPTV providers
-- **Media Applications**: Providing enriched metadata for media browsing and search applications
-- **Content Discovery Platforms**: Creating searchable, categorized content databases
-
-### Current Provider Support
-
+#### Multi-Provider Support
 - **AGTV (Apollo Group TV)**: M3U8 format provider support
 - **Xtream Codec**: Full Xtream API support with extended metadata
+- **Priority System**: Set provider priorities to control which content takes precedence when duplicates exist
+- **Enable/Disable**: Easily enable or disable providers without deleting configurations
+
+#### Content Quality Control
+- **Title Cleanup**: Automatically cleans up title names (removes language tags, quality indicators, etc.)
+- **Content Filtering**: Filter out unwanted or low-quality content using ignore patterns
+- **Best Source Selection**: Automatically selects the best available stream source
+
+#### Performance & Reliability
+- **Intelligent Caching**: Multi-layer caching system for fast data retrieval
+- **Rate Limiting**: Configurable rate limiting per provider to respect API constraints
+- **Concurrent Processing**: Efficient parallel processing of movies and TV shows
+- **Error Handling**: Robust error handling with detailed logging
+
+#### Multi-User Watchlist Management
+- **Personal Watchlists**: Each user has their own watchlist/favorites
+- **Content Filtering**: All clients automatically show only content from your watchlist
+- **Easy Management**: Add or remove titles from your watchlist through the web interface
+- **Isolated Access**: Each user only sees and can access their own selected content
+
+For a complete feature list, see the [Features](docs/FEATURES.md) documentation.
+
+## Who is Playarr For?
+
+Playarr is perfect for:
+
+- **IPTV Service Providers**: Who want to aggregate content from multiple sources
+- **Content Managers**: Building unified content catalogs from diverse IPTV providers
+- **Media Enthusiasts**: Who want a better way to organize and access their IPTV content
+- **Stremio Users**: Who want to integrate their IPTV providers into Stremio
+- **Emby/Jellyfin/Kodi Users**: Who want to use Strmarr to integrate Playarr with their media server
+- **M3U8 Player Users**: Who want M3U8 playlist support for their IPTV players
+- **Xtream Code API Users**: Who want Xtream Code API compatibility for their existing clients
+
+## Supported Clients & Access Methods
+
+Playarr provides multiple ways to access your content, making it compatible with a wide range of media clients:
+
+### 🌐 **Web Interface**
+- Browse and search your entire content library
+- Manage providers, settings, and users
+- Monitor system health and job status
+- Access at `http://localhost:3000` (or your configured port)
+
+### 📺 **Stremio**
+- Native Stremio addon support
+- Access all movies, TV shows, and Live TV channels
+- Automatic metadata and poster integration
+- Get your addon URL from your profile page
+
+### 📋 **M3U8 Playlists**
+- Generate M3U8 playlists for movies and TV shows
+- Compatible with any M3U8-based IPTV player
+- Includes rich metadata (posters, genres, descriptions)
+- Automatically filtered by user watchlist
+
+### 🔌 **Xtream Code API**
+- Full Xtream Code API compatibility
+- Works with any Xtream Code API compatible client
+- Supports VOD (movies), series, and Live TV
+- Automatically filtered by user watchlist
+- Standard authentication
+
+### 🎬 **Strmarr (Emby, Jellyfin, Kodi)**
+- Integration with [Strmarr](https://github.com/elad-bar/strmarr) tool
+- Generates STRM files that point to your Playarr streams
+- Allows Emby, Jellyfin, and Kodi to display your watchlist as local media
+- Automatic synchronization with your Playarr watchlist
+- Setup instructions available in your profile page
+
+## How Does It Work?
+
+1. **Configure Providers**: Add your IPTV provider credentials (AGTV or Xtream Codec) through the web interface - see [User Flows](docs/USER_FLOWS.md) for detailed steps
+2. **Automatic Fetching**: Playarr automatically fetches and processes content from your providers
+3. **Metadata Enrichment**: Content is enriched with TMDB metadata for better organization
+4. **Unified Access**: Access all your content through any of the supported clients and methods above
+5. **Continuous Updates**: Playarr keeps your library up-to-date with scheduled background jobs
+
+For detailed step-by-step workflows, see the [User Flows](docs/USER_FLOWS.md) guide.
+
+## Getting Started
+
+1. **Install Playarr**: Set up Playarr using Docker or run it directly - see [Deployment Guide](docs/DEPLOYMENT.md) for detailed instructions
+2. **Access Web UI**: Open `http://localhost:3000` in your browser
+3. **Login**: Use the default admin credentials (configured via environment variables)
+4. **Add Providers**: Configure your IPTV providers in the Settings - see [User Flows](docs/USER_FLOWS.md) for step-by-step instructions
+5. **Wait for Sync**: Let Playarr fetch and process your content (first sync may take some time)
+6. **Enjoy**: Access your unified content library through:
+   - Web interface for browsing and management
+   - Stremio: Add the Stremio addon URL from your profile
+   - M3U8 Players: Access your personalized playlists
+   - Xtream Code API Clients: Connect using your credentials
+   - Emby/Jellyfin/Kodi: Set up Strmarr to generate STRM files (see your profile for instructions)
+
+## Technical Details
+
+- **Database**: MongoDB for efficient data storage and querying
+- **API**: RESTful API for programmatic access
+- **Web UI**: React-based modern web interface
+- **Containerized**: Full Docker support for easy deployment
+- **Extensible**: Plugin-based provider system for easy extension
 
-## Setup
+For detailed system architecture and design, see the [Architecture](docs/ARCHITECTURE.md) documentation.
 
-1. Install dependencies:
-```bash
-# Install all dependencies (API, UI)
-npm run install:all
+## Configuration
 
-# Or install individually
-npm run install:api
-npm run install:ui
-```
+All configuration is done through the web interface. Navigate to **Settings** in the web UI to configure your providers and system settings.
 
-2. Build the web UI (required for production):
-```bash
-npm run build:ui
-```
+### Adding IPTV Providers
 
-3. Configure environment variables (optional):
-```bash
-cp .env.example .env
-# Edit .env if you want to customize cache directory, ports, etc.
-```
+To add a new IPTV provider:
 
-4. Ensure provider configuration exists in `data/settings/iptv-providers.json`:
-   - See the [Configurations](#configurations) section below for details
+1. Go to **Settings → IPTV Providers**
+2. Click **"Add Provider"**
+3. Fill in the required information:
+   - **Provider ID**: A unique name to identify this provider
+   - **Provider Type**: Choose either "AGTV" or "Xtream Codec"
+   - **API URL**: The base URL for your provider's API
+   - **Username**: Your provider account username
+   - **Password**: Your provider account password
+   - **Priority**: Set a priority number (lower numbers = higher priority). This determines which provider's content takes precedence when the same content exists in multiple providers.
+   - **Enabled**: Toggle to enable or disable this provider
+4. Click **"Save"**
 
-5. Run the application:
-```bash
-# Run API (serves UI on port 3000)
-npm start
+The provider will start syncing content automatically. You can enable or disable providers at any time without deleting the configuration.
 
-# Or run individually
-npm run start:api     # Run API only (serves UI on port 3000)
+### General Settings
 
-# Run in development mode with watch
-npm run dev
-```
+To configure system-wide settings:
 
-## Docker
+1. Go to **Settings → General**
+2. Configure the following:
+   - **TMDB API Token**: (Optional but recommended) Enter your TMDB API token to enable rich metadata enrichment (posters, descriptions, cast info, etc.). Get your free token from [TMDB](https://www.themoviedb.org/settings/api).
+   - **Rate Limiting**: Configure API rate limits to control how many requests are made per second (advanced settings)
 
-The project includes Docker support for easy deployment and containerization.
+These settings apply globally to all providers and affect how Playarr processes and enriches your content.
 
-### Building the Docker Image
+## Documentation
 
-```bash
-# Build the image
-docker build -t playarr .
+For more detailed information, see the following documentation:
 
-# Or using docker-compose
-docker-compose build
-```
+- **[Architecture](docs/ARCHITECTURE.md)** - System architecture and design
+- **[Features](docs/FEATURES.md)** - Complete feature list
+- **[Deployment](docs/DEPLOYMENT.md)** - Setup and deployment guide
+- **[User Flows](docs/USER_FLOWS.md)** - Step-by-step user workflows
+- **[MongoDB Entities](docs/MONGODB_ENTITIES.md)** - MongoDB collections, schemas, and indexes
 
-### CI/CD
+---
 
-The project includes GitHub Actions workflow (`.github/workflows/docker-build.yml`) that automatically builds Docker images on:
-- Push to `main` or `master` branches
-- Pull requests to `main` or `master` branches
-- Tags matching `v*` pattern
-
-The workflow uses Docker Buildx for multi-platform builds and includes automated testing of the built image.
-
-### Running with Docker
-
-```bash
-# Run the container
-docker run -d \
-  --name playarr \
-  -p 3000:3000 \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/cache:/app/cache \
-  -v $(pwd)/logs:/app/logs \
-  -e DEFAULT_ADMIN_USERNAME=admin \
-  -e DEFAULT_ADMIN_PASSWORD=your-secure-password \
-  playarr
-
-# Or using docker-compose (recommended)
-docker-compose up -d
-
-# View logs
-docker-compose logs -f playarr
-
-# Stop the container
-docker-compose down
-```
-
-### Docker Compose Configuration
-
-The `docker-compose.yml` file includes:
-- Volume mounts for data, cache, and logs
-- Port mapping for API (port 3000)
-- Health checks
-- Automatic restart policy
-- Environment variable configuration
-
-**Note**: Data and cache directories are **not** included in the Docker image and **must** be mounted as volumes. The UI will be used to configure providers and settings.
-
-### Docker Image Details
-
-The Dockerfile uses:
-- **Multi-stage build**: Optimized for size and build speed
-  - Stage 1: Builds React UI
-  - Stage 2: Installs API dependencies
-  - Stage 3: Installs engine dependencies
-  - Stage 4: Runtime with all components
-- **Node.js 20 Alpine**: Lightweight base image
-- **dumb-init**: Proper signal handling for graceful shutdowns in containers
-- **Health check**: Verifies data and cache directories are accessible
-- **`.dockerignore`**: Excludes unnecessary files (data, cache, logs, node_modules, etc.) from the build context
-- **Single container**: Runs both engine and API together
-
-### Environment Variables
-
-You can customize the Docker container using environment variables:
-
-- `CACHE_DIR`: Cache directory path (default: `/app/cache`)
-- `LOGS_DIR`: Logs directory path (default: `/app/logs`)
-- `PORT`: API server port (default: `3000`)
-- `NODE_ENV`: Node environment (default: `production`)
-- `DEFAULT_ADMIN_USERNAME`: Default admin username (default: `admin`)
-- `DEFAULT_ADMIN_PASSWORD`: Default admin password (required - must be set)
-
-**Important**: Always set `DEFAULT_ADMIN_PASSWORD` when deploying to production!
-
-
-## Configurations
-
-Configuration data is stored in MongoDB collections. The engine and API share the same MongoDB database:
-
-### Provider Configurations
-
-Provider configurations are stored in the MongoDB `iptv_providers` collection. Each provider has an `id` field that serves as the unique identifier.
-
-#### Provider Configuration Structure
-
-Each provider JSON file should contain the following fields:
-
-```json
-[
-  {
-    "id": "provider-id",           // Unique identifier
-    "type": "agtv" | "xtream",     // Provider type
-    "enabled": true,                // Whether this provider is active (default: true)
-    "priority": 1,                  // Processing priority (lower = higher priority)
-    "api_url": "https://example.com", // Base API URL
-    "username": "your-username",   // Provider username
-    "password": "your-password",    // Provider password
-    "streams_urls": [              // Array of stream URLs (optional)
-      "https://example.com"
-    ],
-    "cleanup": {                    // Regex patterns for title cleanup (optional)
-      "pattern": "replacement"
-    },
-    "ignored_titles": {},          // Titles to ignore (optional)
-    "api_rate": {                  // Rate limiting configuration
-      "concurrect": 10,            // Number of concurrent requests (note: typo "concurrect" is supported)
-      "duration_seconds": 1        // Time window in seconds
-    }
-  }
-]
-```
-
-#### Provider Type: AGTV
-
-AGTV providers use M3U8 format for fetching content. Example configuration:
-
-```json
-{
-  "id": "provider-1",
-  "type": "agtv",
-  "enabled": true,
-  "priority": 2,
-  "api_url": "https://starlite.best",
-  "streams_urls": [
-    "https://starlite.best"
-  ],
-  "username": "your-username",
-  "password": "your-password",
-  "cleanup": {},
-  "ignored_titles": {},
-  "api_rate": {
-    "concurrect": 10,
-    "duration_seconds": 1
-  }
-}
-```
-
-#### Provider Type: Xtream
-
-Xtream Codec providers use the Xtream API. Example configuration:
-
-```json
-{
-  "id": "providerid",
-  "type": "xtream",
-  "enabled": true,
-  "priority": 1,
-  "api_url": "http://example.com",
-  "streams_urls": [
-    "http://example.com",
-    "http://backup.example.com"
-  ],
-  "username": "your-username",
-  "password": "your-password",
-  "cleanup": {
-    "[A-Z]{2}\\|\\s": "",
-    "\\s\\[[m|M][u|U][l|L][t|T]{0,1}[i|I][-|\\s][s|S][u|U][b|B]]": ""
-  },
-  "ignored_titles": {},
-  "api_rate": {
-    "concurrect": 4,
-    "duration_seconds": 1
-  }
-}
-```
-
-#### Configuration Fields Explained
-
-- **id**: Unique identifier for the provider. Used to reference the provider throughout the system.
-- **type**: Provider type - either `"agtv"` for Apollo Group TV or `"xtream"` for Xtream Codec.
-- **enabled**: Set to `false` to disable this provider without deleting the configuration file.
-- **priority**: Lower numbers are processed first. Useful when providers have overlapping content.
-- **api_url**: Base URL for the provider's API endpoint.
-- **username** / **password**: Authentication credentials for the provider.
-- **streams_urls**: Array of URLs where stream content is available. Used for building stream URLs.
-- **cleanup**: Object with regex patterns as keys and replacement strings as values. Applied to clean up title names (e.g., remove language tags, quality indicators).
-- **ignored_titles**: Object mapping title IDs to ignore reasons. Used to skip specific titles during processing.
-- **api_rate**: Rate limiting configuration:
-  - **concurrect**: Maximum number of concurrent requests (note: supports typo "concurrect" for backward compatibility).
-  - **duration_seconds**: Time window in seconds for the rate limit.
-
-### Settings Configuration
-
-Settings are stored in the MongoDB `settings` collection and contain global configuration:
-
-```json
-{
-  "tmdb_token": "your-tmdb-api-token",
-  "tmdb_api_rate": {
-    "concurrect": 45,
-    "duration_seconds": 1
-  }
-}
-```
-
-#### Settings Fields Explained
-
-- **tmdb_token**: TMDB (The Movie Database) API token for metadata enrichment. Get your token from [TMDB](https://www.themoviedb.org/settings/api).
-- **tmdb_api_rate**: Rate limiting for TMDB API calls:
-  - **concurrect**: Maximum concurrent requests to TMDB API.
-  - **duration_seconds**: Time window in seconds.
-
-### Configuration Storage
-
-All configuration data is stored in MongoDB collections:
-- **Provider configs**: `iptv_providers` collection (enabled providers with priority)
-- **Settings**: `settings` collection (TMDB token, API rate limits, etc.)
-- **Users**: `users` collection (API user accounts)
-
-The engine automatically loads all enabled providers from the `iptv_providers` collection and processes them in priority order.
-
-**Note**: The `data/` directory is only used by migration scripts to read legacy files. Runtime data is stored entirely in MongoDB.
-
-## Features
-
-- Fetches movies and TV shows from AGTV (M3U8) and Xtream Codec providers
-- Disk caching for efficient data retrieval with configurable expiration policies (TTL values defined in provider classes)
-- Automatic update detection for TV shows (Xtream)
-- All data stored in MongoDB for efficient querying and scalability
-- Supports provider-specific cleanup rules and ignore patterns
-- Respects provider priority and enabled status
-- Scheduled job processing with Bree.js:
-  - Provider title fetching: Every 1 hour
-  - Main title aggregation: Every 5 minutes
-
-## Web UI and API
-
-The Playarr ecosystem includes a web UI and REST API for managing IPTV providers, viewing content, and configuring settings.
-
-### Web UI
-
-The web UI is a React application that provides:
-- Provider management (add, edit, delete, prioritize)
-- Content browsing and search
-- Settings configuration
-- User management
-- System health monitoring
-
-The UI is built and served statically by the API server.
-
-### Web API
-
-The web API provides REST endpoints for:
-- Authentication and user management
-- Provider CRUD operations
-- Content browsing and search
-- Settings management
-- Health checks
-- Playlist generation
-- Stream URLs
-
-### Accessing the Web Interface
-
-Once running, access the web UI at:
-- **Local**: `http://localhost:3000`
-- **Docker**: `http://localhost:3000` (or your configured port)
-
-The default admin user credentials are set via environment variables:
-- Username: `DEFAULT_ADMIN_USERNAME` (default: `admin`)
-- Password: `DEFAULT_ADMIN_PASSWORD` (must be set)
-
-## Project Structure
-
-```
-playarr/
-├── data/                       # Legacy files (used only by migration scripts)
-│   ├── settings/              # Legacy configuration files (migration scripts only)
-│   │   ├── iptv-providers.json # Legacy provider configs
-│   │   ├── settings.json       # Legacy settings
-│   │   ├── cache-policy.json  # Legacy cache policies
-│   │   └── users.json         # Legacy user accounts
-│   ├── categories/            # Legacy categories (migration scripts only)
-│   ├── titles/                # Legacy titles (migration scripts only)
-│   └── stats.json             # Legacy stats (migration scripts only)
-├── cache/                     # Raw API response cache (file-based)
-├── logs/                      # Application logs
-│   └── api.log                # API logs
-├── web-api/
-│   ├── src/
-│   │   ├── config/            # Configuration (database, collections)
-│   │   ├── middleware/        # Auth middleware
-│   │   ├── routes/            # API routes
-│   │   ├── services/           # Business logic services
-│   │   └── utils/             # Utility functions
-│   ├── package.json           # API dependencies
-│   └── src/index.js           # API server entry point
-├── web-ui/
-│   ├── src/                   # React source code
-│   ├── build/                 # Built UI (generated)
-│   ├── package.json           # UI dependencies
-│   └── public/                # Static assets
-├── .github/
-│   └── workflows/
-│       └── docker-build.yml   # CI/CD workflow for Docker builds
-├── Dockerfile                 # Docker image definition
-├── docker-compose.yml         # Docker Compose configuration
-├── .dockerignore             # Files excluded from Docker builds
-├── package.json              # Root package (monorepo scripts)
-└── README.md                 # This file
-```
-
+**Playarr** - Your unified IPTV content management solution.
