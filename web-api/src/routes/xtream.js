@@ -74,17 +74,35 @@ function toUnixSeconds(value, fallbackSeconds = null) {
 /**
  * Format Unix timestamp into Xtream-compatible human-readable time
  * @param {number} timestampSeconds - Unix timestamp seconds
- * @returns {string} Formatted time string (YYYY-MM-DD HH:mm:ss)
+ * @param {string} [timezone] - IANA timezone identifier (e.g., 'America/New_York', 'UTC')
+ * @returns {string} Formatted time string (YYYY-MM-DD HH:mm:ss) in the specified timezone
  */
-function formatServerTime(timestampSeconds) {
+function formatServerTime(timestampSeconds, timezone = 'UTC') {
   const date = new Date(timestampSeconds * 1000);
-  const pad = (num) => String(num).padStart(2, '0');
-  const year = date.getFullYear();
-  const month = pad(date.getMonth() + 1);
-  const day = pad(date.getDate());
-  const hours = pad(date.getHours());
-  const minutes = pad(date.getMinutes());
-  const seconds = pad(date.getSeconds());
+  
+  // Use Intl.DateTimeFormat to format in the specified timezone
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  
+  // Format the date - returns something like "01/15/2024, 14:30:45"
+  const parts = formatter.formatToParts(date);
+  
+  // Extract parts and build YYYY-MM-DD HH:mm:ss format
+  const year = parts.find(p => p.type === 'year').value;
+  const month = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  const hours = parts.find(p => p.type === 'hour').value;
+  const minutes = parts.find(p => p.type === 'minute').value;
+  const seconds = parts.find(p => p.type === 'second').value;
+  
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
@@ -103,7 +121,7 @@ function buildServerInfo(req) {
   const httpPort = scheme === 'http' ? port : 80;
   const timezone = process.env.SERVER_TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   const timestampNow = Math.floor(Date.now() / 1000);
-  const timeNow = formatServerTime(timestampNow);
+  const timeNow = formatServerTime(timestampNow, timezone);
   
   return {
     url: hostname,
@@ -197,10 +215,12 @@ class XtreamRouter extends BaseRouter {
         // Default: return user info if no action or unknown action
         const nowSeconds = Math.floor(Date.now() / 1000);
         const createdAtSeconds = toUnixSeconds(req.user?.created_at || req.user?.createdAt, nowSeconds);
+        // Use far-future timestamp (2099-12-31 23:59:59 UTC) for unlimited accounts instead of 0
+        const UNLIMITED_EXPIRY_SECONDS = 4102444799; // 2099-12-31 23:59:59 UTC
         const expDateSeconds =
           req.user?.expires_at || req.user?.exp_date
             ? toUnixSeconds(req.user.expires_at || req.user.exp_date, 0)
-            : 0;
+            : UNLIMITED_EXPIRY_SECONDS;
 
         return res.status(200).json({
           user_info: {
