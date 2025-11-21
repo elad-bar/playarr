@@ -103,6 +103,12 @@ class XtreamManager extends BaseManager {
       const movies = [];
 
       for (const [titleKey, title] of watchlistTitles.entries()) {
+        // Check if movie has available media (media item with name === 'main')
+        const media = title.media || [];
+        const hasMainMedia = media.some(m => m.name === 'main');
+        if (!hasMainMedia) {
+          continue; // Skip movies without available streams
+        }
 
         // Filter by category if specified
         if (categoryId) {
@@ -202,6 +208,11 @@ class XtreamManager extends BaseManager {
       const series = [];
 
       for (const [titleKey, title] of watchlistTitles.entries()) {
+        // Check if TV show has available media (at least one episode)
+        const media = title.media || [];
+        if (media.length === 0) {
+          continue; // Skip TV shows without available episodes
+        }
 
         // Filter by category if specified
         if (categoryId) {
@@ -573,8 +584,9 @@ class XtreamManager extends BaseManager {
 
       // Convert to Xtream format
       return filteredChannels.map((channel, index) => {
-        const channelId = encodeURIComponent(channel.channel_id);
-        const streamUrl = `${baseUrl}/api/livetv/stream/${channelId}?api_key=${user.api_key}`;
+        // Use Xtream Code API format for Live TV streams: /live/{username}/{password}/{channelId}.m3u8
+        // The route handler will recognize this and redirect to the actual channel URL
+        const streamUrl = `${baseUrl}/live/${user.username}/${user.api_key}/${channel.channel_id}.m3u8`;
         const categoryIdForChannel = channel.group_title ? categories.get(channel.group_title) : 0;
 
         return {

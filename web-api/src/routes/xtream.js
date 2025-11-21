@@ -170,7 +170,8 @@ class XtreamRouter extends BaseRouter {
     // Stream type handlers mapping (mount path -> handler method)
     this._streamTypeHandlers = {
       '/movie': this._handleMovieStream.bind(this),
-      '/series': this._handleSeriesStream.bind(this)
+      '/series': this._handleSeriesStream.bind(this),
+      '/live': this._handleLiveStream.bind(this)
     };
   }
 
@@ -253,21 +254,6 @@ class XtreamRouter extends BaseRouter {
     this.router.get('/:username/:password/:streamId', this.middleware.requireXtreamAuth, async (req, res) => {
       try {
         const { streamId } = req.params;
-
-        // Check if it's a Live TV channel (ends with .m3u8 or doesn't match movie/series pattern)
-        if (this._liveTVManager && req.user?.liveTV?.m3u_url) {
-          // Try to parse as Live TV channel
-          let channelId = streamId;
-          if (streamId.endsWith('.m3u8')) {
-            channelId = streamId.slice(0, -5);
-          }
-          
-          const channel = await this._liveTVManager.getChannel(req.user.username, channelId);
-          if (channel) {
-            this.logger.info(`Live TV stream request: username=${req.params.username}, channelId=${channelId}`);
-            return res.redirect(channel.url);
-          }
-        }
 
         // Get handler based on mount path (req.baseUrl)
         const handler = this._streamTypeHandlers[req.baseUrl];
@@ -478,6 +464,68 @@ class XtreamRouter extends BaseRouter {
 
     this.logger.info(`Series stream found: username=${username}, titleId=${title_id}, season=${season}, episode=${episode}, redirecting to provider stream`);
     return res.redirect(streamUrl);
+  }
+
+  /**
+   * Handle Live TV stream request
+   * @private
+   * @param {Object} req - Express request object (contains req.user from middleware)
+   * @param {Object} res - Express response object
+   * @param {string} streamId - Stream ID (channel ID with optional extension)
+   * @returns {Promise<void>}
+   */
+  async _handleLiveStream(req, res, streamId) {
+    const { username } = req.params;
+
+    // Check if Live TV is configured for this user
+    if (!this._liveTVManager || !req.user?.liveTV?.m3u_url) {
+      this.logger.warn(`Live TV not configured for user: username=${username}`);
+      return this.returnErrorResponse(res, 404, 'Live TV not configured');
+    }
+
+    // Try to parse as Live TV channel
+    let channelId = streamId;
+    
+    // Strip common video/stream file extensions (.m3u8, .ts, .mp4, etc.)
+    const videoExtensions = ['.m3u8', '.ts', '.mp4', '.mkv', '.avi', '.m4v'];
+    for (const ext of videoExtensions) {
+      if (channelId.endsWith(ext)) {
+        channelId = channelId.slice(0, -ext.length);
+        break;
+      }
+    }
+    
+    // Decode the channel ID in case it's URL encoded
+    try {
+      channelId = decodeURIComponent(channelId);
+    } catch (e) {
+      // If decoding fails, use original channelId
+      this.logger.debug(`Failed to decode channelId, using original: ${channelId}`);
+    }
+    
+    // Try to find channel with stripped extension first
+    let channel = await this._liveTVManager.getChannel(req.user.username, channelId);
+    
+    // If not found, try with original streamId (in case channel is stored with extension)
+    if (!channel && channelId !== streamId) {
+      try {
+        const originalChannelId = decodeURIComponent(streamId);
+        channel = await this._liveTVManager.getChannel(req.user.username, originalChannelId);
+        if (channel) {
+          channelId = originalChannelId; // Use original for logging
+        }
+      } catch (e) {
+        // If decoding fails, ignore
+      }
+    }
+    
+    if (!channel) {
+      this.logger.warn(`Live TV channel not found: username=${username}, channelId=${channelId}, streamId=${streamId}`);
+      return this.returnErrorResponse(res, 404, 'Channel not found');
+    }
+
+    this.logger.debug(`Live TV stream request: username=${username}, channelId=${channelId}`);
+    return res.redirect(channel.url);
   }
 
   /**

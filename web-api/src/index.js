@@ -341,6 +341,7 @@ async function initialize() {
     // These must come before the React Router fallback
     app.use('/movie', xtreamRouter.router);
     app.use('/series', xtreamRouter.router);
+    app.use('/live', xtreamRouter.router); // Live TV streams
     app.use('/stremio', stremioRouter.router);
 
     // Catch-all middleware for unmanaged API endpoints (only when setting is enabled)
@@ -349,7 +350,8 @@ async function initialize() {
       if (req.path.startsWith('/api') || 
           req.path.startsWith('/player_api.php') ||
           req.path.startsWith('/movie') ||
-          req.path.startsWith('/series')) {
+          req.path.startsWith('/series') ||
+          req.path.startsWith('/live')) {
         
         try {
           const logUnmanagedResult = await settingsManager.getSetting('log_unmanaged_endpoints');
@@ -386,6 +388,7 @@ async function initialize() {
       if (req.path.startsWith('/api') || 
           req.path.startsWith('/movie') || 
           req.path.startsWith('/series') ||
+          req.path.startsWith('/live') ||
           req.path.startsWith('/player_api.php') ||
           req.path.startsWith('/stremio')) {
         return next();
@@ -401,6 +404,7 @@ async function initialize() {
       if (req.path.startsWith('/api') || 
           req.path.startsWith('/movie') || 
           req.path.startsWith('/series') ||
+          req.path.startsWith('/live') ||
           req.path.startsWith('/player_api.php') ||
           req.path.startsWith('/stremio')) {
         return next(); // Let the router handle it or return 404 if not matched
