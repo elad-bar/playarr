@@ -7,13 +7,12 @@ This guide covers deploying Playarr in both local and Docker environments. It in
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
-2. [Local Setup](#local-setup)
-3. [Docker Deployment](#docker-deployment)
+2. [Docker Deployment](#docker-deployment)
+3. [Local Setup](#local-setup)
 4. [Environment Variables](#environment-variables)
-5. [CI/CD](#cicd)
-6. [Initial Configuration](#initial-configuration)
-7. [Production Considerations](#production-considerations)
-8. [Troubleshooting](#troubleshooting)
+5. [Initial Configuration](#initial-configuration)
+6. [Production Considerations](#production-considerations)
+7. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -22,6 +21,84 @@ This guide covers deploying Playarr in both local and Docker environments. It in
 - Node.js 20 or higher
 - MongoDB database
 - Docker (optional, for containerized deployment)
+
+## Docker Deployment
+
+Playarr provides a pre-built Docker image available at `ghcr.io/elad-bar/playarr:latest`. This is the recommended way to deploy Playarr.
+
+### Running with Docker
+
+#### Using Docker CLI
+
+```bash
+# Run the container using the pre-built image
+docker run -d \
+  --name playarr \
+  -p 3000:3000 \
+  -v $(pwd)/cache:/app/cache \
+  -v $(pwd)/logs:/app/logs \
+  -e DEFAULT_ADMIN_USERNAME=admin \
+  -e DEFAULT_ADMIN_PASSWORD=your-secure-password \
+  ghcr.io/elad-bar/playarr:latest
+```
+
+#### Using Docker Compose (Recommended)
+
+Create a `docker-compose.yml` file in your project directory:
+
+```yaml
+version: '3.8'
+
+services:
+  playarr:
+    image: ghcr.io/elad-bar/playarr:latest
+    container_name: playarr
+    restart: unless-stopped
+    volumes:
+      # Mount cache directory for persistence
+      - ./cache:/app/cache
+      # Mount logs directory
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - CACHE_DIR=/app/cache
+      - LOGS_DIR=/app/logs
+      - PORT=3000
+      - DEFAULT_ADMIN_USERNAME=${DEFAULT_ADMIN_USERNAME:-admin}
+      - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD:-}
+      - MONGODB_URI=${MONGODB_URI:-}
+    ports:
+      - "3000:3000"
+```
+
+Create a `.env` file (optional) to set environment variables:
+
+```bash
+DEFAULT_ADMIN_USERNAME=admin
+DEFAULT_ADMIN_PASSWORD=your-secure-password
+MONGODB_URI=mongodb://localhost:27017/playarr
+```
+
+Then start the container:
+
+```bash
+# Start the container
+docker-compose up -d
+
+# View logs
+docker-compose logs -f playarr
+
+# Stop the container
+docker-compose down
+
+# Restart the container
+docker-compose restart
+```
+
+**Important Notes:**
+- Data and cache directories are **not** included in the Docker image and **must** be mounted as volumes
+- The UI will be used to configure providers and settings
+- MongoDB should be running separately (or use a MongoDB container)
 
 ## Local Setup
 
@@ -70,75 +147,6 @@ npm run start:api     # Run API only (serves UI on port 3000)
 npm run dev
 ```
 
-## Docker Deployment
-
-### Building the Docker Image
-
-```bash
-# Build the image
-docker build -t playarr .
-
-# Or using docker-compose
-docker-compose build
-```
-
-### Docker Image Details
-
-The Dockerfile uses:
-- **Multi-stage build**: Optimized for size and build speed
-  - Stage 1: Builds React UI
-  - Stage 2: Installs API dependencies
-  - Stage 3: Installs engine dependencies
-  - Stage 4: Runtime with all components
-- **Node.js 20 Alpine**: Lightweight base image
-- **dumb-init**: Proper signal handling for graceful shutdowns in containers
-- **Health check**: Verifies data and cache directories are accessible
-- **`.dockerignore`**: Excludes unnecessary files (data, cache, logs, node_modules, etc.) from the build context
-- **Single container**: Runs both engine and API together
-
-### Running with Docker
-
-#### Using Docker CLI
-
-```bash
-# Run the container
-docker run -d \
-  --name playarr \
-  -p 3000:3000 \
-  -v $(pwd)/cache:/app/cache \
-  -v $(pwd)/logs:/app/logs \
-  -e DEFAULT_ADMIN_USERNAME=admin \
-  -e DEFAULT_ADMIN_PASSWORD=your-secure-password \
-  playarr
-```
-
-#### Using Docker Compose (Recommended)
-
-```bash
-# Start the container
-docker-compose up -d
-
-# View logs
-docker-compose logs -f playarr
-
-# Stop the container
-docker-compose down
-```
-
-### Docker Compose Configuration
-
-The `docker-compose.yml` file includes:
-- Volume mounts for cache and logs
-- Port mapping for API (port 3000)
-- Health checks
-- Automatic restart policy
-- Environment variable configuration
-
-**Important Notes:**
-- Data and cache directories are **not** included in the Docker image and **must** be mounted as volumes
-- The UI will be used to configure providers and settings
-- MongoDB should be running separately (or use a MongoDB container)
-
 ## Environment Variables
 
 You can customize the Docker container using environment variables:
@@ -152,15 +160,6 @@ You can customize the Docker container using environment variables:
 - `MONGODB_URI`: MongoDB connection string (if not using default)
 
 **Important**: Always set `DEFAULT_ADMIN_PASSWORD` when deploying to production!
-
-## CI/CD
-
-The project includes GitHub Actions workflow (`.github/workflows/docker-build.yml`) that automatically builds Docker images on:
-- Push to `main` or `master` branches
-- Pull requests to `main` or `master` branches
-- Tags matching `v*` pattern
-
-The workflow uses Docker Buildx for multi-platform builds and includes automated testing of the built image.
 
 ## Initial Configuration
 
