@@ -76,6 +76,7 @@ This feature refactors Live TV channel management from user-level configuration 
   _id: ObjectId,
   provider_id: String,          // Provider-specific (replaces username)
   channel_id: String,
+  channel_key: String,          // NEW: Unique key per provider (format: "live-{providerId}-{channelId}")
   name: String,
   url: String,
   tvg_id: String,
@@ -93,6 +94,7 @@ This feature refactors Live TV channel management from user-level configuration 
 - Remove: `{ username: 1 }`
 - Add: `{ provider_id: 1, channel_id: 1 }` (unique compound)
 - Add: `{ provider_id: 1 }`
+- Add: `{ channel_key: 1 }` (for watchlist queries)
 
 #### Programs Collection
 
@@ -145,9 +147,13 @@ This feature refactors Live TV channel management from user-level configuration 
 - `user.liveTV.epg_url` field
 - Entire `user.liveTV` object (if no other fields)
 
+**Add:**
+- `user.watchlist_channels: Array<String>` - Array of channel keys in user's watchlist (format: `live-{providerId}-{channelId}`)
+
 **Migration:**
 - Existing user `liveTV` configurations will be ignored
 - Channels will be migrated or cleared during transition
+- Watchlist will be empty initially (users can add channels after migration)
 
 ### Provider Configuration Changes
 
@@ -174,17 +180,12 @@ This feature refactors Live TV channel management from user-level configuration 
 }
 ```
 
-**Category Key Formats:**
-- **Xtream**: `live-{category_id}` (e.g., `live-1`, `live-5`)
-- **AGTV**: `live-{normalized_category_name}` (e.g., `live-sports`, `live-news`, `live-entertainment`)
-  - Category names are normalized: lowercase, slugified, special characters removed
-  - Original category names preserved in `group_title` field for display
-
 **Category Management:**
 - Categories are fetched/extracted during provider sync
 - Users can enable/disable categories via provider settings UI (same flow as movies/TV shows)
 - Only channels from enabled categories are synced and stored
 - When categories are disabled, channels from those categories are removed (see Phase 4.1)
+- Category key formats: See Technical Details > Category Management > Category Key Format
 
 ## Implementation Plan
 
@@ -418,7 +419,7 @@ async _syncXtreamProvider(provider) {
     return enabledCategoryKeys.has(categoryKey);
   });
   
-  // Parse and store channels
+  // Parse and store channels (with channel_key generation)
   const channels = this._parseXtreamChannels(filteredStreams, provider.id);
   await this._saveChannels(provider.id, channels);
   
@@ -452,7 +453,7 @@ async _syncAGTVProvider(provider) {
     return enabledCategoryKeys.has(categoryKey);
   });
   
-  // Store channels
+  // Store channels (with channel_key generation)
   await this._saveChannels(provider.id, filteredChannels);
   
   // Handle EPG if available
@@ -534,7 +535,105 @@ async getChannel(providerId, channelId) {
     channel_id: channelId
   });
 }
+
+/**
+ * Generate channel key (unique per provider)
+ * @param {string} providerId - Provider ID
+ * @param {string} channelId - Channel ID
+ * @returns {string} Channel key in format "live-{providerId}-{channelId}"
+ */
+_generateChannelKey(providerId, channelId) {
+  return `live-${providerId}-${channelId}`;
+}
 ```
+
+#### 3.4 Watchlist Management
+
+**Watchlist Methods:**
+```javascript
+/**
+ * Get channels with optional watchlist filtering
+ * @param {Object} options - Query options
+ * @param {string} [options.userId] - User ID for watchlist filtering
+ * @param {boolean} [options.watchlist] - Filter by watchlist (true = only watchlist, false = exclude watchlist, undefined = all)
+ * @param {string} [options.providerId] - Filter by provider
+ * @param {string} [options.search] - Search term
+ * @returns {Promise<Array>} Array of channel objects
+ */
+async getAllChannels(options = {}) {
+  let query = {};
+  
+  // Provider filter
+  if (options.providerId) {
+    query.provider_id = options.providerId;
+  }
+  
+  // Search filter
+  if (options.search) {
+    query.name = { $regex: options.search, $options: 'i' };
+  }
+  
+  let channels = await this._channelRepo.findByQuery(query);
+  
+  // Watchlist filtering
+  if (options.userId && options.watchlist !== undefined) {
+    const watchlistKeys = await this._getUserWatchlistKeys(options.userId);
+    if (options.watchlist === true) {
+      // Only show watchlist channels
+      channels = channels.filter(ch => watchlistKeys.has(ch.channel_key));
+    } else {
+      // Exclude watchlist channels
+      channels = channels.filter(ch => !watchlistKeys.has(ch.channel_key));
+    }
+  }
+  
+  return channels;
+}
+
+/**
+ * Add channel to user watchlist
+ * @param {string} userId - User ID
+ * @param {string} channelKey - Channel key (format: "live-{providerId}-{channelId}")
+ * @returns {Promise<Object>} Success response
+ */
+async addToWatchlist(userId, channelKey) {
+  await this._userRepo.updateOne(
+    { id: userId },
+    { $addToSet: { watchlist_channels: channelKey } }
+  );
+  return { success: true };
+}
+
+/**
+ * Remove channel from user watchlist
+ * @param {string} userId - User ID
+ * @param {string} channelKey - Channel key
+ * @returns {Promise<Object>} Success response
+ */
+async removeFromWatchlist(userId, channelKey) {
+  await this._userRepo.updateOne(
+    { id: userId },
+    { $pull: { watchlist_channels: channelKey } }
+  );
+  return { success: true };
+}
+
+/**
+ * Get user's watchlist channel keys
+ * @private
+ * @param {string} userId - User ID
+ * @returns {Promise<Set>} Set of channel keys
+ */
+async _getUserWatchlistKeys(userId) {
+  const user = await this._userRepo.findOneByQuery({ id: userId });
+  return new Set(user?.watchlist_channels || []);
+}
+```
+
+**Channel Key Generation During Sync:**
+- Update `_parseXtreamChannels()` to generate `channel_key` using `_generateChannelKey(providerId, channelId)` for each channel
+- Update `_parseM3U8Channels()` to generate `channel_key` using `_generateChannelKey(providerId, channelId)` for each channel
+- Store `channel_key` in channel documents during sync
 
 ### Phase 4: Category Management Integration
 
@@ -629,6 +728,7 @@ async updateEnabledCategories(providerId, enabledCategories) {
 ```javascript
 /**
  * Remove channels from disabled categories (similar to _removeProviderFromTitles)
+ * Also cleans up watchlist entries for deleted channels
  * @private
  * @param {string} providerId - Provider ID
  * @param {Array<string>} enabledLiveCategories - Array of enabled live category keys
@@ -642,6 +742,7 @@ async _removeProviderFromChannels(providerId, enabledLiveCategories) {
   
   let channelsDeleted = 0;
   let programsDeleted = 0;
+  const deletedChannelKeys = [];
   
   for (const channel of allChannels) {
     // Determine category key based on provider type
@@ -662,6 +763,11 @@ async _removeProviderFromChannels(providerId, enabledLiveCategories) {
     
     // Delete channel if category is disabled
     if (categoryKey && !enabledCategoryKeys.has(categoryKey)) {
+      // Track deleted channel key for watchlist cleanup
+      if (channel.channel_key) {
+        deletedChannelKeys.push(channel.channel_key);
+      }
+      
       // Delete associated programs first
       const deletedPrograms = await this._programRepo.deleteMany({
         provider_id: providerId,
@@ -678,14 +784,49 @@ async _removeProviderFromChannels(providerId, enabledLiveCategories) {
     }
   }
   
+  // Clean up watchlist entries for deleted channels
+  let watchlistEntriesRemoved = 0;
+  if (deletedChannelKeys.length > 0) {
+    const users = await this._userRepo.findByQuery({});
+    for (const user of users) {
+      if (user.watchlist_channels && user.watchlist_channels.length > 0) {
+        const originalLength = user.watchlist_channels.length;
+        user.watchlist_channels = user.watchlist_channels.filter(
+          key => !deletedChannelKeys.includes(key)
+        );
+        if (user.watchlist_channels.length !== originalLength) {
+          await this._userRepo.updateOne(
+            { id: user.id },
+            { $set: { watchlist_channels: user.watchlist_channels } }
+          );
+          watchlistEntriesRemoved += (originalLength - user.watchlist_channels.length);
+        }
+      }
+    }
+  }
+  
   return {
     channelsDeleted,
-    programsDeleted
+    programsDeleted,
+    watchlistEntriesRemoved
   };
 }
 ```
 
-#### 4.2 AGTV Category Extraction
+#### 4.2 Provider Disable/Delete Cleanup
+
+**Extend `updateProvider()` Method:**
+- When provider is disabled (`enabled: false`), channels remain in database
+- Channels will be filtered out from API responses (see Technical Details: Provider Disable/Delete Handling)
+- No immediate channel deletion needed for disabled providers
+
+**Extend `deleteProvider()` Method:**
+- Delete all channels for provider: `await this._channelRepo.deleteByProvider(providerId)`
+- Delete all programs for provider: `await this._programRepo.deleteByProvider(providerId)`
+- Clean up watchlist entries: Remove channel keys matching `live-{providerId}-*` from all users
+- See Technical Details: Provider Disable/Delete Handling for implementation details
+
+#### 4.3 AGTV Category Extraction
 
 **For AGTV providers, categories are extracted on-demand from synced channels:**
 - When fetching categories, query channels collection for the provider
@@ -786,9 +927,25 @@ async getLiveStreams(user, baseUrl, categoryId = null) {
 ```javascript
 // GET /api/livetv/channels
 // Returns channels from all active providers
+// Query params: watchlist (true/false, default: true), providerId, search
 this.router.get('/channels', this.middleware.requireAuth, async (req, res) => {
   try {
-    const channels = await this._liveTVManager.getAllChannels();
+    const { watchlist, providerId, search } = req.query;
+    const userId = req.user.id;
+    
+    const options = {
+      userId,
+      watchlist: watchlist === 'true' ? true : watchlist === 'false' ? false : undefined,
+      providerId,
+      search
+    };
+    
+    // Default to watchlist=true if not specified
+    if (options.watchlist === undefined) {
+      options.watchlist = true;
+    }
+    
+    const channels = await this._liveTVManager.getAllChannels(options);
     return res.status(200).json(channels);
   } catch (error) {
     return this.returnErrorResponse(res, 500, 'Failed to get channels', error.message);
@@ -800,10 +957,54 @@ this.router.get('/channels', this.middleware.requireAuth, async (req, res) => {
 this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, async (req, res) => {
   try {
     const { providerId } = req.params;
-    const channels = await this._liveTVManager.getProviderChannels(providerId);
+    const { watchlist, search } = req.query;
+    const userId = req.user.id;
+    
+    const options = {
+      userId,
+      providerId,
+      watchlist: watchlist === 'true' ? true : watchlist === 'false' ? false : undefined,
+      search
+    };
+    
+    // Default to watchlist=true if not specified
+    if (options.watchlist === undefined) {
+      options.watchlist = true;
+    }
+    
+    const channels = await this._liveTVManager.getAllChannels(options);
     return res.status(200).json(channels);
   } catch (error) {
     return this.returnErrorResponse(res, 500, 'Failed to get provider channels', error.message);
+  }
+});
+
+// POST /api/livetv/watchlist
+// Add channel to watchlist
+this.router.post('/watchlist', this.middleware.requireAuth, async (req, res) => {
+  try {
+    const { channelKey } = req.body;
+    if (!channelKey) {
+      return this.returnErrorResponse(res, 400, 'channelKey is required', 'Missing channelKey');
+    }
+    const userId = req.user.id;
+    await this._liveTVManager.addToWatchlist(userId, channelKey);
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return this.returnErrorResponse(res, 500, 'Failed to add to watchlist', error.message);
+  }
+});
+
+// DELETE /api/livetv/watchlist/:channelKey
+// Remove channel from watchlist
+this.router.delete('/watchlist/:channelKey', this.middleware.requireAuth, async (req, res) => {
+  try {
+    const { channelKey } = req.params;
+    const userId = req.user.id;
+    await this._liveTVManager.removeFromWatchlist(userId, channelKey);
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return this.returnErrorResponse(res, 500, 'Failed to remove from watchlist', error.message);
   }
 });
 ```
@@ -831,6 +1032,10 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 - Add provider filter/grouping option
 - Update API calls to use new endpoints
 - Remove user-specific channel assumptions
+- Add watchlist toggle (default: show only watchlist channels)
+- Add watchlist add/remove buttons for each channel
+- Display watchlist status for each channel
+- Support search and provider filtering
 
 #### 7.3 Update Stremio Integration
 
@@ -841,32 +1046,7 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 
 ### Phase 8: Database Migration
 
-#### 8.1 Migration Strategy
-
-**Migration Approach:**
-- **Remove Collections**: Drop `channels` and `programs` collections entirely
-- **Clean User Profiles**: Remove `liveTV` field from all user documents
-- **No Data Migration**: Existing user-configured channels will be lost
-- **Repopulation**: Channels will be automatically repopulated from active providers on first sync job run
-
-**Migration Steps:**
-1. Drop `channels` collection
-2. Drop `programs` collection
-3. Remove `liveTV` field from all user documents in `users` collection
-4. Update indexes (drop old, create new)
-5. Let sync job repopulate channels from providers
-
-**User Impact:**
-- Users will lose their existing channel configurations
-- Channels will be automatically available from providers after first sync (up to 12 hours)
-- No user action required - channels will appear automatically
-
-#### 8.2 Index Migration
-
-**Steps:**
-1. Drop old indexes: `{ username: 1, channel_id: 1 }`, `{ username: 1 }`
-2. Create new indexes: `{ provider_id: 1, channel_id: 1 }`, `{ provider_id: 1 }`
-3. Update ProgramRepository indexes similarly
+**Removing old data starting as new feature** - Drop `channels` and `programs` collections, remove `liveTV` field from user profiles. Channels will be automatically repopulated from active providers on first sync job run.
 
 ## Technical Details
 
@@ -878,6 +1058,36 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 - Use composite key: `{ provider_id: 1, channel_id: 1 }` (unique compound index)
 - Channel IDs are unique per provider, not globally
 - When aggregating channels, include `provider_id` in response
+
+### Channel Key Format
+
+**Format:** `live-{providerId}-{channelId}`
+- **Purpose**: Unique identifier per provider for watchlist management
+- **Example**: `live-provider-123-channel-456`
+- **Storage**: Stored in `channels.channel_key` field
+- **Index**: Index on `channel_key` for efficient watchlist queries
+- **Generation**: Created during sync using `_generateChannelKey(providerId, channelId)`
+
+### Watchlist Management
+
+**User Watchlist:**
+- Stored in `user.watchlist_channels` array (channel keys)
+- Default view shows only watchlist channels (`watchlist=true` by default)
+- Users can toggle between watchlist and all channels via query parameter
+- Watchlist filtering happens at API level after fetching channels
+
+**Watchlist Operations:**
+- **Add**: `POST /api/livetv/watchlist` with `{ channelKey: "live-{providerId}-{channelId}" }`
+- **Remove**: `DELETE /api/livetv/watchlist/:channelKey`
+- **Filter**: 
+  - `GET /api/livetv/channels?watchlist=true` (default - only watchlist channels)
+  - `GET /api/livetv/channels?watchlist=false` (all channels except watchlist)
+  - `GET /api/livetv/channels` (defaults to watchlist=true)
+
+**Default View Behavior:**
+- When `watchlist` parameter is not specified, defaults to `true`
+- This means users see only their watchlist channels by default
+- Users can explicitly request all channels with `?watchlist=false`
 
 ### Category Management
 
@@ -913,12 +1123,6 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 4. Store only filtered channels
 5. Delete channels from disabled categories (if any exist)
 
-**Edge Cases:**
-- If `enabled_categories.live` is empty array → No channels synced
-- If `enabled_categories.live` is missing/null → No channels synced (same as empty)
-- Channels without category (no `group_title` or `category_id`) → Excluded from sync
-- Category name changes → Old category key becomes invalid, channels removed
-
 #### Category Extraction for AGTV
 
 **Since AGTV doesn't have a category API, categories are extracted on-demand from synced channels:**
@@ -927,6 +1131,55 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 - Normalize category names using `_normalizeCategoryName()` (see Phase 3.2)
 - Return as categories with original names preserved for display
 - Always reflects current channel state
+
+#### Category Lifecycle Changes
+
+**When Categories are Enabled/Disabled:**
+- **Enabled**: Channels from newly enabled categories are synced on next sync job run
+- **Disabled**: Channels from disabled categories are immediately deleted via `_removeProviderFromChannels()`
+- Watchlist entries for deleted channels should be cleaned up (channels no longer exist)
+- Sync job is triggered automatically when categories are updated via `updateEnabledCategories()`
+
+**When Category Names Change (AGTV):**
+- **Problem**: AGTV categories come from `group_title` in M3U8, which can change
+- **Impact**: Old category key becomes invalid, new category key is created
+- **Behavior**:
+  - Old channels with old category key are deleted (category no longer matches)
+  - New channels with new category key are synced
+  - If category is enabled, new channels appear; if disabled, they won't sync
+- **Watchlist Impact**: Channels with old category keys are removed from watchlist (channels deleted)
+
+**When Category Names Change (Xtream):**
+- **Less Common**: Xtream uses numeric `category_id` which is more stable
+- **If Category ID Changes**: Similar to AGTV - old channels deleted, new channels synced
+- **If Only Name Changes**: Category key remains same (`live-{category_id}`), no impact
+
+**When New Categories Appear:**
+- **Xtream**: New categories appear in `get_live_categories` API response
+- **AGTV**: New categories appear when channels with new `group_title` values are synced
+- **Behavior**: 
+  - New categories are available in category list
+  - If auto-enabled (depends on UI logic), channels sync automatically
+  - If manual enable required, channels won't sync until category is enabled
+
+**When Categories Disappear:**
+- **Xtream**: Category no longer in API response
+- **AGTV**: No channels with that `group_title` in M3U8
+- **Behavior**:
+  - Category key remains in `enabled_categories.live` but has no channels
+  - No channels to delete (already removed during sync)
+  - Category can be manually removed from enabled list in UI
+
+**Watchlist Cleanup on Category Changes:**
+- When channels are deleted due to category changes, their channel keys are automatically removed from all users' watchlists
+- Implementation: Handled by `_removeProviderFromChannels()` method (see Phase 4.1)
+- The method tracks deleted channel keys and cleans up watchlist entries for all affected users
+
+**Sync Behavior:**
+- Sync job runs every 12 hours automatically
+- When categories are updated via `updateEnabledCategories()`, sync job is triggered immediately
+- Sync fetches latest categories/channels and applies current enabled category filter
+- Channels are added/removed based on current enabled categories state
 
 ### EPG Handling
 
@@ -944,6 +1197,74 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
   epg_url: "https://example.com/epg.xml"  // Optional
 }
 ```
+
+### Provider Disable/Delete Handling
+
+**When Provider is Disabled:**
+- Channels remain in the database (not deleted)
+- Sync job skips disabled providers (`enabled: false`)
+- Channels from disabled providers are filtered out from API responses
+- User watchlist entries remain but channels won't appear (filtered out)
+- If provider is re-enabled, channels will sync again on next job run
+
+**When Provider is Deleted:**
+- Provider is marked as `deleted: true` (logical delete)
+- Channels and programs are deleted from database
+- User watchlist entries containing channel keys from deleted provider are cleaned up
+- Sync job skips deleted providers (`deleted: { $ne: true }`)
+
+**Implementation Requirements:**
+
+1. **Provider Disable Cleanup** (in `ProvidersManager.updateProvider()`):
+   - When `enabled` changes from `true` to `false`:
+     - Channels remain in database (no immediate deletion)
+     - Channels will be filtered out from `getAllChannels()` responses
+     - No watchlist cleanup needed (channels filtered but not deleted)
+
+2. **Provider Delete Cleanup** (in `ProvidersManager.deleteProvider()`):
+   - Delete all channels for provider: `await this._channelRepo.deleteByProvider(providerId)`
+   - Delete all programs for provider: `await this._programRepo.deleteByProvider(providerId)`
+   - Clean up watchlist entries: Remove channel keys matching `live-{providerId}-*` from all users' `watchlist_channels` arrays
+
+3. **API Response Filtering**:
+   - `getAllChannels()` should filter out channels from disabled/deleted providers
+   - Check provider status before returning channels:
+     ```javascript
+     // Filter out channels from disabled/deleted providers
+     const activeProviders = await this._providerRepo.findByQuery({
+       enabled: true,
+       deleted: { $ne: true }
+     });
+     const activeProviderIds = new Set(activeProviders.map(p => p.id));
+     channels = channels.filter(ch => activeProviderIds.has(ch.provider_id));
+     ```
+
+4. **Watchlist Cleanup on Provider Delete**:
+   - When provider is deleted, remove all channel keys matching pattern `live-{providerId}-*` from all users
+   - This prevents orphaned watchlist entries
+   - Example implementation:
+     ```javascript
+     // In ProvidersManager.deleteProvider()
+     const watchlistPattern = `live-${providerId}-`;
+     const users = await this._userRepo.findByQuery({});
+     let watchlistEntriesRemoved = 0;
+
+     for (const user of users) {
+       if (user.watchlist_channels && user.watchlist_channels.length > 0) {
+         const originalLength = user.watchlist_channels.length;
+         user.watchlist_channels = user.watchlist_channels.filter(
+           key => !key.startsWith(watchlistPattern)
+         );
+         if (user.watchlist_channels.length !== originalLength) {
+           await this._userRepo.updateOne(
+             { id: user.id },
+             { $set: { watchlist_channels: user.watchlist_channels } }
+           );
+           watchlistEntriesRemoved += (originalLength - user.watchlist_channels.length);
+         }
+       }
+     }
+     ```
 
 ### Stream URL Generation
 
@@ -986,9 +1307,22 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 
 1. **Provider Channels:**
    - `GET /api/livetv/providers/:providerId/channels` - Get channels for specific provider
+   - Query params: `watchlist` (true/false, default: true), `search`
 
 2. **Provider Programs:**
    - `GET /api/livetv/providers/:providerId/channels/:channelId/programs` - Get programs for provider channel
+
+3. **Watchlist Management:**
+   - `POST /api/livetv/watchlist` - Add channel to watchlist (body: `{ channelKey: "live-{providerId}-{channelId}" }`)
+   - `DELETE /api/livetv/watchlist/:channelKey` - Remove channel from watchlist
+
+### Updated Endpoints
+
+1. **Channels Endpoint:**
+   - `GET /api/livetv/channels` - Now supports query parameters:
+     - `watchlist` (true/false, default: true) - Filter by watchlist
+     - `providerId` - Filter by provider
+     - `search` - Search channels by name
 
 ## Database Considerations
 
@@ -997,17 +1331,11 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 **Channels Collection:**
 - `{ provider_id: 1, channel_id: 1 }` - Unique compound (primary lookup)
 - `{ provider_id: 1 }` - Provider channels lookup
+- `{ channel_key: 1 }` - Channel key lookup (for watchlist queries)
 
 **Programs Collection:**
 - `{ provider_id: 1, channel_id: 1, start: 1, stop: 1 }` - Unique compound
 - `{ provider_id: 1, channel_id: 1 }` - Provider channel programs lookup
-
-### Data Migration
-
-**Migration is handled by dropping collections (see Phase 8.1 Migration Strategy):**
-- Collections are dropped entirely (not cleared with deleteMany)
-- Indexes are automatically recreated when collections are recreated
-- No migration script needed - collections will be created fresh on first sync
 
 ## Monitoring & Logging
 
@@ -1032,8 +1360,8 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 2. **Channel Filtering**: Allow filtering channels by provider in UI
 3. **Channel Groups**: Better organization of channels by provider
 4. **EPG Merging**: Merge EPG data from multiple providers
-5. **Channel Favorites**: User-specific channel favorites (separate from channel storage)
-6. **Channel Metadata**: Enhanced metadata per channel (language, quality, etc.)
+5. **Channel Metadata**: Enhanced metadata per channel (language, quality, etc.)
+6. **Bulk Watchlist Operations**: Add/remove multiple channels at once
 
 ## Testing Considerations
 
@@ -1054,20 +1382,28 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
    - Test category management (enable/disable)
    - Test channel cleanup when categories disabled
    - Test category extraction for AGTV
+   - Test watchlist filtering (true/false/undefined)
+   - Test default watchlist view behavior
+   - Test watchlist add/remove operations
+   - Test channel key generation and uniqueness
+   - Test provider disable (channels remain but filtered out)
+   - Test provider delete (channels and programs deleted, watchlist cleaned up)
+   - Test provider re-enable (channels sync again)
+   - Test API filtering of disabled/deleted provider channels
+   - Test category enable/disable (channels added/removed)
+   - Test category name changes (AGTV and Xtream)
+   - Test new categories appearing
+   - Test categories disappearing
+   - Test watchlist cleanup when channels deleted due to category changes
 
 3. **Edge Cases**
-   - Provider with no live channels
-   - Provider with invalid credentials
-   - Provider API changes
-   - Network timeouts
-   - Rate limiting scenarios
-   - Duplicate channel IDs across providers
-   - Empty enabled_categories.live array
-   - Missing enabled_categories.live field
-   - Channels without categories (no group_title)
-   - Category name changes (AGTV)
-   - Special characters in category names (AGTV)
-   - Very long category names (AGTV)
+   - Provider with invalid credentials (error handling)
+   - Provider API changes breaking compatibility (error handling)
+   - Network timeouts during sync (error handling)
+   - Rate limiting scenarios (error handling)
+   - Invalid channel keys in watchlist (data integrity)
+   - Duplicate channel keys in watchlist array (data integrity)
+   - Category name normalization logic changes (rare code change scenario)
 
 ## Dependencies
 
@@ -1085,9 +1421,10 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
 5. **Phase 5**: SyncLiveTVJob updates (1 day)
 6. **Phase 6**: API/Routes updates (2 days)
 7. **Phase 7**: UI updates (1-2 days)
-8. **Phase 8**: Database migration and testing (1-2 days)
+8. **Phase 8**: Database migration (removing old data) (1 day)
+9. **Phase 9**: Watchlist functionality (2 days)
 
-**Total Estimated Time**: 12-17 days
+**Total Estimated Time**: 14-19 days
 
 ## Migration Notes
 
