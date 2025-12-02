@@ -2,6 +2,71 @@
 alwaysApply: true
 ---
 
+## Code Quality
+
 When creating code, the functions should be well JSDoc described to allow intellisense to work.
 
-When changing the code, always look at the /data configurations and stored data to understand and build the right input and output.
+## Architecture Standards
+
+### 4-Level Architecture
+
+**Level 1: Entry Level** (Routers, Jobs)
+- Routers depend on Managers and Middleware only
+- Jobs depend on Managers only (NOT Repositories or Providers)
+- Cannot depend on other Level 1 components
+- Cannot access Repositories or Providers directly
+- When routers need user watchlist/provider configuration, get from managers and pass as data objects (not manager instances)
+
+**Level 2: Business Logic** (Managers)
+- **Type A: Domain Managers** - One domain = one repository, extend `BaseDomainManager`
+  - Can depend on: Repositories (Level 3), Services (Level 4), other Domain Managers (with caution)
+  - Cannot depend on: Routers, Jobs, Formatting Managers, Processing Managers
+- **Type B: Formatting Managers** - Transform data for external APIs, extend `BaseFormattingManager` or `BaseWatchlistFormattingManager`
+  - Can depend on: Domain Managers, Providers (Level 3, for formatting provider responses)
+  - Cannot depend on: Repositories (use Domain Managers), Routers, Jobs, Processing Managers, UserManager, IPTVProviderManager, ProvidersManager
+  - Receive user/provider configuration as data objects (parameters), NOT manager instances
+- **Type C: Processing Managers** - Process data during sync jobs, extend `BaseProcessingManager`
+  - Can depend on: Providers (Level 3), Domain Managers
+  - Cannot depend on: Repositories (use Domain Managers for data operations), Routers, Jobs, Formatting Managers
+- **Type D: Orchestration Managers** - Coordinate across domains, extend `BaseManager`
+  - Can depend on: Domain Managers, Services (Level 4), Repositories (Level 3, for cross-domain cleanup)
+  - Cannot depend on: Routers, Jobs, Formatting Managers, Processing Managers
+
+**Level 3: Data Access Layer** (Repositories, Providers)
+- Repositories: Only atomic data access operations, NO business logic
+- Providers: External API access only
+- Cannot depend on Managers, Routers, Jobs, Services
+
+**Level 4: Infrastructure** (Services, Middleware)
+- Services: Standalone infrastructure
+- Middleware: Authentication/authorization only
+- Cannot depend on Managers, Repositories, Providers, Routers
+
+### Dependency Rules
+
+1. **No Circular Dependencies:** Managers cannot have circular dependencies
+2. **No Lazy Injection:** All dependencies via constructor only (no setters)
+3. **Downward Dependencies Only:** Each level depends only on levels below it
+4. **Explicit Dependencies:** All dependencies declared in constructor
+5. **No Instance Parameters:** Pass data/configuration objects, NOT manager instances as function parameters
+6. **No Optional Dependencies:** Either required or not present (no `= null` or `= undefined`)
+
+### Base Class Hierarchy
+
+```
+BaseManager (base for all managers)
+├── BaseDomainManager (domain managers: repository reference, bulkUpsert)
+├── BaseFormattingManager (formatting managers: stream functionality)
+│   └── BaseWatchlistFormattingManager (watchlist filtering)
+├── BaseProcessingManager (processing managers)
+│   └── BaseIPTVProcessingManager (IPTV-specific processing)
+└── (Orchestration Managers extend BaseManager directly)
+```
+
+### Key Principles
+
+- **One Domain = One Repository:** Domain Managers manage a single domain with a single repository
+- **No Business Logic in Repositories:** Only atomic data access operations
+- **Processing Managers Use Domain Managers:** Not Repositories directly for data operations
+- **Formatting Managers Receive Config as Parameters:** User watchlist/provider config as data objects, not UserManager/IPTVProviderManager instances
+- **Orchestration Managers Can Use Repositories:** For efficient cross-domain bulk cleanup operations only
