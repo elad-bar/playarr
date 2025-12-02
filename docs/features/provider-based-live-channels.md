@@ -20,7 +20,7 @@ This feature refactors Live TV channel management from user-level configuration 
 - Channels stored in `channels` collection with `username` field
 - Users configure `liveTV.m3u_url` and `liveTV.epg_url` in their profile
 - `SyncLiveTVJob` syncs channels from user-configured M3U/EPG URLs
-- Channels accessed via `LiveTVManager.getUserChannels(username)`
+- Channels accessed via `ChannelManager.getChannelsByUsername(username)` (Domain Manager)
 - Each user has their own set of channels
 
 **Limitations:**
@@ -329,40 +329,56 @@ async deleteByProvider(providerId) {
 - Update indexes
 - Add provider-based query methods
 
-### Phase 3: LiveTVManager Refactoring
+### Phase 3: LiveTVProcessingManager Updates
 
-#### 3.1 Method Signature Changes
+**Note:** `LiveTVProcessingManager` is a Processing Manager (Type C) that handles syncing channels from providers. It extends `BaseProcessingManager` and should NOT access repositories directly - it uses Domain Managers for all data operations.
 
-**Before:**
+#### 3.1 Dependencies Update
+
+**Current Dependencies:**
+- `ChannelManager` (Domain Manager) ✓
+- `ProgramManager` (Domain Manager) ✓
+
+**New Dependencies (Required for Provider-Based Sync):**
+- `IPTVProviderManager` (Domain Manager) - to get provider configurations
+- `XtreamProvider` (Level 3) - to fetch live channels from Xtream providers
+- `AGTVProvider` (Level 3) - to fetch live channels from AGTV providers
+
+**Updated Constructor:**
 ```javascript
-async getUserChannels(username)
-async getChannel(username, channelId)
-async getChannelPrograms(username, channelId)
-async syncAllUsers()
+/**
+ * LiveTVProcessingManager for processing Live TV channels from providers
+ * Type C: Processing Manager
+ * Extends BaseProcessingManager
+ * 
+ * @param {import('../domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance
+ * @param {import('../domain/ProgramManager.js').ProgramManager} programManager - Program manager instance
+ * @param {import('../domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance
+ * @param {import('../../providers/XtreamProvider.js').XtreamProvider} xtreamProvider - Xtream provider instance
+ * @param {import('../../providers/AGTVProvider.js').AGTVProvider} agtvProvider - AGTV provider instance
+ */
+constructor(channelManager, programManager, iptvProviderManager, xtreamProvider, agtvProvider) {
+  const providerData = { id: 'livetv', type: 'livetv' };
+  super(providerData, 'LiveTVProcessingManager');
+  this._channelManager = channelManager;
+  this._programManager = programManager;
+  this._iptvProviderManager = iptvProviderManager;
+  this._xtreamProvider = xtreamProvider;
+  this._agtvProvider = agtvProvider;
+}
 ```
 
-**After:**
-```javascript
-async getProviderChannels(providerId)
-async getAllChannels()  // Aggregate from all providers
-async getChannel(providerId, channelId)
-async getChannelPrograms(providerId, channelId)
-async syncAllProviders()
-```
+#### 3.2 Sync Logic Implementation
 
-#### 3.2 Sync Logic Refactoring
-
-**New `syncAllProviders()` Method:**
+**New `syncProviders()` Method:**
 ```javascript
-async syncAllProviders() {
-  // Get all active, enabled providers (AGTV and Xtream only)
-  const providers = await this._providerRepo.findByQuery({
-    type: { $in: ['agtv', 'xtream'] },
-    enabled: true,
-    deleted: { $ne: true }
-  });
-  
-  if (providers.length === 0) {
+/**
+ * Sync Live TV channels from all active providers
+ * @param {Array<Object>} providers - Array of provider objects (passed from job)
+ * @returns {Promise<Object>} Sync results
+ */
+async syncProviders(providers) {
+  if (!providers || providers.length === 0) {
     this.logger.info('No active providers with live channels');
     return { providers_processed: 0, results: [] };
   }
@@ -421,7 +437,8 @@ async _syncXtreamProvider(provider) {
   
   // Parse and store channels (with channel_key generation)
   const channels = this._parseXtreamChannels(filteredStreams, provider.id);
-  await this._saveChannels(provider.id, channels);
+  // Use ChannelManager (Domain Manager) to save channels
+  await this._channelManager.insertChannels(channels);
   
   // Handle EPG if available
   // ...
@@ -454,7 +471,8 @@ async _syncAGTVProvider(provider) {
   });
   
   // Store channels (with channel_key generation)
-  await this._saveChannels(provider.id, filteredChannels);
+  // Use ChannelManager (Domain Manager) to save channels
+  await this._channelManager.insertChannels(filteredChannels);
   
   // Handle EPG if available
   // ...
@@ -502,42 +520,15 @@ _normalizeCategoryName(categoryName) {
 }
 ```
 
-#### 3.3 Channel Access Methods
+#### 3.3 Channel Key Generation
 
-**Update for Provider-Based Access:**
+**Note:** Channel access methods are in `ChannelManager` (Domain Manager), not in `LiveTVProcessingManager`. The processing manager only handles syncing.
+
+**Channel Key Generation Helper:**
 ```javascript
 /**
- * Get all channels from all active providers
- * @returns {Promise<Array>} Array of channel objects
- */
-async getAllChannels() {
-  return await this._channelRepo.findAll();
-}
-
-/**
- * Get channels for a specific provider
- * @param {string} providerId - Provider ID
- * @returns {Promise<Array>} Array of channel objects
- */
-async getProviderChannels(providerId) {
-  return await this._channelRepo.findByProvider(providerId);
-}
-
-/**
- * Get a specific channel
- * @param {string} providerId - Provider ID
- * @param {string} channelId - Channel ID
- * @returns {Promise<Object|null>} Channel object or null
- */
-async getChannel(providerId, channelId) {
-  return await this._channelRepo.findOneByQuery({
-    provider_id: providerId,
-    channel_id: channelId
-  });
-}
-
-/**
  * Generate channel key (unique per provider)
+ * @private
  * @param {string} providerId - Provider ID
  * @param {string} channelId - Channel ID
  * @returns {string} Channel key in format "live-{providerId}-{channelId}"
@@ -547,20 +538,39 @@ _generateChannelKey(providerId, channelId) {
 }
 ```
 
+**Channel Access Methods (in ChannelManager - Domain Manager):**
+```javascript
+// ChannelManager (Domain Manager) methods:
+async findByQuery(query) {
+  // Query channels with provider_id, channel_key, etc.
+}
+
+async findByProvider(providerId) {
+  return await this.findByQuery({ provider_id: providerId });
+}
+
+async findOneByQuery(query) {
+  // Find single channel
+}
+```
+
 #### 3.4 Watchlist Management
 
-**Watchlist Methods:**
+**Note:** Watchlist operations are handled by Domain Managers, not Processing Managers.
+
+**ChannelManager (Domain Manager) - Channel Query with Watchlist Filtering:**
 ```javascript
 /**
  * Get channels with optional watchlist filtering
  * @param {Object} options - Query options
- * @param {string} [options.userId] - User ID for watchlist filtering
+ * @param {string} [options.userId] - User ID for watchlist filtering (requires UserManager)
  * @param {boolean} [options.watchlist] - Filter by watchlist (true = only watchlist, false = exclude watchlist, undefined = all)
  * @param {string} [options.providerId] - Filter by provider
  * @param {string} [options.search] - Search term
+ * @param {import('../domain/UserManager.js').UserManager} userManager - User manager for watchlist lookup
  * @returns {Promise<Array>} Array of channel objects
  */
-async getAllChannels(options = {}) {
+async getAllChannels(options = {}, userManager = null) {
   let query = {};
   
   // Provider filter
@@ -573,11 +583,13 @@ async getAllChannels(options = {}) {
     query.name = { $regex: options.search, $options: 'i' };
   }
   
-  let channels = await this._channelRepo.findByQuery(query);
+  let channels = await this.findByQuery(query);
   
-  // Watchlist filtering
-  if (options.userId && options.watchlist !== undefined) {
-    const watchlistKeys = await this._getUserWatchlistKeys(options.userId);
+  // Watchlist filtering (requires UserManager)
+  if (options.userId && options.watchlist !== undefined && userManager) {
+    const user = await userManager.findOneByQuery({ id: options.userId });
+    const watchlistKeys = new Set(user?.watchlist_channels || []);
+    
     if (options.watchlist === true) {
       // Only show watchlist channels
       channels = channels.filter(ch => watchlistKeys.has(ch.channel_key));
@@ -589,15 +601,18 @@ async getAllChannels(options = {}) {
   
   return channels;
 }
+```
 
+**UserManager (Domain Manager) - Watchlist Operations:**
+```javascript
 /**
  * Add channel to user watchlist
  * @param {string} userId - User ID
  * @param {string} channelKey - Channel key (format: "live-{providerId}-{channelId}")
  * @returns {Promise<Object>} Success response
  */
-async addToWatchlist(userId, channelKey) {
-  await this._userRepo.updateOne(
+async addChannelToWatchlist(userId, channelKey) {
+  await this.updateOne(
     { id: userId },
     { $addToSet: { watchlist_channels: channelKey } }
   );
@@ -610,23 +625,12 @@ async addToWatchlist(userId, channelKey) {
  * @param {string} channelKey - Channel key
  * @returns {Promise<Object>} Success response
  */
-async removeFromWatchlist(userId, channelKey) {
-  await this._userRepo.updateOne(
+async removeChannelFromWatchlist(userId, channelKey) {
+  await this.updateOne(
     { id: userId },
     { $pull: { watchlist_channels: channelKey } }
   );
   return { success: true };
-}
-
-/**
- * Get user's watchlist channel keys
- * @private
- * @param {string} userId - User ID
- * @returns {Promise<Set>} Set of channel keys
- */
-async _getUserWatchlistKeys(userId) {
-  const user = await this._userRepo.findOneByQuery({ id: userId });
-  return new Set(user?.watchlist_channels || []);
 }
 ```
 
@@ -639,6 +643,8 @@ async _getUserWatchlistKeys(userId) {
 
 #### 4.1 ProvidersManager Updates
 
+**Note:** `ProvidersManager` is an Orchestration Manager (Type D) that coordinates operations across multiple domains. It can use Domain Managers for normal operations and Repositories directly for efficient cross-domain cleanup operations.
+
 **Extend `getCategories()` Method:**
 ```javascript
 async getCategories(providerId) {
@@ -647,12 +653,14 @@ async getCategories(providerId) {
   // Fetch live categories from provider
   let liveCategories = [];
   try {
+    const providerData = await this._iptvProviderManager.findOneByQuery({ id: providerId });
     if (providerData.type === 'xtream') {
-      liveCategories = await this.fetchLiveCategories(providerId);
+      liveCategories = await this._xtreamProvider.fetchLiveCategories(providerId);
     } else if (providerData.type === 'agtv') {
       // For AGTV, categories are extracted from channels during sync
-      // Return empty array here - categories will be populated after first sync
-      liveCategories = [];
+      // Query ChannelManager to get categories from synced channels
+      const channels = await this._channelManager.findByProvider(providerId);
+      liveCategories = this._extractCategoriesFromChannels(channels);
     }
   } catch (error) {
     this.logger.warn(`Failed to fetch live categories for ${providerId}: ${error.message}`);
@@ -699,8 +707,8 @@ async updateEnabledCategories(providerId, enabledCategories) {
     };
   }
   
-  // Update provider document
-  await this._providerRepo.updateOne(
+  // Update provider document via IPTVProviderManager (Domain Manager)
+  await this._iptvProviderManager.updateOne(
     { id: providerId },
     {
       $set: {
@@ -714,7 +722,7 @@ async updateEnabledCategories(providerId, enabledCategories) {
     }
   );
   
-  // Cleanup disabled categories
+  // Cleanup disabled categories (uses repositories for efficient bulk cleanup)
   await this._removeProviderFromChannels(providerId, enabledCategories.live);
   
   // Trigger sync job
@@ -729,6 +737,7 @@ async updateEnabledCategories(providerId, enabledCategories) {
 /**
  * Remove channels from disabled categories (similar to _removeProviderFromTitles)
  * Also cleans up watchlist entries for deleted channels
+ * Note: Uses repositories directly for efficient bulk cleanup (exception for orchestration managers)
  * @private
  * @param {string} providerId - Provider ID
  * @param {Array<string>} enabledLiveCategories - Array of enabled live category keys
@@ -737,16 +746,18 @@ async updateEnabledCategories(providerId, enabledCategories) {
 async _removeProviderFromChannels(providerId, enabledLiveCategories) {
   const enabledCategoryKeys = new Set(enabledLiveCategories);
   
-  // Get all channels for this provider
-  const allChannels = await this._channelRepo.findByProvider(providerId);
+  // Get all channels for this provider via ChannelManager (Domain Manager)
+  const allChannels = await this._channelManager.findByProvider(providerId);
   
   let channelsDeleted = 0;
   let programsDeleted = 0;
   const deletedChannelKeys = [];
   
+  // Get provider data via IPTVProviderManager (Domain Manager)
+  const provider = await this._iptvProviderManager.findOneByQuery({ id: providerId });
+  
   for (const channel of allChannels) {
     // Determine category key based on provider type
-    const provider = await this._providerRepo.findOneByQuery({ id: providerId });
     let categoryKey;
     
     if (provider.type === 'xtream') {
@@ -768,15 +779,15 @@ async _removeProviderFromChannels(providerId, enabledLiveCategories) {
         deletedChannelKeys.push(channel.channel_key);
       }
       
-      // Delete associated programs first
-      const deletedPrograms = await this._programRepo.deleteMany({
+      // Delete associated programs via ProgramManager (Domain Manager)
+      await this._programManager.deleteMany({
         provider_id: providerId,
         channel_id: channel.channel_id
       });
-      programsDeleted += deletedPrograms;
+      programsDeleted++;
       
-      // Delete channel
-      await this._channelRepo.deleteOne({
+      // Delete channel via ChannelManager (Domain Manager)
+      await this._channelManager.deleteOne({
         provider_id: providerId,
         channel_id: channel.channel_id
       });
@@ -784,22 +795,22 @@ async _removeProviderFromChannels(providerId, enabledLiveCategories) {
     }
   }
   
-  // Clean up watchlist entries for deleted channels
+  // Clean up watchlist entries for deleted channels via UserManager (Domain Manager)
   let watchlistEntriesRemoved = 0;
   if (deletedChannelKeys.length > 0) {
-    const users = await this._userRepo.findByQuery({});
+    const users = await this._userManager.findByQuery({});
     for (const user of users) {
       if (user.watchlist_channels && user.watchlist_channels.length > 0) {
         const originalLength = user.watchlist_channels.length;
-        user.watchlist_channels = user.watchlist_channels.filter(
+        const updatedWatchlist = user.watchlist_channels.filter(
           key => !deletedChannelKeys.includes(key)
         );
-        if (user.watchlist_channels.length !== originalLength) {
-          await this._userRepo.updateOne(
+        if (updatedWatchlist.length !== originalLength) {
+          await this._userManager.updateOne(
             { id: user.id },
-            { $set: { watchlist_channels: user.watchlist_channels } }
+            { $set: { watchlist_channels: updatedWatchlist } }
           );
-          watchlistEntriesRemoved += (originalLength - user.watchlist_channels.length);
+          watchlistEntriesRemoved += (originalLength - updatedWatchlist.length);
         }
       }
     }
@@ -821,9 +832,9 @@ async _removeProviderFromChannels(providerId, enabledLiveCategories) {
 - No immediate channel deletion needed for disabled providers
 
 **Extend `deleteProvider()` Method:**
-- Delete all channels for provider: `await this._channelRepo.deleteByProvider(providerId)`
-- Delete all programs for provider: `await this._programRepo.deleteByProvider(providerId)`
-- Clean up watchlist entries: Remove channel keys matching `live-{providerId}-*` from all users
+- Delete all channels for provider: `await this._channelManager.deleteByProvider(providerId)` (via ChannelManager)
+- Delete all programs for provider: `await this._programManager.deleteByProvider(providerId)` (via ProgramManager)
+- Clean up watchlist entries: Remove channel keys matching `live-{providerId}-*` from all users (via UserManager)
 - See Technical Details: Provider Disable/Delete Handling for implementation details
 
 #### 4.3 AGTV Category Extraction
@@ -851,10 +862,34 @@ async _removeProviderFromChannels(providerId, enabledLiveCategories) {
 
 **Update Job Implementation:**
 ```javascript
+/**
+ * SyncLiveTVJob - Syncs Live TV channels from active IPTV providers
+ * Extends BaseJob
+ * 
+ * @param {import('../managers/domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance
+ * @param {import('../managers/processing/LiveTVProcessingManager.js').LiveTVProcessingManager} liveTVProcessingManager - Live TV processing manager instance
+ * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager instance
+ */
+constructor(iptvProviderManager, liveTVProcessingManager, jobHistoryManager) {
+  super('syncLiveTV', jobHistoryManager);
+  this.iptvProviderManager = iptvProviderManager;
+  this.liveTVProcessingManager = liveTVProcessingManager;
+}
+
 async execute() {
   try {
     this.logger.info('Starting Live TV sync job...');
-    const result = await this.liveTVManager.syncAllProviders();
+    
+    // Get all active, enabled providers (AGTV and Xtream only) via IPTVProviderManager
+    const providers = await this.iptvProviderManager.findByQuery({
+      type: { $in: ['agtv', 'xtream'] },
+      enabled: true,
+      deleted: { $ne: true }
+    });
+    
+    // Sync Live TV for all providers
+    const result = await this.liveTVProcessingManager.syncProviders(providers);
+    
     this.logger.info(`Live TV sync completed: ${result.providers_processed} provider(s) processed`);
     return result;
   } catch (error) {
@@ -868,18 +903,30 @@ async execute() {
 
 #### 6.1 XtreamManager Updates
 
+**Note:** `XtreamManager` is a Formatting Manager (Type B) that formats data for external APIs. It receives user/provider configuration as parameters (data objects), not manager instances.
+
 **Update Live Channel Methods:**
 ```javascript
 /**
  * Get Live TV categories (aggregated from all providers)
- * @param {Object} user - Authenticated user object (for compatibility)
+ * @param {Object} user - Authenticated user object (for compatibility, receives as parameter)
  * @returns {Promise<Array>} Array of category objects
  */
 async getLiveCategories(user) {
   try {
-    const channels = await this._liveTVManager.getAllChannels();
-    const categories = new Map();
+    // Use ChannelManager (Domain Manager) to get channels
+    // Filter by active providers only
+    const activeProviders = await this._iptvProviderManager.findByQuery({
+      enabled: true,
+      deleted: { $ne: true }
+    });
+    const activeProviderIds = new Set(activeProviders.map(p => p.id));
     
+    const channels = await this._channelManager.findByQuery({
+      provider_id: { $in: Array.from(activeProviderIds) }
+    });
+    
+    const categories = new Map();
     channels.forEach(channel => {
       if (channel.group_title && !categories.has(channel.group_title)) {
         categories.set(channel.group_title, {
@@ -899,14 +946,24 @@ async getLiveCategories(user) {
 
 /**
  * Get Live TV streams (aggregated from all providers)
- * @param {Object} user - Authenticated user object
+ * @param {Object} user - Authenticated user object (receives as parameter)
  * @param {string} baseUrl - Base URL for stream endpoints
  * @param {number} [categoryId] - Optional category ID to filter
  * @returns {Promise<Array>} Array of channel stream objects
  */
 async getLiveStreams(user, baseUrl, categoryId = null) {
   try {
-    const channels = await this._liveTVManager.getAllChannels();
+    // Use ChannelManager (Domain Manager) to get channels
+    const activeProviders = await this._iptvProviderManager.findByQuery({
+      enabled: true,
+      deleted: { $ne: true }
+    });
+    const activeProviderIds = new Set(activeProviders.map(p => p.id));
+    
+    let channels = await this._channelManager.findByQuery({
+      provider_id: { $in: Array.from(activeProviderIds) }
+    });
+    
     // Filter by category if specified
     // Convert to Xtream format
     // ...
@@ -920,8 +977,16 @@ async getLiveStreams(user, baseUrl, categoryId = null) {
 **Remove User Dependency:**
 - Remove checks for `user.liveTV.m3u_url`
 - Channels are now available to all users
+- Use `ChannelManager` instead of `LiveTVManager`
 
 #### 6.2 LiveTVRouter Updates
+
+**Note:** `LiveTVRouter` is a Router (Level 1) that depends on:
+- `ChannelManager` (Domain Manager) - for channel data access
+- `ProgramManager` (Domain Manager) - for program data access
+- `LiveTVFormattingManager` (Formatting Manager) - for M3U playlist formatting
+- `UserManager` (Domain Manager) - for watchlist operations
+- `Middleware` - for authentication
 
 **Update Endpoints:**
 ```javascript
@@ -945,7 +1010,9 @@ this.router.get('/channels', this.middleware.requireAuth, async (req, res) => {
       options.watchlist = true;
     }
     
-    const channels = await this._liveTVManager.getAllChannels(options);
+    // Use ChannelManager (Domain Manager) for channel access
+    // Use UserManager (Domain Manager) for watchlist operations
+    const channels = await this._channelManager.getAllChannels(options, this._userManager);
     return res.status(200).json(channels);
   } catch (error) {
     return this.returnErrorResponse(res, 500, 'Failed to get channels', error.message);
@@ -972,7 +1039,9 @@ this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, 
       options.watchlist = true;
     }
     
-    const channels = await this._liveTVManager.getAllChannels(options);
+    // Use ChannelManager (Domain Manager) for channel access
+    // Use UserManager (Domain Manager) for watchlist operations
+    const channels = await this._channelManager.getAllChannels(options, this._userManager);
     return res.status(200).json(channels);
   } catch (error) {
     return this.returnErrorResponse(res, 500, 'Failed to get provider channels', error.message);
@@ -988,7 +1057,7 @@ this.router.post('/watchlist', this.middleware.requireAuth, async (req, res) => 
       return this.returnErrorResponse(res, 400, 'channelKey is required', 'Missing channelKey');
     }
     const userId = req.user.id;
-    await this._liveTVManager.addToWatchlist(userId, channelKey);
+    await this._userManager.addChannelToWatchlist(userId, channelKey);
     return res.status(200).json({ success: true });
   } catch (error) {
     return this.returnErrorResponse(res, 500, 'Failed to add to watchlist', error.message);
@@ -1001,7 +1070,7 @@ this.router.delete('/watchlist/:channelKey', this.middleware.requireAuth, async 
   try {
     const { channelKey } = req.params;
     const userId = req.user.id;
-    await this._liveTVManager.removeFromWatchlist(userId, channelKey);
+    await this._userManager.removeChannelFromWatchlist(userId, channelKey);
     return res.status(200).json({ success: true });
   } catch (error) {
     return this.returnErrorResponse(res, 500, 'Failed to remove from watchlist', error.message);
@@ -1040,13 +1109,402 @@ this.router.delete('/watchlist/:channelKey', this.middleware.requireAuth, async 
 #### 7.3 Update Stremio Integration
 
 **Changes:**
-- Update `StremioManager.getCatalog('tv')` to use `getAllChannels()`
+- Update `StremioManager.getCatalog('tv')` to use `ChannelManager.findByQuery()` instead of user-specific channels
 - Remove check for `user.liveTV.m3u_url`
 - Channels available to all authenticated users
+- Use `ChannelManager` (Domain Manager) to get channels from active providers
 
 ### Phase 8: Database Migration
 
-**Removing old data starting as new feature** - Drop `channels` and `programs` collections, remove `liveTV` field from user profiles. Channels will be automatically repopulated from active providers on first sync job run.
+#### 8.1 Database Version Detection
+
+**Validation Logic:**
+Before migrating, check if the database is already using the new provider-based system or still using the old user-level system.
+
+**Detection Method:**
+```javascript
+/**
+ * Check if database is using old user-level Live TV or new provider-based system
+ * @param {import('../repositories/ChannelRepository.js').ChannelRepository} channelRepo - Channel repository
+ * @param {import('../repositories/ProgramRepository.js').ProgramRepository} programRepo - Program repository
+ * @returns {Promise<{isOldVersion: boolean, reason: string}>} Detection result
+ */
+async detectLiveTVVersion(channelRepo, programRepo) {
+  try {
+    // Check channels collection
+    const sampleChannel = await channelRepo.findOneByQuery({});
+    
+    if (sampleChannel) {
+      // If channel has 'username' field, it's old version
+      if (sampleChannel.username !== undefined) {
+        return {
+          isOldVersion: true,
+          reason: 'Channels collection uses username field (old user-level system)'
+        };
+      }
+      
+      // If channel has 'provider_id' field, it's new version
+      if (sampleChannel.provider_id !== undefined) {
+        return {
+          isOldVersion: false,
+          reason: 'Channels collection uses provider_id field (new provider-based system)'
+        };
+      }
+    }
+    
+    // Check programs collection
+    const sampleProgram = await programRepo.findOneByQuery({});
+    
+    if (sampleProgram) {
+      // If program has 'username' field, it's old version
+      if (sampleProgram.username !== undefined) {
+        return {
+          isOldVersion: true,
+          reason: 'Programs collection uses username field (old user-level system)'
+        };
+      }
+      
+      // If program has 'provider_id' field, it's new version
+      if (sampleProgram.provider_id !== undefined) {
+        return {
+          isOldVersion: false,
+          reason: 'Programs collection uses provider_id field (new provider-based system)'
+        };
+      }
+    }
+    
+    // No data found - assume new version (empty collections)
+    return {
+      isOldVersion: false,
+      reason: 'No existing Live TV data found - starting fresh with provider-based system'
+    };
+  } catch (error) {
+    this.logger.error(`Error detecting Live TV version: ${error.message}`);
+    // On error, assume old version to be safe (will trigger migration)
+    return {
+      isOldVersion: true,
+      reason: `Error during detection: ${error.message} - assuming old version for safety`
+    };
+  }
+}
+```
+
+#### 8.2 Migration Execution
+
+**Migration Script:**
+```javascript
+/**
+ * Migrate from old user-level Live TV to new provider-based system
+ * @param {import('../repositories/ChannelRepository.js').ChannelRepository} channelRepo - Channel repository
+ * @param {import('../repositories/ProgramRepository.js').ProgramRepository} programRepo - Program repository
+ * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager
+ * @returns {Promise<Object>} Migration results
+ */
+async migrateLiveTVToProviderBased(channelRepo, programRepo, userManager) {
+  const results = {
+    channelsDeleted: 0,
+    programsDeleted: 0,
+    usersUpdated: 0,
+    errors: []
+  };
+  
+  try {
+    this.logger.info('Starting Live TV migration from user-level to provider-based system...');
+    
+    // Step 1: Delete all channels from old system
+    try {
+      const channelDeleteResult = await channelRepo.deleteMany({});
+      results.channelsDeleted = channelDeleteResult.deletedCount || 0;
+      this.logger.info(`Deleted ${results.channelsDeleted} channels from old system`);
+    } catch (error) {
+      results.errors.push(`Failed to delete channels: ${error.message}`);
+      this.logger.error(`Error deleting channels: ${error.message}`);
+    }
+    
+    // Step 2: Delete all programs from old system
+    try {
+      const programDeleteResult = await programRepo.deleteMany({});
+      results.programsDeleted = programDeleteResult.deletedCount || 0;
+      this.logger.info(`Deleted ${results.programsDeleted} programs from old system`);
+    } catch (error) {
+      results.errors.push(`Failed to delete programs: ${error.message}`);
+      this.logger.error(`Error deleting programs: ${error.message}`);
+    }
+    
+    // Step 3: Remove liveTV field/object from all users (NOT deleting users!)
+    try {
+      const users = await userManager.findByQuery({});
+      let updatedCount = 0;
+      
+      for (const user of users) {
+        if (user.liveTV) {
+          // Remove the liveTV field/object from the user document (user remains intact)
+          await userManager.updateOne(
+            { id: user.id },
+            { $unset: { liveTV: '' } }  // This removes the field, NOT the user!
+          );
+          updatedCount++;
+        }
+      }
+      
+      results.usersUpdated = updatedCount;
+      this.logger.info(`Removed liveTV field from ${updatedCount} user documents (users themselves remain intact)`);
+    } catch (error) {
+      results.errors.push(`Failed to remove liveTV field from users: ${error.message}`);
+      this.logger.error(`Error removing liveTV field from users: ${error.message}`);
+    }
+    
+    // Step 4: Drop old indexes (if they exist)
+    try {
+      await channelRepo.dropIndex({ username: 1, channel_id: 1 });
+      await channelRepo.dropIndex({ username: 1 });
+      await programRepo.dropIndex({ username: 1, channel_id: 1, start: 1, stop: 1 });
+      await programRepo.dropIndex({ username: 1, channel_id: 1 });
+      this.logger.info('Dropped old indexes');
+    } catch (error) {
+      // Indexes might not exist, log but don't fail
+      this.logger.warn(`Note: Some old indexes may not exist: ${error.message}`);
+    }
+    
+    this.logger.info('Live TV migration completed successfully');
+    return results;
+  } catch (error) {
+    this.logger.error(`Migration failed: ${error.message}`);
+    results.errors.push(`Migration failed: ${error.message}`);
+    throw error;
+  }
+}
+```
+
+#### 8.3 Migration Job/Startup Script
+
+**Implementation Options:**
+
+**Option A: Migration Job (Recommended)**
+Create a one-time migration job that runs on startup:
+```javascript
+/**
+ * LiveTVMigrationJob - One-time migration from user-level to provider-based Live TV
+ * Extends BaseJob
+ * 
+ * @param {import('../repositories/ChannelRepository.js').ChannelRepository} channelRepo - Channel repository
+ * @param {import('../repositories/ProgramRepository.js').ProgramRepository} programRepo - Program repository
+ * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager
+ * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
+ */
+export class LiveTVMigrationJob extends BaseJob {
+  constructor(channelRepo, programRepo, userManager, jobHistoryManager) {
+    super('liveTVMigration', jobHistoryManager);
+    this.channelRepo = channelRepo;
+    this.programRepo = programRepo;
+    this.userManager = userManager;
+  }
+  
+  async execute() {
+    try {
+      // Detect current version
+      const versionCheck = await this.detectLiveTVVersion(this.channelRepo, this.programRepo);
+      
+      if (versionCheck.isOldVersion) {
+        this.logger.info(`Detected old Live TV system: ${versionCheck.reason}`);
+        this.logger.info('Starting migration to provider-based system...');
+        
+        const results = await this.migrateLiveTVToProviderBased(
+          this.channelRepo,
+          this.programRepo,
+          this.userManager
+        );
+        
+        this.logger.info(`Migration completed: ${JSON.stringify(results)}`);
+        return results;
+      } else {
+        this.logger.info(`Database already using new system: ${versionCheck.reason}`);
+        this.logger.info('Skipping migration - no action needed');
+        return {
+          skipped: true,
+          reason: versionCheck.reason
+        };
+      }
+    } catch (error) {
+      this.logger.error(`Migration job failed: ${error.message}`);
+      throw error;
+    }
+  }
+}
+```
+
+**Option B: Startup Validation**
+Add validation to application startup:
+```javascript
+// In web-api/src/index.js or initialization script
+async function validateAndMigrateLiveTV() {
+  const versionCheck = await detectLiveTVVersion(channelRepo, programRepo);
+  
+  if (versionCheck.isOldVersion) {
+    logger.warn(`Old Live TV system detected: ${versionCheck.reason}`);
+    logger.warn('Migration required before starting application');
+    
+    // Run migration
+    const results = await migrateLiveTVToProviderBased(
+      channelRepo,
+      programRepo,
+      userManager
+    );
+    
+    logger.info(`Migration completed: ${JSON.stringify(results)}`);
+  } else {
+    logger.info(`Live TV system check passed: ${versionCheck.reason}`);
+  }
+}
+```
+
+#### 8.4 Post-Migration
+
+**After Migration:**
+- Old `channels` and `programs` collections are empty (or dropped)
+- The `liveTV` field/object is removed from all user documents (users themselves remain - only the field is removed)
+- New indexes will be created automatically when first channels are synced
+- Channels will be automatically repopulated from active providers on first `SyncLiveTVJob` run
+
+**Verification:**
+- Check that no channels exist with `username` field
+- Check that no programs exist with `username` field
+- Check that no users have `liveTV` field (users themselves still exist)
+- Verify new indexes are created when channels are synced
+
+**Rollback (if needed):**
+- Migration is destructive - old data is permanently removed
+- Ensure database backup before running migration
+- Channels will be repopulated from providers, but user-specific configurations are lost
+
+### Phase 9: Watchlist Functionality
+
+**Note:** While watchlist operations are defined in Phase 3.4 (Domain Manager methods), this phase covers the complete implementation of watchlist functionality across all layers.
+
+#### 9.1 UserManager Updates (Domain Manager)
+
+**Add Watchlist Methods:**
+```javascript
+/**
+ * Add channel to user watchlist
+ * @param {string} userId - User ID
+ * @param {string} channelKey - Channel key (format: "live-{providerId}-{channelId}")
+ * @returns {Promise<Object>} Success response
+ */
+async addChannelToWatchlist(userId, channelKey) {
+  await this.updateOne(
+    { id: userId },
+    { $addToSet: { watchlist_channels: channelKey } }
+  );
+  return { success: true };
+}
+
+/**
+ * Remove channel from user watchlist
+ * @param {string} userId - User ID
+ * @param {string} channelKey - Channel key
+ * @returns {Promise<Object>} Success response
+ */
+async removeChannelFromWatchlist(userId, channelKey) {
+  await this.updateOne(
+    { id: userId },
+    { $pull: { watchlist_channels: channelKey } }
+  );
+  return { success: true };
+}
+
+/**
+ * Get user's watchlist channel keys
+ * @param {string} userId - User ID
+ * @returns {Promise<Set>} Set of channel keys
+ */
+async getWatchlistChannelKeys(userId) {
+  const user = await this.findOneByQuery({ id: userId });
+  return new Set(user?.watchlist_channels || []);
+}
+```
+
+#### 9.2 ChannelManager Updates (Domain Manager)
+
+**Add Watchlist Filtering Method:**
+```javascript
+/**
+ * Get channels with optional watchlist filtering
+ * @param {Object} options - Query options
+ * @param {string} [options.userId] - User ID for watchlist filtering
+ * @param {boolean} [options.watchlist] - Filter by watchlist (true = only watchlist, false = exclude watchlist, undefined = all)
+ * @param {string} [options.providerId] - Filter by provider
+ * @param {string} [options.search] - Search term
+ * @param {import('../domain/UserManager.js').UserManager} userManager - User manager for watchlist lookup
+ * @returns {Promise<Array>} Array of channel objects
+ */
+async getAllChannels(options = {}, userManager = null) {
+  let query = {};
+  
+  // Provider filter
+  if (options.providerId) {
+    query.provider_id = options.providerId;
+  }
+  
+  // Search filter
+  if (options.search) {
+    query.name = { $regex: options.search, $options: 'i' };
+  }
+  
+  let channels = await this.findByQuery(query);
+  
+  // Watchlist filtering (requires UserManager)
+  if (options.userId && options.watchlist !== undefined && userManager) {
+    const watchlistKeys = await userManager.getWatchlistChannelKeys(options.userId);
+    
+    if (options.watchlist === true) {
+      // Only show watchlist channels
+      channels = channels.filter(ch => watchlistKeys.has(ch.channel_key));
+    } else {
+      // Exclude watchlist channels
+      channels = channels.filter(ch => !watchlistKeys.has(ch.channel_key));
+    }
+  }
+  
+  return channels;
+}
+```
+
+#### 9.3 API Endpoints (Already in Phase 6.2)
+
+**Watchlist endpoints are implemented in Phase 6.2:**
+- `POST /api/livetv/watchlist` - Add channel to watchlist
+- `DELETE /api/livetv/watchlist/:channelKey` - Remove channel from watchlist
+- `GET /api/livetv/channels?watchlist=true/false` - Filter channels by watchlist
+
+#### 9.4 UI Implementation
+
+**Update ChannelsList Component (Extension of Phase 7.2):**
+- Implement watchlist toggle button (show watchlist/all channels)
+- Add "Add to Watchlist" button for each channel
+- Add "Remove from Watchlist" button for channels in watchlist
+- Display watchlist status indicator (icon/badge)
+- Show watchlist count in header
+- Persist watchlist filter preference in user settings
+- Handle watchlist operations with loading states and error handling
+
+**Watchlist UI Features:**
+- Visual indicator for channels in watchlist
+- Quick filter toggle (watchlist/all)
+- Bulk operations (add/remove multiple channels)
+- Watchlist management page (optional)
+
+#### 9.5 Watchlist Cleanup
+
+**Implement cleanup logic in ProvidersManager:**
+- Clean up watchlist entries when channels are deleted (category changes, provider deletion)
+- Validate channel keys in watchlist (remove invalid keys)
+- Handle orphaned watchlist entries (channels no longer exist)
+
+**Cleanup Methods:**
+- `_cleanupWatchlistOnChannelDeletion()` - Remove deleted channel keys from all users
+- `_validateWatchlistEntries()` - Remove invalid channel keys from user watchlists
+- Called automatically during provider deletion and category changes
 
 ## Technical Details
 
@@ -1222,16 +1680,17 @@ this.router.delete('/watchlist/:channelKey', this.middleware.requireAuth, async 
      - No watchlist cleanup needed (channels filtered but not deleted)
 
 2. **Provider Delete Cleanup** (in `ProvidersManager.deleteProvider()`):
-   - Delete all channels for provider: `await this._channelRepo.deleteByProvider(providerId)`
-   - Delete all programs for provider: `await this._programRepo.deleteByProvider(providerId)`
-   - Clean up watchlist entries: Remove channel keys matching `live-{providerId}-*` from all users' `watchlist_channels` arrays
+   - Delete all channels for provider: `await this._channelManager.deleteByProvider(providerId)` (via ChannelManager)
+   - Delete all programs for provider: `await this._programManager.deleteByProvider(providerId)` (via ProgramManager)
+   - Clean up watchlist entries: Remove channel keys matching `live-{providerId}-*` from all users' `watchlist_channels` arrays (via UserManager)
 
 3. **API Response Filtering**:
-   - `getAllChannels()` should filter out channels from disabled/deleted providers
+   - `ChannelManager.getAllChannels()` should filter out channels from disabled/deleted providers
    - Check provider status before returning channels:
      ```javascript
      // Filter out channels from disabled/deleted providers
-     const activeProviders = await this._providerRepo.findByQuery({
+     // Use IPTVProviderManager (Domain Manager) to get active providers
+     const activeProviders = await this._iptvProviderManager.findByQuery({
        enabled: true,
        deleted: { $ne: true }
      });
@@ -1245,22 +1704,23 @@ this.router.delete('/watchlist/:channelKey', this.middleware.requireAuth, async 
    - Example implementation:
      ```javascript
      // In ProvidersManager.deleteProvider()
+     // Use UserManager (Domain Manager) for user operations
      const watchlistPattern = `live-${providerId}-`;
-     const users = await this._userRepo.findByQuery({});
+     const users = await this._userManager.findByQuery({});
      let watchlistEntriesRemoved = 0;
 
      for (const user of users) {
        if (user.watchlist_channels && user.watchlist_channels.length > 0) {
          const originalLength = user.watchlist_channels.length;
-         user.watchlist_channels = user.watchlist_channels.filter(
+         const updatedWatchlist = user.watchlist_channels.filter(
            key => !key.startsWith(watchlistPattern)
          );
-         if (user.watchlist_channels.length !== originalLength) {
-           await this._userRepo.updateOne(
+         if (updatedWatchlist.length !== originalLength) {
+           await this._userManager.updateOne(
              { id: user.id },
-             { $set: { watchlist_channels: user.watchlist_channels } }
+             { $set: { watchlist_channels: updatedWatchlist } }
            );
-           watchlistEntriesRemoved += (originalLength - user.watchlist_channels.length);
+           watchlistEntriesRemoved += (originalLength - updatedWatchlist.length);
          }
        }
      }
@@ -1407,16 +1867,24 @@ this.router.delete('/watchlist/:channelKey', this.middleware.requireAuth, async 
 
 ## Dependencies
 
-- Existing provider infrastructure (`XtreamProvider`, `AGTVProvider`)
-- Existing job infrastructure (`BaseJob`, `EngineScheduler`)
-- Existing repository infrastructure (`ChannelRepository`, `ProgramRepository`)
-- Existing manager infrastructure (`LiveTVManager`, `ProvidersManager`)
+- Existing provider infrastructure (`XtreamProvider`, `AGTVProvider`) - Level 3
+- Existing job infrastructure (`BaseJob`, `EngineScheduler`) - Level 1 & 4
+- Existing repository infrastructure (`ChannelRepository`, `ProgramRepository`) - Level 3
+- Existing manager infrastructure:
+  - `ChannelManager` (Domain Manager, Type A) - Level 2
+  - `ProgramManager` (Domain Manager, Type A) - Level 2
+  - `IPTVProviderManager` (Domain Manager, Type A) - Level 2
+  - `UserManager` (Domain Manager, Type A) - Level 2
+  - `LiveTVProcessingManager` (Processing Manager, Type C) - Level 2
+  - `LiveTVFormattingManager` (Formatting Manager, Type B) - Level 2
+  - `ProvidersManager` (Orchestration Manager, Type D) - Level 2
+  - `JobHistoryManager` (Domain Manager, Type A) - Level 2
 
 ## Timeline
 
 1. **Phase 1**: Provider implementation (2-3 days)
 2. **Phase 2**: Repository updates (1 day)
-3. **Phase 3**: LiveTVManager refactoring (2-3 days)
+3. **Phase 3**: LiveTVProcessingManager updates (2-3 days)
 4. **Phase 4**: Category management integration (2-3 days)
 5. **Phase 5**: SyncLiveTVJob updates (1 day)
 6. **Phase 6**: API/Routes updates (2 days)
@@ -1424,7 +1892,7 @@ this.router.delete('/watchlist/:channelKey', this.middleware.requireAuth, async 
 8. **Phase 8**: Database migration (removing old data) (1 day)
 9. **Phase 9**: Watchlist functionality (2 days)
 
-**Total Estimated Time**: 14-19 days
+**Total Estimated Time**: 16-21 days
 
 ## Migration Notes
 
