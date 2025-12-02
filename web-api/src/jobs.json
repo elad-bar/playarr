@@ -21,6 +21,13 @@
       "interval": "12h",
       "description": "Sync Live TV channels and EPG from user-configured M3U and EPG URLs",
       "schedule": "On startup and Every 12 hours"
+    },
+    {
+      "name": "syncProviderDetails",
+      "jobHistoryName": "SyncProviderDetailsJob",
+      "interval": "1m",
+      "description": "Sync provider account details (expiration, connections) from authentication endpoints",
+      "schedule": "On startup and Every 1 minute"
     }
   ]
 }

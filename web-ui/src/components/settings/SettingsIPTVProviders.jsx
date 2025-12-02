@@ -420,6 +420,27 @@ function SettingsIPTVProviders() {
                     </Box>
                   </Box>
 
+                  {/* Provider Details */}
+                  {provider.provider_details && (
+                    <Box sx={{ mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="body2" sx={{ mb: 1 }}>
+                        <strong>Maximum Connections:</strong> {provider.provider_details.max_connections ?? 'N/A'}
+                      </Typography>
+                      {provider.type?.toLowerCase() === 'xtream' && (
+                        <Typography variant="body2" sx={{ mb: 1 }}>
+                          <strong>Active Connections:</strong> {provider.provider_details.active_connections ?? 'N/A'}
+                        </Typography>
+                      )}
+                      <Typography variant="body2">
+                        <strong>Expiration Date:</strong> {
+                          provider.provider_details.expiration_date 
+                            ? new Date(provider.provider_details.expiration_date * 1000).toLocaleDateString()
+                            : 'N/A'
+                        }
+                      </Typography>
+                    </Box>
+                  )}
+
                   {/* Action Buttons */}
                   <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5, mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
                     <IconButton

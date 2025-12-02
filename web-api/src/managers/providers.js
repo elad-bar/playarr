@@ -137,6 +137,15 @@ class ProvidersManager extends BaseManager {
   }
 
   /**
+   * Get provider instance by type (for jobs that need direct access)
+   * @param {string} providerType - Provider type ('xtream' or 'agtv')
+   * @returns {BaseIPTVProvider|null} Provider instance or null if not found
+   */
+  getProviderInstance(providerType) {
+    return this._providerTypeMap[providerType?.toLowerCase()] || null;
+  }
+
+  /**
    * Extract category IDs from category keys
    * Category keys format: "movies-1", "tvshows-5"
    * Returns: [1, 5] (numeric IDs)
@@ -619,6 +628,35 @@ class ProvidersManager extends BaseManager {
         }
       }
 
+      // Authenticate and get provider details
+      try {
+        const providerInstance = this._providerTypeMap[providerData.type.toLowerCase()];
+        if (providerInstance) {
+          const authDetails = await providerInstance.authenticate(providerData.id);
+          
+          // Build provider_details object with last_checked timestamp
+          providerData.provider_details = {
+            expiration_date: authDetails.expiration_date ?? null,
+            max_connections: authDetails.max_connections ?? 0,
+            active_connections: authDetails.active_connections ?? 0,
+            last_checked: new Date().toISOString()
+          };
+
+          this.logger.info(`Provider details populated for ${providerData.id} on creation`);
+        }
+      } catch (error) {
+        // Log authentication failure but don't fail provider creation
+        this.logger.warn(`Failed to authenticate provider ${providerData.id} during creation: ${error.message}`);
+        // Set empty provider_details with error tracking
+        providerData.provider_details = {
+          expiration_date: null,
+          max_connections: 0,
+          active_connections: 0,
+          last_checked: new Date().toISOString(),
+          last_error: error.message
+        };
+      }
+
       // Add provider to array and save
       providers.push(providerData);
       await this._writeAllProviders(providers);
@@ -706,6 +744,35 @@ class ProvidersManager extends BaseManager {
         }
       }
 
+      // Authenticate and get provider details
+      try {
+        const providerInstance = this._providerTypeMap[updatedProvider.type?.toLowerCase()];
+        if (providerInstance) {
+          const authDetails = await providerInstance.authenticate(providerId);
+          
+          // Build provider_details object with last_checked timestamp
+          updatedProvider.provider_details = {
+            expiration_date: authDetails.expiration_date ?? null,
+            max_connections: authDetails.max_connections ?? 0,
+            active_connections: authDetails.active_connections ?? 0,
+            last_checked: new Date().toISOString()
+          };
+
+          this.logger.info(`Provider details updated for ${providerId} on edit`);
+        }
+      } catch (error) {
+        // Log authentication failure but don't fail provider update
+        this.logger.warn(`Failed to authenticate provider ${providerId} during update: ${error.message}`);
+        // Set provider_details with error tracking
+        updatedProvider.provider_details = {
+          expiration_date: null,
+          max_connections: 0,
+          active_connections: 0,
+          last_checked: new Date().toISOString(),
+          last_error: error.message
+        };
+      }
+
       // Handle enable/disable cleanup
       if (enabledChanged && !willBeEnabled) {
         // Provider being disabled - keep provider titles, only remove from main titles
@@ -752,6 +819,68 @@ class ProvidersManager extends BaseManager {
       this._invalidateProvidersCache();
       return {
         response: { error: 'Failed to update provider' },
+        statusCode: 500,
+      };
+    }
+  }
+
+  /**
+   * Update provider details (expiration, connections) for a specific provider
+   * Lightweight method that updates only the provider_details field without side effects
+   * @param {string} providerId - Provider ID
+   * @param {Object} details - Provider details object with expiration_date, max_connections, active_connections, and optionally last_error
+   * @returns {Promise<Object>} Result object with statusCode and response
+   */
+  async updateProviderDetails(providerId, details) {
+    try {
+      // Validate provider exists
+      const providers = await this._readAllProviders();
+      const provider = providers.find(p => p.id === providerId);
+
+      if (!provider) {
+        return {
+          response: { error: 'Provider not found' },
+          statusCode: 404,
+        };
+      }
+
+      // Build provider_details object with last_checked timestamp
+      const providerDetails = {
+        expiration_date: details.expiration_date ?? null,
+        max_connections: details.max_connections ?? 0,
+        active_connections: details.active_connections ?? 0,
+        last_checked: new Date().toISOString()
+      };
+
+      // Optionally include last_error if provided
+      if (details.last_error !== undefined) {
+        providerDetails.last_error = details.last_error;
+      }
+
+      // Update database via direct repository update ($set operator)
+      await this._providerRepo.updateOne(
+        { id: providerId },
+        { $set: { provider_details: providerDetails } }
+      );
+
+      // Update in-memory cache directly (no invalidation needed)
+      if (this._cachedProviders) {
+        const cachedProvider = this._cachedProviders.find(p => p.id === providerId);
+        if (cachedProvider) {
+          cachedProvider.provider_details = providerDetails;
+        }
+      }
+
+      this.logger.debug(`Updated provider details for ${providerId}`);
+
+      return {
+        response: { provider_id: providerId, provider_details: providerDetails },
+        statusCode: 200,
+      };
+    } catch (error) {
+      this.logger.error(`Error updating provider details for ${providerId}:`, error);
+      return {
+        response: { error: 'Failed to update provider details' },
         statusCode: 500,
       };
     }

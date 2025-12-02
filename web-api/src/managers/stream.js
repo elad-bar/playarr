@@ -196,7 +196,7 @@ class StreamManager extends BaseManager {
           if (providerUrl.startsWith('http://') || providerUrl.startsWith('https://')) {
             // Already absolute, use as-is
             this.logger.debug(`Using absolute URL: ${providerUrl}`);
-            sources.push({ url: providerUrl, providerType });
+            sources.push({ url: providerUrl, providerType, provider_id: providerId });
           } else if (providerUrl.startsWith('/')) {
             // Relative URL - need to concatenate with base URLs
             if (provider && provider.streams_urls && Array.isArray(provider.streams_urls) && provider.streams_urls.length > 0) {
@@ -208,22 +208,57 @@ class StreamManager extends BaseManager {
                   const cleanBaseUrl = baseUrl.replace(/\/$/, '');
                   const fullUrl = `${cleanBaseUrl}${providerUrl}`;
                   this.logger.debug(`Constructed full URL: ${fullUrl}`);
-                  sources.push({ url: fullUrl, providerType });
+                  sources.push({ url: fullUrl, providerType, provider_id: providerId });
                 }
               }
             } else {
               // No streams_urls configured, log warning but still try the relative URL
               this.logger.warn(`Provider ${providerId} has relative stream URL but no streams_urls configured. Using relative URL: ${providerUrl}`);
-              sources.push({ url: providerUrl, providerType });
+              sources.push({ url: providerUrl, providerType, provider_id: providerId });
             }
           } else {
             // Neither absolute nor relative (unexpected format), use as-is
             this.logger.warn(`Unexpected stream URL format for ${providerId}: ${providerUrl}`);
-            sources.push({ url: providerUrl, providerType });
+            sources.push({ url: providerUrl, providerType, provider_id: providerId });
           }
       }
 
-      this.logger.debug(`Found ${sources.length} source URL(s) for title ${titleId}`);
+      // Sort sources by provider type, availability, and priority
+      sources.sort((a, b) => {
+        const providerA = providersMap.get(a.provider_id);
+        const providerB = providersMap.get(b.provider_id);
+        
+        // 1. Provider type priority: Xtream (0) > AGTV (1) > unknown (999)
+        const typePriority = { 'xtream': 0, 'agtv': 1 };
+        const typeA = typePriority[providerA?.type?.toLowerCase()] ?? 999;
+        const typeB = typePriority[providerB?.type?.toLowerCase()] ?? 999;
+        const typeDiff = typeA - typeB;
+        if (typeDiff !== 0) return typeDiff;
+        
+        // 2. For Xtream: sort by availability (higher is better)
+        if (providerA?.type?.toLowerCase() === 'xtream' && providerB?.type?.toLowerCase() === 'xtream') {
+          const detailsA = providerA.provider_details || {};
+          const detailsB = providerB.provider_details || {};
+          
+          const maxConnA = detailsA.max_connections ?? 1;
+          const activeConnA = detailsA.active_connections ?? 0;
+          const availabilityA = maxConnA > 0 ? 1 - (activeConnA / maxConnA) : 0;
+          
+          const maxConnB = detailsB.max_connections ?? 1;
+          const activeConnB = detailsB.active_connections ?? 0;
+          const availabilityB = maxConnB > 0 ? 1 - (activeConnB / maxConnB) : 0;
+          
+          const availabilityDiff = availabilityB - availabilityA; // Descending (higher availability first)
+          if (availabilityDiff !== 0) return availabilityDiff;
+        }
+        
+        // 3. Provider priority as tiebreaker (lower number = higher priority)
+        const priorityA = providerA?.priority ?? 999;
+        const priorityB = providerB?.priority ?? 999;
+        return priorityA - priorityB;
+      });
+
+      this.logger.debug(`Found ${sources.length} source URL(s) for title ${titleId} (sorted by priority)`);
       return sources;
     } catch (error) {
       this.logger.error(`Error getting sources for title ${titleId}:`, error);
