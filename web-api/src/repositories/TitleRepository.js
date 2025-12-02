@@ -189,33 +189,5 @@ export class TitleRepository extends BaseRepository {
       }
     );
   }
-
-  /**
-   * Remove provider from titles.streams
-   * This method is no longer used - provider removal is handled directly via MongoDB $pull operations
-   * Kept for backward compatibility but returns zero counts
-   * @param {string} providerId - Provider ID to remove
-   * @param {Array<string>} titleKeys - Array of title_key values
-   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number}>}
-   */
-  async removeProviderFromStreams(providerId, titleKeys) {
-    // This method is no longer used - provider removal is handled in ProvidersManager
-    // using MongoDB $pull operations on titles.media[].sources
-    return { titlesUpdated: 0, streamsRemoved: 0 };
-  }
-
-  /**
-   * Delete titles without streams
-   * This method is no longer used - title deletion is handled directly in ProvidersManager
-   * Kept for backward compatibility
-   * @param {Array<string>} titleKeys - Array of title_key values to check
-   * @param {Set<string>} titleKeysWithStreams - Set of title_keys that have streams (unused)
-   * @returns {Promise<number>} Number of deleted titles
-   */
-  async deleteWithoutStreams(titleKeys, titleKeysWithStreams) {
-    // This method is no longer used - title deletion is handled in ProvidersManager
-    // by querying titles.media array directly
-    return 0;
-  }
 }
 

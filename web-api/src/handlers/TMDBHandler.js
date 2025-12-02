@@ -1607,9 +1607,5 @@ export class TMDBHandler extends BaseHandler {
     }
   }
 
-  // Note: Composite operations (deleteTitleStreamsByCategories, removeProvidersFromAllTitleSources,
-  // removeProviderFromTitleSourcesByDisabledCategories, deleteTitlesWithoutStreams) have been moved
-  // to ProvidersManager. These methods are no longer needed in TMDBHandler.
-
 }
 
