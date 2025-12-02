@@ -9,6 +9,79 @@ import path from 'path';
 export class AGTVProvider extends BaseIPTVProvider {
 
   /**
+   * Authenticate with AGTV provider and get account details
+   * Calls /login endpoint to get expiration date
+   * Connection information is not available from API, so returns hardcoded values
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<Object>} Provider details object with expiration_date, max_connections, active_connections
+   */
+  async authenticate(providerId) {
+    try {
+      const provider = this._getProviderConfig(providerId);
+      const limiter = this._getLimiter(providerId);
+
+      // Step 1: Login to get token
+      const loginUrl = `${provider.api_url}/api/login`;
+      const loginResponse = await this._fetchJsonPostWithCacheAxios({
+        providerId,
+        type: 'auth',
+        endpoint: 'login',
+        url: loginUrl,
+        data: {
+          username: provider.username,
+          password: provider.password
+        },
+        headers: {},
+        limiter,
+        skipCache: true
+      });
+
+      // Extract token from login response
+      const token = loginResponse.data?.token;
+      if (!token) {
+        throw new Error('No token received from login');
+      }
+
+      // Step 2: Get user info with token
+      const userUrl = `${provider.api_url}/api/user`;
+      const userResponse = await this._fetchJsonWithCacheAxios({
+        providerId,
+        type: 'auth',
+        endpoint: 'user',
+        url: userUrl,
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        limiter,
+        skipCache: true
+      });
+
+      // Parse expiration date from expiration_date_timestamp
+      const expirationTimestamp = userResponse.data?.expiration_date_timestamp;
+      const expirationDate = expirationTimestamp ? expirationTimestamp : null;
+
+      // AGTV does not provide connection information via API
+      // Return hardcoded values as per specification
+      // max_connections: 5 (hardcoded, not available from API)
+      // active_connections: 0 (cannot be retrieved from API)
+      
+      return {
+        expiration_date: expirationDate,
+        max_connections: 5,
+        active_connections: 0
+      };
+    } catch (error) {
+      this.logger.error(`[${providerId}] Error authenticating with AGTV provider: ${error.message}`);
+      // Return hardcoded values on error
+      return {
+        expiration_date: null,
+        max_connections: 5,
+        active_connections: 0
+      };
+    }
+  }
+
+  /**
    * Fetch M3U8 content from AGTV provider
    * @param {string} providerId - Provider ID
    * @param {string} type - Media type ('movies' or 'tvshows')
@@ -46,6 +119,31 @@ export class AGTVProvider extends BaseIPTVProvider {
    */
   _getCacheKeyMappings(providerId) {
     return {
+      // Authentication endpoints
+      'login-auth': {
+        type: 'auth',
+        endpoint: 'login',
+        dirBuilder: (cacheDir, providerId, params) => {
+          return path.join(cacheDir, providerId, 'auth');
+        },
+        fileBuilder: (cacheDir, providerId, type, params) => {
+          const dirPath = path.join(cacheDir, providerId, 'auth');
+          return path.join(dirPath, 'login.json');
+        },
+        ttl: null // Never expire (for debugging)
+      },
+      'user-auth': {
+        type: 'auth',
+        endpoint: 'user',
+        dirBuilder: (cacheDir, providerId, params) => {
+          return path.join(cacheDir, providerId, 'auth');
+        },
+        fileBuilder: (cacheDir, providerId, type, params) => {
+          const dirPath = path.join(cacheDir, providerId, 'auth');
+          return path.join(dirPath, 'user.json');
+        },
+        ttl: null // Never expire (for debugging)
+      },
       // Movies M3U8 (no page param = list.m3u8)
       'm3u8-movies': {
         type: 'movies',

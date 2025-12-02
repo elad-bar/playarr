@@ -495,26 +495,29 @@ export class BaseProvider {
    * @param {Object} [options.headers={}] - Request headers
    * @param {Bottleneck} options.limiter - Rate limiter (required for axios-based calls)
    * @param {Function} [options.transform] - Optional transform function for response data
+   * @param {boolean} [options.skipCache=false] - Skip reading from cache (always fetch fresh, but still write to cache for debugging)
    * @param {number} [options.timeout=30000] - Request timeout in milliseconds
    * @returns {Promise<Object>} JSON response data
    */
-  async _fetchJsonWithCacheAxios({ providerId, type, endpoint, cacheParams = {}, url, headers = {}, limiter, transform = null, timeout = 30000 }) {
+  async _fetchJsonWithCacheAxios({ providerId, type, endpoint, cacheParams = {}, url, headers = {}, limiter, transform = null, skipCache = false, timeout = 30000 }) {
     if (!limiter) {
       throw new Error('Rate limiter is required');
     }
 
-    // Check cache first
-    const cached = this._getCache(providerId, type, endpoint, cacheParams);
-    if (cached !== null) {
-      this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
-      return cached;
+    // Check cache first (unless skipping cache read)
+    if (!skipCache) {
+      const cached = this._getCache(providerId, type, endpoint, cacheParams);
+      if (cached !== null) {
+        this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
+        return cached;
+      }
     }
 
     // Make API call with rate limiting
     const axios = (await import('axios')).default;
     const totalStartTime = Date.now();
     const cacheKey = cacheParams.titleId ? `/${cacheParams.titleId}` : '';
-    this.logger.debug(`API request starting: ${endpoint} ${providerId}/${type}${cacheKey}`);
+    this.logger.debug(`API request starting: ${endpoint} ${providerId}/${type}${cacheKey}${skipCache ? ' (skipping cache read)' : ''}`);
     
     let requestDuration = 0;
     const data = await limiter.schedule(async () => {
@@ -531,6 +534,68 @@ export class BaseProvider {
 
     // Transform data if transform function provided
     const finalData = transform ? transform(data) : data;
+
+    // Cache the result
+    this._setCache(providerId, type, endpoint, finalData, cacheParams);
+
+    return finalData;
+  }
+
+  /**
+   * Fetch JSON data with POST method, caching and rate limiting (using axios)
+   * @protected
+   * @param {Object} options - Fetch options
+   * @param {string} options.providerId - Provider ID
+   * @param {string} options.type - Media type
+   * @param {string} options.endpoint - Cache endpoint name (e.g., 'authenticate')
+   * @param {Object} [options.cacheParams={}] - Parameters for cache key uniqueness
+   * @param {string} options.url - Full URL to fetch
+   * @param {Object} options.data - Request body data
+   * @param {Object} [options.headers={}] - Request headers
+   * @param {Bottleneck} options.limiter - Rate limiter (required for axios-based calls)
+   * @param {Function} [options.transform] - Optional transform function for response data
+   * @param {boolean} [options.skipCache=false] - Skip reading from cache (always fetch fresh, but still write to cache for debugging)
+   * @param {number} [options.timeout=30000] - Request timeout in milliseconds
+   * @returns {Promise<Object>} JSON response data
+   */
+  async _fetchJsonPostWithCacheAxios({ providerId, type, endpoint, cacheParams = {}, url, data, headers = {}, limiter, transform = null, skipCache = false, timeout = 30000 }) {
+    if (!limiter) {
+      throw new Error('Rate limiter is required');
+    }
+
+    // Check cache first (unless skipping cache read)
+    if (!skipCache) {
+      const cached = this._getCache(providerId, type, endpoint, cacheParams);
+      if (cached !== null) {
+        this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
+        return cached;
+      }
+    }
+
+    // Make API call with rate limiting
+    const axios = (await import('axios')).default;
+    const totalStartTime = Date.now();
+    const cacheKey = cacheParams.titleId ? `/${cacheParams.titleId}` : '';
+    this.logger.debug(`API POST request starting: ${endpoint} ${providerId}/${type}${cacheKey}${skipCache ? ' (skipping cache read)' : ''}`);
+    
+    let requestDuration = 0;
+    const responseData = await limiter.schedule(async () => {
+      const requestStartTime = Date.now();
+      const response = await axios.post(url, data, { 
+        headers: { 'Content-Type': 'application/json', ...headers }, 
+        timeout 
+      });
+      requestDuration = Date.now() - requestStartTime;
+      this.logger.debug(`API POST request completed: ${endpoint} ${providerId}/${type}${cacheKey} - ${requestDuration}ms (HTTP ${response.status})`);
+      return response.data;
+    });
+    
+    const totalDuration = Date.now() - totalStartTime;
+    const waitTime = totalDuration - requestDuration;
+    this.logger.debug(`API POST call total time (including rate limiter wait): ${endpoint} ${providerId}/${type}${cacheKey} - ${totalDuration}ms (request: ${requestDuration}ms, wait: ${waitTime}ms)`);
+
+    // Transform data if transform function provided
+    const finalData = transform ? transform(responseData) : responseData;
 
     // Cache the result
     this._setCache(providerId, type, endpoint, finalData, cacheParams);
