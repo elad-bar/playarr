@@ -49,12 +49,10 @@ jobs:
           file: ./Dockerfile
           push: false
           load: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ env.IMAGE_NAME }}:test
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Test Docker image
         run: |
-          docker run --rm ${{ env.IMAGE_NAME }}:latest node --version || \
-          docker run --rm ${{ env.IMAGE_NAME }}:${{ github.sha }} node --version || \
-          docker run --rm ${{ env.IMAGE_NAME }}:${{ github.head_ref || github.ref_name }} node --version
+          docker run --rm ${{ env.IMAGE_NAME }}:test node --version
 
