@@ -724,10 +724,11 @@ class ProvidersManager extends BaseManager {
 
       // Reset provider_details to null if credentials changed - syncProviderDetails job will repopulate it
       // This ensures authentication uses the updated credentials after config is reloaded
+      // Only check fields that are present in providerData to avoid false positives on partial updates
       const credentialsChanged = 
-        providerData.username !== existingProvider.username ||
-        providerData.password !== existingProvider.password ||
-        JSON.stringify(providerData.streams_urls || []) !== JSON.stringify(existingProvider.streams_urls || []);
+        ('username' in providerData && providerData.username !== existingProvider.username) ||
+        ('password' in providerData && providerData.password !== existingProvider.password) ||
+        ('streams_urls' in providerData && JSON.stringify(providerData.streams_urls || []) !== JSON.stringify(existingProvider.streams_urls || []));
       
       if (credentialsChanged) {
         updatedProvider.provider_details = null;
