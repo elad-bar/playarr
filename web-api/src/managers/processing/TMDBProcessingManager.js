@@ -1,5 +1,5 @@
 import { BaseProcessingManager } from './BaseProcessingManager.js';
-import { extractYearFromTitle, extractBaseTitle, extractYearFromReleaseDate, generateTitleKey } from '../utils/titleUtils.js';
+import { extractYearFromTitle, extractBaseTitle, extractYearFromReleaseDate, generateTitleKey } from '../../utils/titleUtils.js';
 
 /**
  * TMDB API handler

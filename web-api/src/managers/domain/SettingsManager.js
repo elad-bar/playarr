@@ -1,6 +1,6 @@
 import { BaseDomainManager } from './BaseDomainManager.js';
-import { DatabaseCollections, toCollectionName } from '../config/collections.js';
-import { AppError } from '../errors/AppError.js';
+import { DatabaseCollections, toCollectionName } from '../../config/collections.js';
+import { AppError } from '../../errors/AppError.js';
 
 /**
  * Settings manager for managing application settings

@@ -1,6 +1,6 @@
 import { BaseDomainManager } from './BaseDomainManager.js';
-import { DatabaseCollections, toCollectionName } from '../config/collections.js';
-import { NotFoundError, ValidationError, AppError } from '../errors/AppError.js';
+import { DatabaseCollections, toCollectionName } from '../../config/collections.js';
+import { NotFoundError, ValidationError, AppError } from '../../errors/AppError.js';
 
 /**
  * @typedef {Object} MediaStreamSource

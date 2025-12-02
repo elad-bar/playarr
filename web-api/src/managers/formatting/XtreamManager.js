@@ -1,5 +1,5 @@
 import { BaseWatchlistFormattingManager } from './BaseWatchlistFormattingManager.js';
-import { DatabaseCollections, toCollectionName } from '../config/collections.js';
+import { DatabaseCollections, toCollectionName } from '../../config/collections.js';
 
 /**
  * Xtream Code API manager for exposing movies and TV shows in Xtream Code format

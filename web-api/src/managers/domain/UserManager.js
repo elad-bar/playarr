@@ -1,8 +1,8 @@
 import { BaseDomainManager } from './BaseDomainManager.js';
-import { DatabaseCollections, toCollectionName } from '../config/collections.js';
-import { hashPassword, verifyPassword } from '../utils/password.js';
-import { createJWTToken } from '../utils/jwt.js';
-import { NotFoundError, ValidationError, ConflictError, ForbiddenError, AppError } from '../errors/AppError.js';
+import { DatabaseCollections, toCollectionName } from '../../config/collections.js';
+import { hashPassword, verifyPassword } from '../../utils/password.js';
+import { createJWTToken } from '../../utils/jwt.js';
+import { NotFoundError, ValidationError, ConflictError, ForbiddenError, AppError } from '../../errors/AppError.js';
 
 /**
  * User manager for handling user operations

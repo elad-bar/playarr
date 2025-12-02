@@ -1,5 +1,5 @@
 import { BaseManager } from '../BaseManager.js';
-import { JobNotFoundError, JobAlreadyRunningError, JobSchedulerUnavailableError, AppError } from '../errors/AppError.js';
+import { JobNotFoundError, JobAlreadyRunningError, JobSchedulerUnavailableError, AppError } from '../../errors/AppError.js';
 
 /**
  * Jobs manager for managing jobs

@@ -21,7 +21,7 @@
  */
 
 import { BaseProcessingManager } from './BaseProcessingManager.js';
-import { generateTitleKey, generateCategoryKey } from '../utils/titleUtils.js';
+import { generateTitleKey, generateCategoryKey } from '../../utils/titleUtils.js';
 
 /**
  * Base class for all IPTV processing managers (AGTV, Xtream)

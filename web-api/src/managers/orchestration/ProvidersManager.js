@@ -1,6 +1,6 @@
 import { BaseManager } from '../BaseManager.js';
-import { DataProvider } from '../config/collections.js';
-import { NotFoundError, AppError } from '../errors/AppError.js';
+import { DataProvider } from '../../config/collections.js';
+import { NotFoundError, AppError } from '../../errors/AppError.js';
 
 /**
  * Providers Manager (Type D: Orchestration Manager)
