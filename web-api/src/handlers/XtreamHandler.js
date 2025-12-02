@@ -121,8 +121,7 @@ export class XtreamHandler extends BaseIPTVHandler {
     title.streams.main = this._buildStreamUrl(streamId, containerExtension, config.mediaEndpoint);
 
     // Extract and store metadata fields directly on title object
-    // Ensure tmdb_id is stored as a number if it exists and is not null
-    title.tmdb_id = extInfo.tmdb_id != null ? Number(extInfo.tmdb_id) : null;
+    title.tmdb_id = this._extractTmdbId(extInfo);
     title.release_date = extInfo.releasedate;
   }
 
@@ -186,7 +185,7 @@ export class XtreamHandler extends BaseIPTVHandler {
       });
     }
 
-    title.tmdb_id = null;
+    title.tmdb_id = this._extractTmdbId(extInfo);
     title.name = extInfo.name;
     title.release_date = extInfo.releaseDate;
   }
@@ -220,6 +219,29 @@ export class XtreamHandler extends BaseIPTVHandler {
     const resource = `${streamId}.${extension}`;
     
     return `/${mediaEndpoint}/${username}/${password}/${resource}`;
+  }
+
+  /**
+   * Extract TMDB ID from extended info object
+   * Supports both tmdb_id and tmdb fields (some providers use different field names)
+   * @private
+   * @param {Object} extInfo - Extended info object from API response
+   * @returns {number|null} TMDB ID as number, or null if not found
+   */
+  _extractTmdbId(extInfo) {
+    if (!extInfo) {
+      return null;
+    }
+
+    if(extInfo.tmdb_id) {
+      return Number(extInfo.tmdb_id);
+    }
+
+    if(extInfo.tmdb) {
+      return Number(extInfo.tmdb);
+    }
+
+    return null;
   }
 
   /**
