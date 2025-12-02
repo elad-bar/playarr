@@ -41,11 +41,12 @@ class ProvidersManager extends BaseManager {
   }
 
   /**
-   * Trigger syncIPTVProviderTitles job asynchronously (fire and forget)
+   * Trigger a job asynchronously (fire and forget)
    * @private
+   * @param {string} jobName - Name of the job to trigger
    * @returns {void}
    */
-  _triggerSyncJob() {
+  _triggerJobAsync(jobName) {
     if (!this._triggerJob) {
       this.logger.warn('Trigger job function not available');
       return;
@@ -54,10 +55,10 @@ class ProvidersManager extends BaseManager {
     // Fire job asynchronously without blocking
     setImmediate(async () => {
       try {
-        await this._triggerJob('syncIPTVProviderTitles');
-        this.logger.info('Triggered syncIPTVProviderTitles job');
+        await this._triggerJob(jobName);
+        this.logger.info(`Triggered ${jobName} job`);
       } catch (error) {
-        this.logger.error(`Failed to trigger syncIPTVProviderTitles job: ${error.message}`);
+        this.logger.error(`Failed to trigger ${jobName} job: ${error.message}`);
         // Don't throw - allow provider operation to continue even if job trigger fails
       }
     });
@@ -628,34 +629,9 @@ class ProvidersManager extends BaseManager {
         }
       }
 
-      // Authenticate and get provider details
-      try {
-        const providerInstance = this._providerTypeMap[providerData.type.toLowerCase()];
-        if (providerInstance) {
-          const authDetails = await providerInstance.authenticate(providerData.id);
-          
-          // Build provider_details object with last_checked timestamp
-          providerData.provider_details = {
-            expiration_date: authDetails.expiration_date ?? null,
-            max_connections: authDetails.max_connections ?? 0,
-            active_connections: authDetails.active_connections ?? 0,
-            last_checked: new Date().toISOString()
-          };
-
-          this.logger.info(`Provider details populated for ${providerData.id} on creation`);
-        }
-      } catch (error) {
-        // Log authentication failure but don't fail provider creation
-        this.logger.warn(`Failed to authenticate provider ${providerData.id} during creation: ${error.message}`);
-        // Set empty provider_details with error tracking
-        providerData.provider_details = {
-          expiration_date: null,
-          max_connections: 0,
-          active_connections: 0,
-          last_checked: new Date().toISOString(),
-          last_error: error.message
-        };
-      }
+      // Initialize provider_details as null - syncProviderDetails job will populate it
+      // This ensures authentication happens after provider config is properly loaded
+      providerData.provider_details = null;
 
       // Add provider to array and save
       providers.push(providerData);
@@ -667,9 +643,11 @@ class ProvidersManager extends BaseManager {
       // Reload provider configs in provider instances
       await this._reloadProviderConfigs();
 
-      // Trigger sync job if provider is enabled (async, non-blocking)
+      // Trigger sync jobs if provider is enabled (async, non-blocking)
       if (providerData.enabled !== false) {
-        this._triggerSyncJob();
+        this._triggerJobAsync('syncIPTVProviderTitles');
+        // Trigger syncProviderDetails job to authenticate and populate provider details
+        this._triggerJobAsync('syncProviderDetails');
       }
 
       // Broadcast WebSocket event
@@ -744,33 +722,16 @@ class ProvidersManager extends BaseManager {
         }
       }
 
-      // Authenticate and get provider details
-      try {
-        const providerInstance = this._providerTypeMap[updatedProvider.type?.toLowerCase()];
-        if (providerInstance) {
-          const authDetails = await providerInstance.authenticate(providerId);
-          
-          // Build provider_details object with last_checked timestamp
-          updatedProvider.provider_details = {
-            expiration_date: authDetails.expiration_date ?? null,
-            max_connections: authDetails.max_connections ?? 0,
-            active_connections: authDetails.active_connections ?? 0,
-            last_checked: new Date().toISOString()
-          };
-
-          this.logger.info(`Provider details updated for ${providerId} on edit`);
-        }
-      } catch (error) {
-        // Log authentication failure but don't fail provider update
-        this.logger.warn(`Failed to authenticate provider ${providerId} during update: ${error.message}`);
-        // Set provider_details with error tracking
-        updatedProvider.provider_details = {
-          expiration_date: null,
-          max_connections: 0,
-          active_connections: 0,
-          last_checked: new Date().toISOString(),
-          last_error: error.message
-        };
+      // Reset provider_details to null if credentials changed - syncProviderDetails job will repopulate it
+      // This ensures authentication uses the updated credentials after config is reloaded
+      const credentialsChanged = 
+        providerData.username !== existingProvider.username ||
+        providerData.password !== existingProvider.password ||
+        JSON.stringify(providerData.streams_urls || []) !== JSON.stringify(existingProvider.streams_urls || []);
+      
+      if (credentialsChanged) {
+        updatedProvider.provider_details = null;
+        this.logger.debug(`Provider ${providerId} credentials changed, resetting provider_details for re-authentication`);
       }
 
       // Handle enable/disable cleanup
@@ -790,7 +751,7 @@ class ProvidersManager extends BaseManager {
       } else if (enabledChanged && willBeEnabled) {
         // Provider being enabled - incremental sync will work automatically since titles are kept
         // Trigger sync job to fetch updates (async, non-blocking)
-        this._triggerSyncJob();
+        this._triggerJobAsync('syncIPTVProviderTitles');
       }
 
       // Update in array and save
@@ -802,6 +763,12 @@ class ProvidersManager extends BaseManager {
 
       // Reload provider configs in provider instances
       await this._reloadProviderConfigs();
+
+      // Trigger syncProviderDetails job if credentials changed or provider is enabled
+      // This will authenticate with updated credentials and populate provider details
+      if (credentialsChanged || updatedProvider.enabled !== false) {
+        this._triggerJobAsync('syncProviderDetails');
+      }
 
       // Broadcast WebSocket event
       this._webSocketService.broadcastEvent('provider_changed', {
@@ -1109,7 +1076,7 @@ class ProvidersManager extends BaseManager {
       }
 
       // Trigger sync job to fetch fresh data with new categories (async, non-blocking)
-      this._triggerSyncJob();
+      this._triggerJobAsync('syncIPTVProviderTitles');
 
       // Broadcast WebSocket event
       this._webSocketService.broadcastEvent('provider_changed', {
