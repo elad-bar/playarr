@@ -42,38 +42,43 @@ import { SyncLiveTVJob } from './jobs/SyncLiveTVJob.js';
 import { SyncProviderDetailsJob } from './jobs/SyncProviderDetailsJob.js';
 
 // Import manager classes
-import { UserManager } from './managers/users.js';
-import { TitlesManager } from './managers/titles.js';
-import { SettingsManager } from './managers/settings.js';
-import { StatsManager } from './managers/stats.js';
-import { ProvidersManager } from './managers/providers.js';
-import { StreamManager } from './managers/stream.js';
-import { PlaylistManager } from './managers/playlist.js';
-import { TMDBManager } from './managers/tmdb.js';
-import { XtreamManager } from './managers/xtream.js';
-import { JobsManager } from './managers/jobs.js';
-import { StremioManager } from './managers/stremio.js';
-import { LiveTVManager } from './managers/liveTV.js';
+import { UserManager } from './managers/domain/UserManager.js';
+import { TitlesManager } from './managers/domain/TitlesManager.js';
+import { SettingsManager } from './managers/domain/SettingsManager.js';
+import { StatsManager } from './managers/domain/StatsManager.js';
+import { ProviderTitlesManager } from './managers/domain/ProviderTitlesManager.js';
+import { IPTVProviderManager } from './managers/domain/IPTVProviderManager.js';
+import { JobHistoryManager } from './managers/domain/JobHistoryManager.js';
+import { ProvidersManager } from './managers/orchestration/ProvidersManager.js';
+import { PlaylistManager } from './managers/formatting/PlaylistManager.js';
+import { TMDBManager } from './managers/domain/TMDBManager.js';
+import { XtreamManager } from './managers/formatting/XtreamManager.js';
+import { JobsManager } from './managers/orchestration/JobsManager.js';
+import { StremioManager } from './managers/formatting/StremioManager.js';
+import { ChannelManager } from './managers/domain/ChannelManager.js';
+import { ProgramManager } from './managers/domain/ProgramManager.js';
+import { LiveTVProcessingManager } from './managers/processing/LiveTVProcessingManager.js';
+import { LiveTVFormattingManager } from './managers/formatting/LiveTVFormattingManager.js';
 
 // Import middleware
 import Middleware from './middleware/Middleware.js';
 
 // Import router classes
-import AuthRouter from './routes/auth.js';
-import UsersRouter from './routes/users.js';
-import ProfileRouter from './routes/profile.js';
-import SettingsRouter from './routes/settings.js';
-import StatsRouter from './routes/stats.js';
-import TitlesRouter from './routes/titles.js';
-import ProvidersRouter from './routes/providers.js';
-import StreamRouter from './routes/stream.js';
-import PlaylistRouter from './routes/playlist.js';
-import TMDBRouter from './routes/tmdb.js';
-import HealthcheckRouter from './routes/healthcheck.js';
-import XtreamRouter from './routes/xtream.js';
-import JobsRouter from './routes/jobs.js';
-import StremioRouter from './routes/stremio.js';
-import LiveTVRouter from './routes/liveTV.js';
+import AuthRouter from './routes/AuthRouter.js';
+import UsersRouter from './routes/UsersRouter.js';
+import ProfileRouter from './routes/ProfileRouter.js';
+import SettingsRouter from './routes/SettingsRouter.js';
+import StatsRouter from './routes/StatsRouter.js';
+import TitlesRouter from './routes/TitlesRouter.js';
+import ProvidersRouter from './routes/ProvidersRouter.js';
+import StreamRouter from './routes/StreamRouter.js';
+import PlaylistRouter from './routes/PlaylistRouter.js';
+import TMDBRouter from './routes/TMDBRouter.js';
+import HealthcheckRouter from './routes/HealthcheckRouter.js';
+import XtreamRouter from './routes/XtreamRouter.js';
+import JobsRouter from './routes/JobsRouter.js';
+import StremioRouter from './routes/StremioRouter.js';
+import LiveTVRouter from './routes/LiveTVRouter.js';
 import { XtreamProvider } from './providers/XtreamProvider.js';
 import { AGTVProvider } from './providers/AGTVProvider.js';
 import { TMDBProvider } from './providers/TMDBProvider.js';
@@ -147,6 +152,9 @@ async function initialize() {
     const programRepo = new ProgramRepository(mongoClient);
     logger.info('All repositories created');
 
+    // Create domain managers that depend on repositories
+    const jobHistoryManager = new JobHistoryManager(jobHistoryRepo);
+
     // 2.1. Initialize database indexes for all repositories
     logger.debug('Initializing database indexes...');
     try {
@@ -208,15 +216,17 @@ async function initialize() {
     let tmdbApiKey = null;
     try {
       const apiKeyResult = await settingsManager.getSetting(tmdbTokenKey);
-      if (apiKeyResult.statusCode === 200 && apiKeyResult.response.value) {
-        tmdbApiKey = apiKeyResult.response.value;
+      if (apiKeyResult.value) {
+        tmdbApiKey = apiKeyResult.value;
       }
     } catch (error) {
       logger.warn('Could not load TMDB API key on startup:', error.message);
     }
     const tmdbProvider = new TMDBProvider(tmdbApiKey, cacheDir);
     const statsManager = new StatsManager(statsRepo);
-    const titlesManager = new TitlesManager(userManager, titleRepo, providerRepo);
+    const titlesManager = new TitlesManager(titleRepo);
+    const providerTitlesManager = new ProviderTitlesManager(providerTitleRepo);
+    const iptvProviderManager = new IPTVProviderManager(providerRepo);
     
     // Declare jobsManager early for closure
     let jobsManager;
@@ -231,65 +241,59 @@ async function initialize() {
     
     const providersManager = new ProvidersManager(
       webSocketService,
-      titlesManager,
       providerTypeMap,
+      iptvProviderManager,
+      providerTitlesManager,
       providerTitleRepo,
       titleRepo,
-      providerRepo,
       triggerJob
     );
     
-    // Resolve circular dependency: inject ProvidersManager into TitlesManager and StreamManager
-    titlesManager.setProvidersManager(providersManager);
+    // Create Live TV managers
+    const channelManager = new ChannelManager(channelRepo);
+    const programManager = new ProgramManager(programRepo);
+    const liveTVProcessingManager = new LiveTVProcessingManager(channelManager, programManager);
+    const liveTVFormattingManager = new LiveTVFormattingManager(titlesManager, iptvProviderManager, channelManager, programManager);
     
-    const streamManager = new StreamManager(titleRepo, providerRepo);
-    streamManager.setProvidersManager(providersManager);
-    const liveTVManager = new LiveTVManager(userRepo, channelRepo, programRepo);
-    const playlistManager = new PlaylistManager(titleRepo, liveTVManager);
-    const tmdbManager = new TMDBManager(settingsManager, tmdbProvider);
-    const xtreamManager = new XtreamManager(titlesManager, liveTVManager);
-    const stremioManager = new StremioManager(titlesManager, streamManager, userManager, liveTVManager);
+    const playlistManager = new PlaylistManager(titlesManager, iptvProviderManager, channelManager, programManager);
+    const tmdbManager = new TMDBManager(tmdbProvider);
+    const xtreamManager = new XtreamManager(titlesManager, iptvProviderManager, channelManager, programManager);
+    const stremioManager = new StremioManager(titlesManager, iptvProviderManager, channelManager, programManager);
     
     // Create job instances with all dependencies
     const jobInstances = new Map();
     jobInstances.set('syncIPTVProviderTitles', new SyncIPTVProviderTitlesJob(
       'syncIPTVProviderTitles',
-      providerRepo,
-      providerTitleRepo,
-      titleRepo,
-      jobHistoryRepo,
+      jobHistoryManager,
       providersManager,
       tmdbManager,
-      tmdbProvider
+      titlesManager,
+      providerTitlesManager
     ));
     jobInstances.set('providerTitlesMonitor', new ProviderTitlesMonitorJob(
       'providerTitlesMonitor',
-      providerRepo,
-      providerTitleRepo,
-      titleRepo,
-      jobHistoryRepo,
+      jobHistoryManager,
       providersManager,
       tmdbManager,
-      tmdbProvider
+      titlesManager,
+      providerTitlesManager
     ));
-    jobInstances.set('syncLiveTV', new SyncLiveTVJob(liveTVManager));
+    jobInstances.set('syncLiveTV', new SyncLiveTVJob(userManager, liveTVProcessingManager));
     jobInstances.set('syncProviderDetails', new SyncProviderDetailsJob(
       'syncProviderDetails',
-      providerRepo,
-      providerTitleRepo,
-      titleRepo,
-      jobHistoryRepo,
+      jobHistoryManager,
       providersManager,
       tmdbManager,
-      tmdbProvider
+      titlesManager,
+      providerTitlesManager
     ));
     
     // Initialize EngineScheduler with job instances
-    jobScheduler = new EngineScheduler(jobInstances, jobHistoryRepo);
+    jobScheduler = new EngineScheduler(jobInstances, jobHistoryManager);
     await jobScheduler.initialize();
     
-    // Initialize JobsManager
-    jobsManager = new JobsManager(jobsConfig, jobScheduler, jobHistoryRepo);
+    // Initialize JobsManager with scheduler reference
+    jobsManager = new JobsManager(jobsConfig, jobHistoryManager, jobScheduler);
 
     // Initialize user manager (creates default admin user)
     await userManager.initialize();
@@ -304,16 +308,16 @@ async function initialize() {
     const profileRouter = new ProfileRouter(userManager, middleware, jobsManager);
     const settingsRouter = new SettingsRouter(settingsManager, middleware);
     const statsRouter = new StatsRouter(statsManager, middleware);
-    const titlesRouter = new TitlesRouter(titlesManager, middleware);
+    const titlesRouter = new TitlesRouter(titlesManager, providersManager, userManager, middleware);
     const providersRouter = new ProvidersRouter(providersManager, middleware);
-    const streamRouter = new StreamRouter(streamManager, middleware);
+    const streamRouter = new StreamRouter(stremioManager, middleware);
     const playlistRouter = new PlaylistRouter(playlistManager, middleware);
-    const tmdbRouter = new TMDBRouter(tmdbManager, middleware);
+    const tmdbRouter = new TMDBRouter(tmdbManager, settingsManager, middleware);
     const healthcheckRouter = new HealthcheckRouter(settingsManager, middleware);
-    const xtreamRouter = new XtreamRouter(xtreamManager, streamManager, middleware, liveTVManager);
+    const xtreamRouter = new XtreamRouter(xtreamManager, middleware, channelManager, programManager);
     const jobsRouter = new JobsRouter(jobsManager, middleware);
     const stremioRouter = new StremioRouter(stremioManager, middleware);
-    const liveTVRouter = new LiveTVRouter(liveTVManager, middleware);
+    const liveTVRouter = new LiveTVRouter(channelManager, programManager, liveTVFormattingManager, middleware);
 
     // Initialize all routers
     authRouter.initialize();

@@ -161,18 +161,8 @@ export class BaseRepository {
       if (this._isStopping) return null;
 
       const collection = this.db.collection(this.collectionName);
-      const now = new Date();
-      
-      // Auto-add timestamps if not present
-      if (!document.createdAt) document.createdAt = now;
-      if (!document.lastUpdated) document.lastUpdated = now;
-
       return await collection.insertOne(document, options);
     } catch (error) {
-      if (error.code === 11000) {
-        logger.debug(`Duplicate key in ${this.collectionName}, ignoring`);
-        return null;
-      }
       logger.error(`Error inserting one in ${this.collectionName}:`, error);
       throw error;
     }
@@ -197,13 +187,6 @@ export class BaseRepository {
       const batch = options.batch !== false;
       const batchSize = options.batchSize || this.defaultBatchSize;
       const ordered = options.ordered || false;
-      const now = new Date();
-
-      // Auto-add timestamps
-      documents.forEach(doc => {
-        if (!doc.createdAt) doc.createdAt = now;
-        if (!doc.lastUpdated) doc.lastUpdated = now;
-      });
 
       if (batch && documents.length > batchSize) {
         // Batch inserts
@@ -220,10 +203,6 @@ export class BaseRepository {
         return { insertedCount: result.insertedCount };
       }
     } catch (error) {
-      if (error.code === 11000) {
-        logger.debug(`Duplicate key in ${this.collectionName}, continuing`);
-        return { insertedCount: 0 };
-      }
       logger.error(`Error inserting many in ${this.collectionName}:`, error);
       throw error;
     }
@@ -242,12 +221,6 @@ export class BaseRepository {
       if (this._isStopping) return { modifiedCount: 0 };
 
       const collection = this.db.collection(this.collectionName);
-      
-      // Auto-add lastUpdated if $set is used
-      if (update.$set && !update.$set.lastUpdated) {
-        update.$set.lastUpdated = new Date();
-      }
-
       return await collection.updateOne(filter, update, options);
     } catch (error) {
       logger.error(`Error updating one in ${this.collectionName}:`, error);
@@ -267,12 +240,6 @@ export class BaseRepository {
       if (this._isStopping) return { modifiedCount: 0 };
 
       const collection = this.db.collection(this.collectionName);
-      
-      // Auto-add lastUpdated if $set is used
-      if (update.$set && !update.$set.lastUpdated) {
-        update.$set.lastUpdated = new Date();
-      }
-
       return await collection.updateMany(filter, update, options);
     } catch (error) {
       logger.error(`Error updating many in ${this.collectionName}:`, error);
@@ -479,171 +446,6 @@ export class BaseRepository {
     }
   }
 
-  /**
-   * Generic bulk save with existence check (atomic pattern)
-   * Used by: saveProviderTitles, saveMainTitles, saveTitleStreams, etc.
-   * @param {Array<Object>} documents - Documents to save
-   * @param {Object} [options={}] - Options
-   * @param {boolean} [options.addTimestamps=true] - Whether to add createdAt/lastUpdated
-   * @param {Object} [options.existenceOptions] - Options for existence check
-   * @returns {Promise<{inserted: number, updated: number}>}
-   */
-  async bulkSave(documents, options = {}) {
-    if (!documents || documents.length === 0) {
-      return { inserted: 0, updated: 0 };
-    }
-
-    const now = new Date();
-    const addTimestamps = options.addTimestamps !== false;
-    
-    // Build existence queries (atomic)
-    const existenceQueries = this.buildExistenceQueries(documents, options);
-    
-    if (existenceQueries.length === 0) {
-      // No valid documents to check, return early
-      return { inserted: 0, updated: 0 };
-    }
-    
-    // Check existence (atomic)
-    const existingKeys = await this.checkExistenceBatch(
-      existenceQueries,
-      this.keyBuilder,
-      options.existenceOptions || {}
-    );
-
-    // Separate into inserts and updates (atomic)
-    const { toInsert, toUpdate } = this.separateInsertsAndUpdates(
-      documents,
-      existingKeys,
-      options
-    );
-
-    // Execute bulk operations (atomic)
-    return await this.executeBulkSave(toInsert, toUpdate);
-  }
-
-  /**
-   * Build existence queries from documents (atomic)
-   * @protected
-   * @param {Array<Object>} documents - Documents to check
-   * @param {Object} options - Options passed to bulkSave
-   * @returns {Array<Object>} Array of query objects
-   */
-  buildExistenceQueries(documents, options) {
-    // Override in subclasses for entity-specific logic
-    return documents
-      .filter(doc => this.getDocumentKey(doc))
-      .map(doc => this.buildExistenceQuery(doc, options));
-  }
-
-  /**
-   * Build single existence query (atomic)
-   * @protected
-   * @param {Object} doc - Document to check
-   * @param {Object} options - Options passed to bulkSave
-   * @returns {Object} Query object
-   */
-  buildExistenceQuery(doc, options) {
-    // Override in subclasses
-    return { _id: doc._id };
-  }
-
-  /**
-   * Get document key for existence check (atomic)
-   * @protected
-   * @param {Object} doc - Document
-   * @returns {string|null} Key or null if invalid
-   */
-  getDocumentKey(doc) {
-    // Override in subclasses
-    return doc._id || doc.title_key;
-  }
-
-  /**
-   * Separate documents into inserts and updates (atomic)
-   * @protected
-   * @param {Array<Object>} documents - Documents to separate
-   * @param {Set<string>} existingKeys - Set of existing keys
-   * @param {Object} options - Options passed to bulkSave
-   * @returns {{toInsert: Array<Object>, toUpdate: Array<Object>}}
-   */
-  separateInsertsAndUpdates(documents, existingKeys, options) {
-    const toInsert = [];
-    const toUpdate = [];
-    const now = new Date();
-    const addTimestamps = options.addTimestamps !== false;
-
-    for (const doc of documents) {
-      const key = this.buildKeyForCheck(doc, options);
-      if (!key) continue;
-
-      const docWithTimestamps = addTimestamps ? {
-        ...doc,
-        ...(doc.createdAt ? {} : { createdAt: doc.createdAt || now }),
-        lastUpdated: now
-      } : doc;
-
-      if (existingKeys.has(key)) {
-        toUpdate.push(this.buildUpdateOperation(doc, options));
-      } else {
-        toInsert.push(docWithTimestamps);
-      }
-    }
-
-    return { toInsert, toUpdate };
-  }
-
-  /**
-   * Build key for existence check (atomic)
-   * @protected
-   * @param {Object} doc - Document
-   * @param {Object} options - Options passed to bulkSave
-   * @returns {string|null} Key or null if invalid
-   */
-  buildKeyForCheck(doc, options) {
-    // Override in subclasses
-    return this.keyBuilder(doc);
-  }
-
-  /**
-   * Build update operation (atomic)
-   * @protected
-   * @param {Object} doc - Document to update
-   * @param {Object} options - Options passed to bulkSave
-   * @returns {Object} Bulk write operation
-   */
-  buildUpdateOperation(doc, options) {
-    // Override in subclasses
-    return {
-      updateOne: {
-        filter: { _id: doc._id },
-        update: { $set: { ...doc, lastUpdated: new Date() } }
-      }
-    };
-  }
-
-  /**
-   * Execute bulk save operations (atomic)
-   * @protected
-   * @param {Array<Object>} toInsert - Documents to insert
-   * @param {Array<Object>} toUpdate - Update operations
-   * @returns {Promise<{inserted: number, updated: number}>}
-   */
-  async executeBulkSave(toInsert, toUpdate) {
-    const [insertResult, updateResult] = await Promise.all([
-      toInsert.length > 0 
-        ? this.insertMany(toInsert, { batch: true, ordered: false }) 
-        : { insertedCount: 0 },
-      toUpdate.length > 0 
-        ? this.bulkWrite(toUpdate, { batch: true, ordered: false }) 
-        : { modifiedCount: 0 }
-    ]);
-
-    return {
-      inserted: insertResult.insertedCount || 0,
-      updated: updateResult.modifiedCount || 0
-    };
-  }
 
   // Common query methods (atomic)
   

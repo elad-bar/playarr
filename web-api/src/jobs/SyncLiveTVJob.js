@@ -7,10 +7,12 @@ const logger = createLogger('SyncLiveTVJob');
  */
 export class SyncLiveTVJob {
   /**
-   * @param {import('../managers/liveTV.js').LiveTVManager} liveTVManager - Live TV manager instance
+   * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager instance
+   * @param {import('../managers/processing/LiveTVProcessingManager.js').LiveTVProcessingManager} liveTVProcessingManager - Live TV processing manager instance
    */
-  constructor(liveTVManager) {
-    this.liveTVManager = liveTVManager;
+  constructor(userManager, liveTVProcessingManager) {
+    this.userManager = userManager;
+    this.liveTVProcessingManager = liveTVProcessingManager;
     this.logger = logger;
   }
 
@@ -21,7 +23,13 @@ export class SyncLiveTVJob {
   async execute() {
     try {
       this.logger.info('Starting Live TV sync job...');
-      const result = await this.liveTVManager.syncAllUsers();
+      
+      // Get users with Live TV configuration
+      const users = await this.userManager.getUsersWithLiveTVConfig();
+      
+      // Sync Live TV for all users
+      const result = await this.liveTVProcessingManager.syncUsers(users);
+      
       this.logger.info(`Live TV sync completed: ${result.users_processed} user(s) processed`);
       return result;
     } catch (error) {

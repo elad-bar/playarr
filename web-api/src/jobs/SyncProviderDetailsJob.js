@@ -10,16 +10,14 @@ import { BaseJob } from './BaseJob.js';
 export class SyncProviderDetailsJob extends BaseJob {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
-   * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
-   * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository
-   * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository
-   * @param {import('../managers/providers.js').ProvidersManager} providersManager - Providers manager for direct API calls
-   * @param {import('../managers/tmdb.js').TMDBManager} tmdbManager - TMDB manager for direct API calls
-   * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
+   * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
+   * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
+   * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
+   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
+   * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
    */
-  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
-    super(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider);
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager) {
+    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager);
   }
 
   /**
@@ -29,23 +27,14 @@ export class SyncProviderDetailsJob extends BaseJob {
    * @returns {Promise<Array<{providerId: string, success: boolean, error?: string}>>} Array of sync results
    */
   async execute() {
-    this._validateDependencies();
-
     const executionStartTime = Date.now();
 
     try {
       // Set status to "running" at start
       await this.setJobStatus('running');
 
-      // Fetch all active, non-deleted providers
-      const providersResult = await this.providersManager.getProviders();
-      const allProviders = providersResult.response?.providers || [];
-
-      // Filter to only enabled, non-deleted providers
-      const activeProviders = allProviders.filter(p => 
-        p.enabled !== false && 
-        !p.deleted
-      );
+      // Fetch enabled, non-deleted providers
+      const activeProviders = await this.providersManager.getEnabledProviders({ excludeDeleted: true });
 
       // Filter providers based on type and last_checked
       const providersToProcess = activeProviders.filter(provider => {
@@ -127,22 +116,13 @@ export class SyncProviderDetailsJob extends BaseJob {
           };
 
           // Update provider details via lightweight method
-          const updateResult = await this.providersManager.updateProviderDetails(providerId, details);
+          await this.providersManager.updateProviderDetails(providerId, details);
 
-          if (updateResult.statusCode === 200) {
-            this.logger.debug(`[${providerId}] Provider details updated successfully`);
-            results.push({
-              providerId,
-              success: true
-            });
-          } else {
-            this.logger.warn(`[${providerId}] Failed to update provider details: ${updateResult.response?.error || 'Unknown error'}`);
-            results.push({
-              providerId,
-              success: false,
-              error: updateResult.response?.error || 'Failed to update provider details'
-            });
-          }
+          this.logger.debug(`[${providerId}] Provider details updated successfully`);
+          results.push({
+            providerId,
+            success: true
+          });
         } catch (error) {
           // Log authentication error
           this.logger.error(`[${providerId}] Error syncing provider details: ${error.message}`);

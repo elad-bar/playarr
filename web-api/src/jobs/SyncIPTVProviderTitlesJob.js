@@ -9,16 +9,14 @@ import { BaseJob } from './BaseJob.js';
 export class SyncIPTVProviderTitlesJob extends BaseJob {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
-   * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
-   * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository
-   * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository
-   * @param {import('../managers/providers.js').ProvidersManager} providersManager - Providers manager for direct API calls
-   * @param {import('../managers/tmdb.js').TMDBManager} tmdbManager - TMDB manager for direct API calls
-   * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
+   * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
+   * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
+   * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
+   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
+   * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
    */
-  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
-    super(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider);
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager) {
+    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager);
   }
 
   /**
@@ -26,8 +24,6 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
    * @returns {Promise<Array<{providerId: string, providerName: string, movies?: number, tvShows?: number, error?: string}>>} Array of fetch results
    */
   async execute() {
-    this._validateDependencies();
-
     try {
       // Get last execution time from job history BEFORE setting status
       // This ensures we have the correct last_execution value from previous successful run
