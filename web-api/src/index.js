@@ -39,6 +39,7 @@ const jobsConfig = JSON.parse(readFileSync(path.join(__dirname, 'jobs.json'), 'u
 import { SyncIPTVProviderTitlesJob } from './jobs/SyncIPTVProviderTitlesJob.js';
 import { ProviderTitlesMonitorJob } from './jobs/ProviderTitlesMonitorJob.js';
 import { SyncLiveTVJob } from './jobs/SyncLiveTVJob.js';
+import { SyncProviderDetailsJob } from './jobs/SyncProviderDetailsJob.js';
 
 // Import manager classes
 import { UserManager } from './managers/users.js';
@@ -272,6 +273,16 @@ async function initialize() {
       tmdbProvider
     ));
     jobInstances.set('syncLiveTV', new SyncLiveTVJob(liveTVManager));
+    jobInstances.set('syncProviderDetails', new SyncProviderDetailsJob(
+      'syncProviderDetails',
+      providerRepo,
+      providerTitleRepo,
+      titleRepo,
+      jobHistoryRepo,
+      providersManager,
+      tmdbManager,
+      tmdbProvider
+    ));
     
     // Initialize EngineScheduler with job instances
     jobScheduler = new EngineScheduler(jobInstances, jobHistoryRepo);

@@ -104,6 +104,66 @@ export class XtreamProvider extends BaseIPTVProvider {
   }
 
   /**
+   * Authenticate with Xtream provider and get account details
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<Object>} Provider details object with expiration_date, max_connections, active_connections
+   */
+  async authenticate(providerId) {
+    try {
+      const provider = this._getProviderConfig(providerId);
+      
+      // Build API URL without action parameter (authentication endpoint)
+      const queryParams = new URLSearchParams({
+        username: provider.username,
+        password: provider.password
+      });
+      
+      const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
+      const limiter = this._getLimiter(providerId);
+
+      const data = await this._fetchJsonWithCacheAxios({
+        providerId,
+        type: 'auth', // Use 'auth' as type for cache key
+        endpoint: 'authenticate',
+        url,
+        headers: {},
+        limiter,
+        skipCache: true // Don't cache authentication calls
+      });
+
+      // Parse user_info from response
+      const userInfo = data.user_info;
+      if (!userInfo) {
+        this.logger.warn(`[${providerId}] No user_info in authentication response`);
+        return {
+          expiration_date: null,
+          max_connections: 0,
+          active_connections: 0
+        };
+      }
+
+      // Extract and convert fields
+      const expirationDate = userInfo.exp_date ? parseInt(userInfo.exp_date, 10) : null;
+      const maxConnections = userInfo.max_connections ? parseInt(userInfo.max_connections, 10) : 0;
+      const activeConnections = userInfo.active_cons ? parseInt(userInfo.active_cons, 10) : 0;
+
+      return {
+        expiration_date: expirationDate,
+        max_connections: maxConnections,
+        active_connections: activeConnections
+      };
+    } catch (error) {
+      this.logger.error(`[${providerId}] Error authenticating with Xtream provider: ${error.message}`);
+      // Return empty details on error
+      return {
+        expiration_date: null,
+        max_connections: 0,
+        active_connections: 0
+      };
+    }
+  }
+
+  /**
    * Fetch extended info from Xtream provider
    * @param {string} providerId - Provider ID
    * @param {string} type - Media type ('movies' or 'tvshows')
@@ -148,6 +208,19 @@ export class XtreamProvider extends BaseIPTVProvider {
    */
   _getCacheKeyMappings(providerId) {
     return {
+      // Authentication endpoint
+      'authenticate-auth': {
+        type: 'auth',
+        endpoint: 'authenticate',
+        dirBuilder: (cacheDir, providerId, params) => {
+          return path.join(cacheDir, providerId, 'auth');
+        },
+        fileBuilder: (cacheDir, providerId, type, params) => {
+          const dirPath = path.join(cacheDir, providerId, 'auth');
+          return path.join(dirPath, 'authenticate.json');
+        },
+        ttl: null // Never expire (for debugging)
+      },
       'categories-movies': {
         type: 'movies',
         endpoint: 'categories',
