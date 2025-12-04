@@ -1,0 +1,23 @@
+# Ground Rules for AI Assistant
+
+## Code Changes
+- **NEVER make code changes when asked a question** - Answer the question only
+- **NEVER make changes without explicit instruction** - Wait for clear direction
+- **NEVER access private properties** (e.g., `_repository`, `_privateMethod`) - Always use public methods from managers
+- If a public method doesn't exist, suggest adding one to the Domain Manager first
+
+## Architecture Compliance
+- Formatting Managers (Type B) must ONLY use public methods from Domain Managers
+- Processing Managers (Type C) must ONLY use public methods from Domain Managers  
+- Routers (Level 1) must ONLY use public methods from Managers
+- **NEVER access `_repository` or other private properties directly**
+
+## Response Behavior
+- When asked a question, answer it - do not make changes
+- When asked to explain, explain - do not implement
+- When asked to list, list - do not fix
+- Only make changes when explicitly instructed to "fix", "implement", "update", "change", etc.
+
+## Violations
+Repeated violations of these rules after being told multiple times is unacceptable and will result in consequences.
+

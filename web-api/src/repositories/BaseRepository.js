@@ -13,15 +13,19 @@ export class BaseRepository {
    * @param {import('mongodb').MongoClient} mongoClient - MongoDB client instance
    * @param {string} collectionName - Collection name for this repository
    * @param {Function} keyBuilder - Function to build unique key from document: (doc) => string
+   * @param {string} [collectionType='data'] - Collection type: 'data' or 'configuration'
+   * @param {string} [schemaVersion='v1'] - Schema version (e.g., 'v1', 'v2')
    * @param {number} [defaultBatchSize=1000] - Default batch size for bulk operations
    */
-  constructor(mongoClient, collectionName, keyBuilder, defaultBatchSize = 1000) {
+  constructor(mongoClient, collectionName, keyBuilder, collectionType = 'data', schemaVersion = 'v1', defaultBatchSize = 1000) {
     this.client = mongoClient;
     this.db = mongoClient.db(DB_NAME);
     this.defaultBatchSize = defaultBatchSize;
     this._isStopping = false;
     this.collectionName = collectionName;
     this.keyBuilder = keyBuilder;
+    this.collectionType = collectionType; // 'data' or 'configuration'
+    this.schemaVersion = schemaVersion;   // Schema version (e.g., 'v1', 'v2')
   }
 
   /**
@@ -591,9 +595,215 @@ export class BaseRepository {
   }
 
   /**
+   * Get version definitions with structure and transformation functions
+   * Override in repositories for configuration collections that need transformation
+   * @returns {Object|null} Version definitions dictionary or null
+   */
+  getVersionDefinitions() {
+    // Override in repositories that need transformation
+    return null;
+  }
+
+  /**
+   * Get stored version from metadata collection
+   * @private
+   * @returns {Promise<string|null>} Stored version or null (means v1)
+   */
+  async _getStoredVersion() {
+    try {
+      const metadata = await this.db.collection('_collection_metadata')
+        .findOne({ _id: this.collectionName });
+      return metadata?.version || null; // null = v1 (default)
+    } catch (error) {
+      logger.error(`Error getting stored version for ${this.collectionName}: ${error.message}`);
+      return null; // On error, assume v1
+    }
+  }
+
+  /**
+   * Update metadata collection with current version
+   * @private
+   * @param {Object} metadata - Metadata to update
+   */
+  async _updateMetadata(metadata) {
+    try {
+      await this.db.collection('_collection_metadata').updateOne(
+        { _id: this.collectionName },
+        { 
+          $set: { 
+            ...metadata,
+            lastInitialized: new Date()
+          },
+          $setOnInsert: {
+            createdAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
+    } catch (error) {
+      logger.error(`Error updating metadata for ${this.collectionName}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Check if backup already exists for a version
+   * @private
+   * @param {string} version - Version to check
+   * @returns {Promise<boolean>} True if backup exists
+   */
+  async _checkBackupExists(version) {
+    try {
+      const backupPattern = `${this.collectionName}_${version}_backup_`;
+      const collections = await this.db.listCollections({ 
+        name: { $regex: `^${backupPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` } 
+      }).toArray();
+      return collections.length > 0;
+    } catch (error) {
+      logger.error(`Error checking backup existence for ${this.collectionName} ${version}: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Backup collection with version in name
+   * @private
+   * @param {string} version - Version being backed up
+   * @returns {Promise<string>} Backup collection name
+   */
+  async _backupCollection(version) {
+    try {
+      // Check if backup already exists
+      const backupPattern = `${this.collectionName}_${version}_backup_`;
+      const existingBackups = await this.db.listCollections({ 
+        name: { $regex: `^${backupPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` } 
+      }).toArray();
+      
+      if (existingBackups.length > 0) {
+        logger.info(`Backup already exists for ${this.collectionName} ${version}, skipping backup creation`);
+        return existingBackups[0].name;
+      }
+      
+      // Create new backup
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').split('.')[0];
+      const backupName = `${this.collectionName}_${version}_backup_${timestamp}`;
+      
+      const collection = this.db.collection(this.collectionName);
+      const docCount = await collection.countDocuments();
+      
+      await collection.rename(backupName);
+      
+      // Log backup creation
+      logger.warn('═══════════════════════════════════════════════════════════════');
+      logger.warn(`⚠️  COLLECTION BACKUP CREATED: ${this.collectionName}`);
+      logger.warn(`   Backup name: ${backupName}`);
+      logger.warn(`   Version backed up: ${version}`);
+      logger.warn(`   Documents backed up: ${docCount}`);
+      logger.warn(`   Reason: Schema version mismatch (${version} → ${this.schemaVersion})`);
+      logger.warn('═══════════════════════════════════════════════════════════════');
+      
+      return backupName;
+    } catch (error) {
+      logger.error(`Error backing up collection ${this.collectionName}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Migrate collection sequentially from stored version to target version
+   * Applies transformations step-by-step (v1 → v2 → v3, etc.)
+   * @private
+   * @param {string} fromVersion - Starting version
+   * @param {string} toVersion - Target version
+   * @returns {Promise<number|null>} Number of documents migrated, or null if no transformation available
+   */
+  async _migrateCollectionSequentially(fromVersion, toVersion) {
+    const versionDefs = this.getVersionDefinitions();
+    
+    if (!versionDefs) {
+      return null; // No version definitions available
+    }
+    
+    // Parse version numbers
+    const fromId = versionDefs[fromVersion]?.id;
+    const toId = versionDefs[toVersion]?.id;
+    
+    if (!fromId || !toId) {
+      return null; // Version definitions not available
+    }
+    
+    if (fromId >= toId) {
+      return null; // Already at or past target version
+    }
+    
+    // Get backup collection name (fromVersion already includes "v" prefix)
+    const backupPattern = `${this.collectionName}_${fromVersion}_backup_`;
+    const backupCollections = await this.db.listCollections({ 
+      name: { $regex: `^${backupPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` } 
+    }).toArray();
+    
+    if (backupCollections.length === 0) {
+      throw new Error(`Backup collection not found for version ${fromVersion}`);
+    }
+    
+    const backupName = backupCollections[0].name;
+    const backupCollection = this.db.collection(backupName);
+    const targetCollection = this.db.collection(this.collectionName);
+    
+    // Fetch all documents from backup
+    const documents = await backupCollection.find({}).toArray();
+    
+    // Migrate step-by-step through each version
+    let currentDocs = documents;
+    let currentVersion = fromVersion;
+    
+    for (let targetId = fromId + 1; targetId <= toId; targetId++) {
+      const targetVersion = Object.keys(versionDefs).find(v => versionDefs[v].id === targetId);
+      if (!targetVersion) {
+        throw new Error(`Version with id ${targetId} not found in definitions`);
+      }
+      
+      const transformationKey = `${currentVersion}_to_${targetVersion}`;
+      const transformFn = versionDefs[targetVersion]?.transformation;
+      
+      if (!transformFn) {
+        throw new Error(`No transformation function available for ${transformationKey}`);
+      }
+      
+      // Transform each document one-by-one
+      const transformedDocs = [];
+      for (const doc of currentDocs) {
+        try {
+          const transformed = await transformFn(doc);
+          transformedDocs.push(transformed);
+        } catch (error) {
+          throw new Error(`Transformation failed for document ${doc._id} in ${transformationKey}: ${error.message}`);
+        }
+      }
+      
+      // Update metadata to intermediate version after each step
+      await this._updateMetadata({
+        version: targetVersion,
+        collectionType: this.collectionType
+      });
+      
+      currentDocs = transformedDocs;
+      currentVersion = targetVersion;
+    }
+    
+    // Insert all transformed documents into target collection
+    if (currentDocs.length > 0) {
+      await targetCollection.insertMany(currentDocs);
+    }
+    
+    return currentDocs.length;
+  }
+
+  /**
    * Initialize database indexes for this collection
    * Uses getIndexDefinitions() to get index configuration
    * Creates indexes if they don't exist (MongoDB will auto-create collection if needed)
+   * Handles schema version mismatches with automatic backup and migration
    * @returns {Promise<void>}
    */
   async initializeIndexes() {
@@ -603,6 +813,57 @@ export class BaseRepository {
       if (indexDefinitions.length === 0) {
         logger.debug(`No index definitions found for ${this.collectionName}`);
         return;
+      }
+
+      // Get expected and stored versions
+      const expectedVersion = this.schemaVersion;
+      const storedVersion = await this._getStoredVersion() || 'v1'; // null = v1 (default)
+      const collectionType = this.collectionType;
+      
+      // Check for version mismatch
+      if (storedVersion !== expectedVersion) {
+        // Version mismatch detected - backup current version
+        const versionToBackup = storedVersion;
+        
+        // Backup collection (even if empty - harmless and keeps logic simple)
+        await this._backupCollection(versionToBackup);
+        
+        if (collectionType === 'configuration') {
+          // Configuration collection - try transformation
+          try {
+            const transformedCount = await this._migrateCollectionSequentially(storedVersion, expectedVersion);
+            if (transformedCount !== null) {
+              // Transformation successful
+              logger.info(`✅ Successfully migrated ${this.collectionName} from ${storedVersion} to ${expectedVersion} (${transformedCount} documents)`);
+              // Continue with index creation
+            } else {
+              // No transformation available - fall back to error
+              logger.error('═══════════════════════════════════════════════════════════════');
+              logger.error(`❌ CONFIGURATION COLLECTION SCHEMA MISMATCH: ${this.collectionName}`);
+              logger.error(`   Version mismatch: ${versionToBackup} → ${expectedVersion}`);
+              logger.error(`   Backup created: ${this.collectionName}_${versionToBackup}_backup_*`);
+              logger.error(`   No transformation available for this version jump`);
+              logger.error(`   ACTION REQUIRED: Collection not migrated. Please restore from backup manually.`);
+              logger.error('═══════════════════════════════════════════════════════════════');
+              return; // Stop initialization for this collection
+            }
+          } catch (error) {
+            // Transformation failed
+            logger.error('═══════════════════════════════════════════════════════════════');
+            logger.error(`❌ CONFIGURATION COLLECTION MIGRATION FAILED: ${this.collectionName}`);
+            logger.error(`   Version: ${versionToBackup} → ${expectedVersion}`);
+            logger.error(`   Error: ${error.message}`);
+            logger.error(`   Backup available: ${this.collectionName}_${versionToBackup}_backup_*`);
+            logger.error(`   Migration stopped. Collection remains at previous version.`);
+            logger.error(`   ACTION REQUIRED: Check logs and restore from backup if needed.`);
+            logger.error('═══════════════════════════════════════════════════════════════');
+            return; // Stop initialization for this collection
+          }
+        } else {
+          // Data collection - recreate with new schema
+          logger.warn(`Data collection ${this.collectionName} will be recreated with schema ${expectedVersion}`);
+          // Collection already renamed to backup, will be recreated when indexes are created
+        }
       }
 
       const collection = this.db.collection(this.collectionName);
@@ -654,18 +915,38 @@ export class BaseRepository {
           const indexDesc = description || JSON.stringify(key);
           logger.debug(`Created index in ${this.collectionName}: ${indexDesc}`);
         } catch (error) {
-          // If index already exists (race condition), that's fine
-          if (error.message && (
+          // Handle duplicate key errors by backing up and retrying
+          if (error.code === 11000 || error.message?.includes('duplicate key')) {
+            const storedVersion = await this._getStoredVersion() || 'v1';
+            logger.warn(`Duplicate key error creating index ${keySpecStr} in ${this.collectionName}, backing up collection...`);
+            try {
+              // Backup the collection
+              await this._backupCollection(storedVersion);
+              // Retry creating the index (on new empty collection)
+              await collection.createIndex(key, options);
+              logger.debug(`Recreated index in ${this.collectionName} after backup: ${description || JSON.stringify(key)}`);
+            } catch (retryError) {
+              logger.error(`Failed to recreate index after backup: ${retryError.message}`);
+              throw retryError;
+            }
+          } else if (error.message && (
             error.message.includes('already exists') ||
             error.message.includes('same name as the requested index')
           )) {
             // Index was created by another process, continue
             continue;
+          } else {
+            // Re-throw other errors
+            throw error;
           }
-          // Re-throw other errors
-          throw error;
         }
       }
+
+      // After successful initialization, update metadata
+      await this._updateMetadata({
+        version: expectedVersion,
+        collectionType: collectionType
+      });
 
       logger.debug(`${this.collectionName} indexes initialized`);
     } catch (error) {

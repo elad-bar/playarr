@@ -23,6 +23,28 @@ export const API_ENDPOINTS = {
     streamMovie: (titleId) => `/api/stream/movies/${titleId}`,
     streamShow: (titleId, seasonNumber, episodeNumber) => `/api/stream/tvshows/${titleId}/${seasonNumber}/${episodeNumber}`,
 
+    // Channels endpoints
+    channels: (filters = {}) => {
+        const params = new URLSearchParams();
+        if (filters.searchQuery) params.append('search', filters.searchQuery);
+        if (filters.providerId) params.append('providerId', filters.providerId);
+        if (filters.watchlistFilter && filters.watchlistFilter !== 'all') {
+            params.append('watchlist', filters.watchlistFilter === 'checked' ? 'true' : 'false');
+        }
+        // Add category filter - can be array or single value
+        if (filters.categories && filters.categories.length > 0) {
+            filters.categories.forEach(category => {
+                params.append('category', category);
+            });
+        }
+        if (filters.page) params.append('page', filters.page);
+        if (filters.per_page) params.append('per_page', filters.per_page);
+        return `/livetv/channels${params.toString() ? `?${params.toString()}` : ''}`;
+    },
+    channelWatchlist: (channelKey) => `/livetv/watchlist`,
+    channelWatchlistRemove: (channelKey) => `/livetv/watchlist/${encodeURIComponent(channelKey)}`,
+    channelCategories: () => `/livetv/categories`,
+
     // Providers endpoints
     providers: `/iptv/providers`,
     providerCategories: (providerId) => `/iptv/providers/${providerId}/categories`,

@@ -3,16 +3,18 @@ import { createLogger } from '../utils/logger.js';
 const logger = createLogger('SyncLiveTVJob');
 
 /**
- * Job for syncing Live TV channels and EPG from user-configured M3U and EPG URLs
+ * Job for syncing Live TV channels from active IPTV providers
  */
 export class SyncLiveTVJob {
   /**
-   * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager instance
+   * @param {import('../managers/domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance
    * @param {import('../managers/processing/LiveTVProcessingManager.js').LiveTVProcessingManager} liveTVProcessingManager - Live TV processing manager instance
+   * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager instance
    */
-  constructor(userManager, liveTVProcessingManager) {
-    this.userManager = userManager;
-    this.liveTVProcessingManager = liveTVProcessingManager;
+  constructor(iptvProviderManager, liveTVProcessingManager, jobHistoryManager) {
+    this._iptvProviderManager = iptvProviderManager;
+    this._liveTVProcessingManager = liveTVProcessingManager;
+    this._jobHistoryManager = jobHistoryManager;
     this.logger = logger;
   }
 
@@ -24,13 +26,25 @@ export class SyncLiveTVJob {
     try {
       this.logger.info('Starting Live TV sync job...');
       
-      // Get users with Live TV configuration
-      const users = await this.userManager.getUsersWithLiveTVConfig();
+      // Get active providers (type in ['agtv','xtream'], enabled: true, deleted: false)
+      const providers = await this._iptvProviderManager.findByQuery({
+        type: { $in: ['agtv', 'xtream'] },
+        enabled: { $ne: false },
+        deleted: { $ne: true }
+      });
       
-      // Sync Live TV for all users
-      const result = await this.liveTVProcessingManager.syncUsers(users);
+      if (providers.length === 0) {
+        this.logger.info('No active providers found for Live TV sync');
+        return {
+          providers_processed: 0,
+          results: []
+        };
+      }
       
-      this.logger.info(`Live TV sync completed: ${result.users_processed} user(s) processed`);
+      // Sync Live TV for all providers
+      const result = await this._liveTVProcessingManager.syncProviders(providers);
+      
+      this.logger.info(`Live TV sync completed: ${result.providers_processed} provider(s) processed`);
       return result;
     } catch (error) {
       this.logger.error(`Live TV sync job failed: ${error.message}`);

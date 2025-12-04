@@ -81,31 +81,43 @@ export class BaseDomainManager extends BaseManager {
       return [];
     }
 
-    // Build query to find existing documents
-    const query = { $or: [] };
-    
-    for (const doc of documents) {
-      const matchQuery = {};
-      let hasMatchFields = false;
+    // Batch size to prevent BSON document size limit (16MB) from being exceeded
+    // Each document in the $or array can be ~100-200 bytes, so ~50k documents = ~10MB
+    // Use 10k to be safe and leave room for Date serialization overhead
+    const BATCH_SIZE = 10000;
+    const allExistingDocs = [];
+
+    // Process in batches to avoid BSON document size limit
+    for (let i = 0; i < documents.length; i += BATCH_SIZE) {
+      const batch = documents.slice(i, i + BATCH_SIZE);
       
-      for (const field of matchFields) {
-        if (doc[field] !== undefined && doc[field] !== null) {
-          matchQuery[field] = doc[field];
-          hasMatchFields = true;
+      // Build query to find existing documents for this batch
+      const query = { $or: [] };
+      
+      for (const doc of batch) {
+        const matchQuery = {};
+        let hasMatchFields = false;
+        
+        for (const field of matchFields) {
+          if (doc[field] !== undefined && doc[field] !== null) {
+            matchQuery[field] = doc[field];
+            hasMatchFields = true;
+          }
+        }
+        
+        if (hasMatchFields) {
+          query.$or.push(matchQuery);
         }
       }
-      
-      if (hasMatchFields) {
-        query.$or.push(matchQuery);
+
+      if (query.$or.length > 0) {
+        // Query repository for existing documents in this batch
+        const batchExisting = await this._repository.findByQuery(query);
+        allExistingDocs.push(...batchExisting);
       }
     }
 
-    if (query.$or.length === 0) {
-      return [];
-    }
-
-    // Query repository for existing documents
-    return await this._repository.findByQuery(query);
+    return allExistingDocs;
   }
 
   /**
@@ -119,6 +131,7 @@ export class BaseDomainManager extends BaseManager {
   _separateInsertsAndUpdatesForUpsert(documents, existingDocs, matchFields) {
     const inserts = [];
     const updates = [];
+    const insertKeys = new Set(); // Track insert keys to prevent duplicates
 
     // Create a map of existing documents for quick lookup
     const existingMap = new Map();
@@ -139,10 +152,12 @@ export class BaseDomainManager extends BaseManager {
           filter: this._buildFilterFromDoc(existing, matchFields),
           update: doc
         });
-      } else {
-        // Document doesn't exist, prepare for insert
+      } else if (key && !insertKeys.has(key)) {
+        // Document doesn't exist and we haven't seen this key in inserts yet
+        insertKeys.add(key);
         inserts.push(doc);
       }
+      // If key is null or we've already added this key to inserts, skip it
     }
 
     return { inserts, updates };

@@ -236,7 +236,7 @@ The `users` collection stores user accounts with authentication credentials and 
 
 **Key Features:**
 - Stores user authentication (username/password hash)
-- Contains per-user watchlists (array of title_key values)
+- Contains per-user watchlists (organized by media type)
 - Supports role-based access (admin/user)
 - Includes API keys for programmatic access
 - Watchlist determines what content is visible to each user
@@ -250,8 +250,11 @@ The `users` collection stores user accounts with authentication credentials and 
   password_hash: String,             // Hashed password (bcrypt)
   api_key: String,                   // API key for programmatic access (unique, optional)
   role: String,                      // User role: "admin" | "user"
-  watchlist: Array,                  // Array of title_key strings (references titles.title_key)
-  liveTV: Object,                    // Live TV configuration (optional): { m3u_url: String, epg_url: String }
+  watchlist: {                       // Unified watchlist object organized by media type
+    movies: Array<string>,            // Array of title keys (format: "movies-{id}")
+    tvshows: Array<string>,           // Array of title keys (format: "tvshows-{id}")
+    live: Array<string>              // Array of channel keys (format: "live-{providerId}-{channelId}")
+  },
   createdAt: ISODate,                // Account creation timestamp
   lastUpdated: ISODate               // Last update timestamp
 }
@@ -267,13 +270,14 @@ The `users` collection stores user accounts with authentication credentials and 
 ### Relationships
 
 - **Related to `titles`**: 
-  - `watchlist` array contains `title_key` values → `titles.title_key` (many-to-many via array)
+  - `watchlist.movies` and `watchlist.tvshows` arrays contain `title_key` values → `titles.title_key` (many-to-many via array)
   - Users can have multiple titles in watchlist
   - Titles can be in multiple users' watchlists
-
 - **Related to `channels`**: 
-  - `username` → `channels.username` (one-to-many)
-  - User has many Live TV channels
+  - `watchlist.live` array contains channel keys → `channels.channel_key` (many-to-many via array)
+  - Users can have multiple channels in watchlist
+  - Channels can be in multiple users' watchlists
+
 
 - **Related to `programs`**: 
   - `username` → `programs.username` (one-to-many)
@@ -516,7 +520,8 @@ The `stats` collection stores application statistics and metrics. This is typica
 
 ```
 titles (1) ──< (many) provider_titles
-titles (1) ──< (many) users.watchlist (via array)
+titles (1) ──< (many) users.watchlist.movies, users.watchlist.tvshows (via array)
+channels (1) ──< (many) users.watchlist.live (via array)
 
 iptv_providers (1) ──< (many) provider_titles
 
@@ -530,7 +535,7 @@ channels (1) ──< (many) programs
 
 1. **Embedded Media Array**: The `titles.media` field contains all stream information directly embedded in the title document. This eliminates the need for a separate `title_streams` collection and simplifies queries.
 
-2. **Title Key as Foreign Key**: `title_key` is used consistently across collections (`titles`, `provider_titles`, `users.watchlist`) as the primary relationship key.
+2. **Title Key as Foreign Key**: `title_key` is used consistently across collections (`titles`, `provider_titles`, `users.watchlist.movies`, `users.watchlist.tvshows`) as the primary relationship key.
 
 3. **Per-User Live TV**: Channels and programs are stored per user, allowing each user to have their own Live TV configuration.
 

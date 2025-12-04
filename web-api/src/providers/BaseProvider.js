@@ -281,7 +281,7 @@ export class BaseProvider {
       }
       
       // Read based on file extension
-      if (filePath.endsWith('.m3u8')) {
+      if (filePath.endsWith('.m3u8') || filePath.endsWith('.xml')) {
         return fs.readFileSync(filePath, 'utf8');
       } else {
         return fs.readJsonSync(filePath);
@@ -656,18 +656,22 @@ export class BaseProvider {
    * @param {Object} [options.headers={}] - Request headers
    * @param {Bottleneck} options.limiter - Rate limiter (required for axios-based calls)
    * @param {number} [options.timeout=30000] - Request timeout in milliseconds
+   * @param {string} [options.responseType='text'] - Response type ('text' or 'arraybuffer')
+   * @param {Function} [options.transform] - Optional transform function to process response data before caching
    * @returns {Promise<string>} Text response data
    */
-  async _fetchTextWithCacheAxios({ providerId, type, endpoint, cacheParams = {}, url, headers = {}, limiter, timeout = 30000 }) {
+  async _fetchTextWithCacheAxios({ providerId, type, endpoint, cacheParams = {}, url, headers = {}, limiter, timeout = 30000, responseType = 'text', transform = null, skipCache = false }) {
     if (!limiter) {
       throw new Error('Rate limiter is required');
     }
 
-    // Check cache first
-    const cached = this._getCache(providerId, type, endpoint, cacheParams);
-    if (cached !== null) {
-      this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
-      return cached;
+    // Check cache first (unless skipping cache read)
+    if (!skipCache) {
+      const cached = this._getCache(providerId, type, endpoint, cacheParams);
+      if (cached !== null) {
+        this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
+        return cached;
+      }
     }
 
     // Make API call with rate limiting
@@ -675,16 +679,19 @@ export class BaseProvider {
     const data = await limiter.schedule(async () => {
       const response = await axios.get(url, {
         headers,
-        responseType: 'text',
+        responseType,
         timeout
       });
       return response.data;
     });
 
-    // Cache the result
-    this._setCache(providerId, type, endpoint, data, cacheParams);
+    // Transform data if transform function provided (e.g., decompress gzip)
+    const finalData = transform ? await transform(data) : data;
 
-    return data;
+    // Cache the result
+    this._setCache(providerId, type, endpoint, finalData, cacheParams);
+
+    return finalData;
   }
 }
 

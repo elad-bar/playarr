@@ -44,7 +44,7 @@ class StremioRouter extends BaseRouter {
         const baseUrl = this._getBaseUrl(req);
         
         // Pass user to personalize the addon name
-        const manifest = this._stremioManager.getManifest(baseUrl, req.user);
+        const manifest = await this._stremioManager.getManifest(baseUrl, req.user);
         
         // Set CORS headers for Stremio
         res.setHeader('Access-Control-Allow-Origin', '*');

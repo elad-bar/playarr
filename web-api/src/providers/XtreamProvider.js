@@ -146,11 +146,15 @@ export class XtreamProvider extends BaseIPTVProvider {
       const expirationDate = userInfo.exp_date ? parseInt(userInfo.exp_date, 10) : null;
       const maxConnections = userInfo.max_connections ? parseInt(userInfo.max_connections, 10) : 0;
       const activeConnections = userInfo.active_cons ? parseInt(userInfo.active_cons, 10) : 0;
+      // Convert status to active boolean: true if status is not "expired", false if expired, null if status is missing
+      const status = userInfo.status?.toLowerCase();
+      const active = status ? status !== 'expired' : null;
 
       return {
         expiration_date: expirationDate,
         max_connections: maxConnections,
-        active_connections: activeConnections
+        active_connections: activeConnections,
+        active: active
       };
     } catch (error) {
       this.logger.error(`[${providerId}] Error authenticating with Xtream provider: ${error.message}`);
@@ -158,7 +162,8 @@ export class XtreamProvider extends BaseIPTVProvider {
       return {
         expiration_date: null,
         max_connections: 0,
-        active_connections: 0
+        active_connections: 0,
+        active: null
       };
     }
   }
@@ -197,6 +202,120 @@ export class XtreamProvider extends BaseIPTVProvider {
       url,
       headers: {},
       limiter
+    });
+  }
+
+  /**
+   * Fetch live TV categories from Xtream provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<Array>} Array of category objects
+   */
+  async fetchLiveCategories(providerId) {
+    const provider = this._getProviderConfig(providerId);
+    const queryParams = new URLSearchParams({
+      username: provider.username,
+      password: provider.password,
+      action: 'get_live_categories'
+    });
+    const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
+    const limiter = this._getLimiter(providerId);
+    
+    return await this._fetchJsonWithCacheAxios({
+      providerId,
+      type: 'live',
+      endpoint: 'live_categories',
+      url,
+      headers: {},
+      limiter,
+      transform: (data) => {
+        const categories = Array.isArray(data) ? data : [];
+        return categories.map(cat => ({
+          category_id: cat.category_id || cat.id,
+          category_name: cat.category_name || cat.name
+        }));
+      }
+    });
+  }
+
+  /**
+   * Fetch live TV streams from Xtream provider
+   * @param {string} providerId - Provider ID
+   * @param {number} [categoryId] - Optional category ID to filter
+   * @returns {Promise<Array>} Array of channel stream objects
+   */
+  async fetchLiveStreams(providerId, categoryId = null) {
+    const provider = this._getProviderConfig(providerId);
+    const queryParams = new URLSearchParams({
+      username: provider.username,
+      password: provider.password,
+      action: 'get_live_streams'
+    });
+    if (categoryId) {
+      queryParams.append('category_id', categoryId);
+    }
+    const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
+    const limiter = this._getLimiter(providerId);
+    
+    return await this._fetchJsonWithCacheAxios({
+      providerId,
+      type: 'live',
+      endpoint: 'live_streams',
+      cacheParams: categoryId ? { categoryId } : {},
+      url,
+      headers: {},
+      limiter
+    });
+  }
+
+  /**
+   * Fetch live TV M3U playlist from Xtream provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<string>} M3U playlist content as string
+   */
+  async fetchLiveM3U(providerId) {
+    const provider = this._getProviderConfig(providerId);
+    const queryParams = new URLSearchParams({
+      username: provider.username,
+      password: provider.password,
+      type: 'm3u_plus',
+      output: 'm3u8'
+    });
+    const url = `${provider.api_url}/get.php?${queryParams.toString()}`;
+    const limiter = this._getLimiter(providerId);
+    
+    return await this._fetchTextWithCacheAxios({
+      providerId,
+      type: 'live',
+      endpoint: 'm3u',
+      url,
+      headers: {},
+      limiter,
+      timeout: 60000 // Longer timeout for large M3U files
+    });
+  }
+
+  /**
+   * Fetch live TV EPG (XMLTV) from Xtream provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<string>} EPG XML content as string
+   */
+  async fetchLiveEPG(providerId) {
+    const provider = this._getProviderConfig(providerId);
+    const queryParams = new URLSearchParams({
+      username: provider.username,
+      password: provider.password
+    });
+    const url = `${provider.api_url}/xmltv.php?${queryParams.toString()}`;
+    const limiter = this._getLimiter(providerId);
+    
+    return await this._fetchTextWithCacheAxios({
+      providerId,
+      type: 'live',
+      endpoint: 'epg',
+      url,
+      headers: {},
+      limiter,
+      timeout: 60000 // Longer timeout for large EPG files
     });
   }
 
@@ -301,6 +420,46 @@ export class XtreamProvider extends BaseIPTVProvider {
           return path.join(dirPath, `${params.titleId}.json`);
         },
         ttl: 12 // 12 hours for tvshows
+      },
+      // Live TV categories
+      'live_categories-live': {
+        type: 'live',
+        endpoint: 'live_categories',
+        dirBuilder: (cacheDir, providerId, params) => {
+          return path.join(cacheDir, providerId, 'live', 'categories');
+        },
+        fileBuilder: (cacheDir, providerId, type, params) => {
+          const dirPath = path.join(cacheDir, providerId, 'live', 'categories');
+          return path.join(dirPath, 'categories.json');
+        },
+        ttl: 6 // 6 hours
+      },
+      // Live TV streams
+      'live_streams-live': {
+        type: 'live',
+        endpoint: 'live_streams',
+        dirBuilder: (cacheDir, providerId, params) => {
+          return path.join(cacheDir, providerId, 'live', 'streams');
+        },
+        fileBuilder: (cacheDir, providerId, type, params) => {
+          const dirPath = path.join(cacheDir, providerId, 'live', 'streams');
+          const filename = params.categoryId ? `streams-${params.categoryId}.json` : 'streams.json';
+          return path.join(dirPath, filename);
+        },
+        ttl: 6 // 6 hours
+      },
+      // Live TV EPG
+      'epg-live': {
+        type: 'live',
+        endpoint: 'epg',
+        dirBuilder: (cacheDir, providerId, params) => {
+          return path.join(cacheDir, providerId, 'live', 'metadata');
+        },
+        fileBuilder: (cacheDir, providerId, type, params) => {
+          const dirPath = path.join(cacheDir, providerId, 'live', 'metadata');
+          return path.join(dirPath, 'epg.xml');
+        },
+        ttl: 6 // 6 hours
       }
     };
   }

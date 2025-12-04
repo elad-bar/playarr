@@ -15,7 +15,9 @@ export class TitleRepository extends BaseRepository {
     super(
       mongoClient,
       'titles',
-      (doc) => doc.title_key
+      (doc) => doc.title_key,
+      'data',  // Collection type
+      'v1'     // Schema version
     );
   }
 

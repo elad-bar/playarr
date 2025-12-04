@@ -7,9 +7,9 @@ class ProfileRouter extends BaseRouter {
   /**
    * @param {UserManager} userManager - User manager instance
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
-   * @param {import('../managers/orchestration/JobsManager.js').JobsManager} [jobsManager] - Jobs manager instance (optional, for triggering Live TV sync)
+   * @param {import('../managers/orchestration/JobsManager.js').JobsManager} jobsManager - Jobs manager instance (for triggering Live TV sync)
    */
-  constructor(userManager, middleware, jobsManager = null) {
+  constructor(userManager, middleware, jobsManager) {
     super(middleware, 'ProfileRouter');
     this._userManager = userManager;
     this._jobsManager = jobsManager;
@@ -50,7 +50,7 @@ class ProfileRouter extends BaseRouter {
         const result = await this._userManager.updateProfile(username, updates);
         
         // Trigger Live TV sync job if liveTV was modified (fire and forget - don't block response)
-        if (liveTV !== undefined && this._jobsManager) {
+        if (liveTV !== undefined) {
           // Trigger job asynchronously without awaiting - let it run in background
           this._jobsManager.triggerJob('syncLiveTV')
             .then(() => {

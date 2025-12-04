@@ -15,7 +15,9 @@ export class ProviderTitleRepository extends BaseRepository {
     super(
       mongoClient,
       'provider_titles',
-      (doc) => `${doc.provider_id}|${doc.title_key}`
+      (doc) => `${doc.provider_id}|${doc.title_key}`,
+      'data',  // Collection type
+      'v1'     // Schema version
     );
   }
 

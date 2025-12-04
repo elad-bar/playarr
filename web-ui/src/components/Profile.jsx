@@ -29,7 +29,6 @@ import ProfileM3UEndpoint from './profile/ProfileM3UEndpoint';
 import ProfileIPTVSyncer from './profile/ProfileIPTVSyncer';
 import ProfileXtreamCode from './profile/ProfileXtreamCode';
 import ProfileStremio from './profile/ProfileStremio';
-import ProfileLiveTV from './profile/ProfileLiveTV';
 
 function TabPanel({ children, value, index }) {
   return (
@@ -335,7 +334,6 @@ const Profile = ({ open, onClose }) => {
               aria-label="profile tabs"
             >
               <Tab label="User Details" />
-              <Tab label="LiveTV" />
               <Tab label="Client" />
             </Tabs>
           </Box>
@@ -385,20 +383,8 @@ const Profile = ({ open, onClose }) => {
             </Grid>
           </TabPanel>
 
-          {/* LiveTV Tab */}
-          <TabPanel value={activeTab} index={1}>
-            <Grid container spacing={3}>
-              <Grid item xs={12}>
-                <ProfileLiveTV
-                  profile={profile}
-                  onUpdate={loadProfile}
-                />
-              </Grid>
-            </Grid>
-          </TabPanel>
-
           {/* Client Tab - 4 columns layout */}
-          <TabPanel value={activeTab} index={2}>
+          <TabPanel value={activeTab} index={1}>
             <Grid container spacing={3}>
               {clients.map((client) => (
                 <Grid item xs={12} sm={6} md={3} key={client.id}>

@@ -43,37 +43,64 @@ class PlaylistManager extends BaseWatchlistFormattingManager {
       mediaFiles[proxyPath] = streamUrl;
     }
 
-    // Add Live TV channels if user has Live TV configured
-    if (user?.liveTV?.m3u_url && this._channelManager) {
-      try {
-        const channels = await this._channelManager.getChannelsByUsername(user.username);
+    // Add Live TV channels from active providers
+    try {
+      // Get active providers
+      const activeProviders = await this._iptvProviderManager.findByQuery({
+        type: { $in: ['agtv', 'xtream'] },
+        enabled: { $ne: false },
+        deleted: { $ne: true }
+      });
+      
+      if (activeProviders.length > 0) {
+        const activeProviderIds = activeProviders.map(p => p.id);
+        const channels = await this._channelManager._repository.findByQuery({
+          provider_id: { $in: activeProviderIds }
+        });
         
-        // Get current programs for all channels
+        // Get current programs for channels
         const now = new Date();
-        const currentPrograms = await this._programManager?.getCurrentPrograms(user.username, now) || [];
-        
-        // Map programs by channel_id
         const programMap = new Map();
-        currentPrograms.forEach(prog => {
-          if (!programMap.has(prog.channel_id)) {
-            programMap.set(prog.channel_id, prog);
+        
+        // Group channels by provider_id for efficient program lookup
+        const providerChannelMap = new Map();
+        channels.forEach(ch => {
+          if (!providerChannelMap.has(ch.provider_id)) {
+            providerChannelMap.set(ch.provider_id, []);
           }
+          providerChannelMap.get(ch.provider_id).push(ch.channel_id);
         });
         
-        // Add current program to channels
-        const channelsWithPrograms = channels.map(channel => ({
-          ...channel,
-          currentProgram: programMap.get(channel.channel_id) || null
-        }));
+        // Fetch programs for each provider
+        for (const [providerId, channelIds] of providerChannelMap.entries()) {
+          try {
+            const programs = await this._programManager._repository.findByQuery({
+              provider_id: providerId,
+              channel_id: { $in: channelIds },
+              start: { $lte: now },
+              stop: { $gte: now }
+            });
+            
+            programs.forEach(prog => {
+              const key = `${prog.provider_id}-${prog.channel_id}`;
+              if (!programMap.has(key)) {
+                programMap.set(key, prog);
+              }
+            });
+          } catch (error) {
+            // Log but continue
+            this.logger.warn(`Error fetching programs for provider ${providerId}: ${error.message}`);
+          }
+        }
         
-        channelsWithPrograms.forEach(channel => {
-          const channelId = encodeURIComponent(channel.channel_id);
+        channels.forEach(channel => {
+          const channelKey = encodeURIComponent(channel.channel_key);
           mediaFiles[`livetv/${channel.channel_id}.m3u`] = 
-            `${baseUrl}/api/livetv/stream/${channelId}?api_key=${user.api_key}`;
+            `${baseUrl}/api/livetv/stream/${channelKey}?api_key=${user.api_key}`;
         });
-      } catch (error) {
-        this.logger.error(`Error adding Live TV channels to media files mapping: ${error.message}`);
       }
+    } catch (error) {
+      this.logger.error(`Error adding Live TV channels to media files mapping: ${error.message}`);
     }
 
     return mediaFiles;

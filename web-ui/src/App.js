@@ -14,6 +14,7 @@ import Home from './pages/Home';
 import Settings from './components/Settings';
 import Login from './pages/Login';
 import Profile from './components/Profile';
+import axiosInstance from './config/axios';
 
 const AppContent = () => {
     const dispatch = useDispatch();
@@ -26,6 +27,7 @@ const AppContent = () => {
         const saved = localStorage.getItem('playarr_content_mode');
         return saved || 'vod';
     });
+    const [hasChannels, setHasChannels] = useState(false);
     const location = useLocation();
     const navigate = useNavigate();
     const { isAuthenticated, loading, user, logout } = useAuth();
@@ -91,15 +93,45 @@ const AppContent = () => {
         }
     }, [isAuthenticated]);
 
-    // Validate contentMode when user changes - reset to 'vod' if user doesn't have live TV
+    // Check if channels are available from providers
     useEffect(() => {
         if (isAuthenticated && user) {
-            const savedMode = localStorage.getItem('playarr_content_mode');
-            // If user doesn't have live TV but contentMode is 'tv', reset to 'vod'
-            if (!user?.liveTV?.m3u_url && savedMode === 'tv') {
-                setContentMode('vod');
-                localStorage.setItem('playarr_content_mode', 'vod');
-            }
+            const checkChannels = async () => {
+                try {
+                    // Make a lightweight request to check if channels exist
+                    // Using watchlist=false to get all channels, not just watchlist
+                    const response = await axiosInstance.get('/livetv/channels?watchlist=false&page=1&per_page=1');
+                    // Handle both old format (array) and new format (paginated object)
+                    const hasChannelsData = response.data && (
+                        (Array.isArray(response.data) && response.data.length > 0) ||
+                        (response.data.items && response.data.items.length > 0) ||
+                        (response.data.pagination && response.data.pagination.total > 0)
+                    );
+                    setHasChannels(hasChannelsData);
+                    
+                    // After checking channels, validate contentMode
+                    // Only reset to 'vod' if user doesn't have channels but contentMode is 'tv'
+                    if (!hasChannelsData) {
+                        const savedMode = localStorage.getItem('playarr_content_mode');
+                        if (savedMode === 'tv') {
+                            setContentMode('vod');
+                            localStorage.setItem('playarr_content_mode', 'vod');
+                        }
+                    }
+                } catch (error) {
+                    // If error, assume no channels available
+                    setHasChannels(false);
+                    // Validate contentMode after error - reset to 'vod' if needed
+                    const savedMode = localStorage.getItem('playarr_content_mode');
+                    if (savedMode === 'tv') {
+                        setContentMode('vod');
+                        localStorage.setItem('playarr_content_mode', 'vod');
+                    }
+                }
+            };
+            checkChannels();
+        } else {
+            setHasChannels(false);
         }
     }, [isAuthenticated, user]);
 
@@ -203,7 +235,7 @@ const AppContent = () => {
                                         {mode === 'light' ? <DarkModeIcon /> : <LightModeIcon />}
                                     </IconButton>
                                 </Tooltip>
-                                {user?.liveTV?.m3u_url && (
+                                {hasChannels && (
                                     <>
                                         <Tooltip title="Video on Demand">
                                             <IconButton

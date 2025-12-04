@@ -155,7 +155,18 @@ async function initialize() {
     // Create domain managers that depend on repositories
     const jobHistoryManager = new JobHistoryManager(jobHistoryRepo);
 
-    // 2.1. Initialize database indexes for all repositories
+    // 2.1. Initialize metadata collection (for schema versioning)
+    logger.debug('Initializing metadata collection...');
+    try {
+      const metadataCollection = mongoClient.db(dbName).collection('_collection_metadata');
+      await metadataCollection.createIndex({ _id: 1 });
+      logger.debug('Metadata collection initialized');
+    } catch (error) {
+      logger.warn(`Error initializing metadata collection: ${error.message}`);
+      // Continue - metadata collection will be created on first use
+    }
+
+    // 2.2. Initialize database indexes for all repositories
     logger.debug('Initializing database indexes...');
     try {
       await Promise.all([
@@ -239,6 +250,18 @@ async function initialize() {
       await jobsManager.triggerJob(jobName);
     };
     
+    // Create Live TV managers (before ProvidersManager so they can be passed as dependencies)
+    const channelManager = new ChannelManager(channelRepo);
+    const programManager = new ProgramManager(programRepo);
+        
+    const liveTVProcessingManager = new LiveTVProcessingManager(
+      channelManager,
+      programManager,
+      iptvProviderManager,
+      xtreamProvider,
+      agtvProvider
+    );
+    
     const providersManager = new ProvidersManager(
       webSocketService,
       providerTypeMap,
@@ -246,14 +269,12 @@ async function initialize() {
       providerTitlesManager,
       providerTitleRepo,
       titleRepo,
-      triggerJob
+      triggerJob,
+      channelManager,
+      programManager,
+      userManager
     );
-    
-    // Create Live TV managers
-    const channelManager = new ChannelManager(channelRepo);
-    const programManager = new ProgramManager(programRepo);
-    const liveTVProcessingManager = new LiveTVProcessingManager(channelManager, programManager);
-    const liveTVFormattingManager = new LiveTVFormattingManager(titlesManager, iptvProviderManager, channelManager, programManager);
+    const liveTVFormattingManager = new LiveTVFormattingManager(titlesManager, iptvProviderManager, channelManager, programManager, userManager);
     
     const playlistManager = new PlaylistManager(titlesManager, iptvProviderManager, channelManager, programManager);
     const tmdbManager = new TMDBManager(tmdbProvider);
@@ -278,7 +299,8 @@ async function initialize() {
       titlesManager,
       providerTitlesManager
     ));
-    jobInstances.set('syncLiveTV', new SyncLiveTVJob(userManager, liveTVProcessingManager));
+    jobInstances.set('syncLiveTV', new SyncLiveTVJob(iptvProviderManager, liveTVProcessingManager, jobHistoryManager));
+    
     jobInstances.set('syncProviderDetails', new SyncProviderDetailsJob(
       'syncProviderDetails',
       jobHistoryManager,
@@ -317,7 +339,7 @@ async function initialize() {
     const xtreamRouter = new XtreamRouter(xtreamManager, middleware, channelManager, programManager);
     const jobsRouter = new JobsRouter(jobsManager, middleware);
     const stremioRouter = new StremioRouter(stremioManager, middleware);
-    const liveTVRouter = new LiveTVRouter(channelManager, programManager, liveTVFormattingManager, middleware);
+    const liveTVRouter = new LiveTVRouter(channelManager, programManager, liveTVFormattingManager, userManager, iptvProviderManager, middleware);
 
     // Initialize all routers
     authRouter.initialize();

@@ -483,11 +483,22 @@ class XtreamManager extends BaseWatchlistFormattingManager {
    */
   async getLiveCategories(user) {
     try {
-      if (!this._channelManager || !user?.liveTV?.m3u_url) {
+      // Get active providers
+      const activeProviders = await this._iptvProviderManager.findByQuery({
+        type: { $in: ['agtv', 'xtream'] },
+        enabled: { $ne: false },
+        deleted: { $ne: true }
+      });
+      
+      if (activeProviders.length === 0) {
         return [];
       }
 
-      const channels = await this._channelManager.getChannelsByUsername(user.username);
+      const activeProviderIds = activeProviders.map(p => p.id);
+      const channels = await this._channelManager._repository.findByQuery({
+        provider_id: { $in: activeProviderIds }
+      });
+      
       const categories = new Map();
 
       // Extract unique group titles
@@ -517,11 +528,22 @@ class XtreamManager extends BaseWatchlistFormattingManager {
    */
   async getLiveStreams(user, baseUrl, categoryId = null) {
     try {
-      if (!this._channelManager || !user?.liveTV?.m3u_url) {
+      // Get active providers
+      const activeProviders = await this._iptvProviderManager.findByQuery({
+        type: { $in: ['agtv', 'xtream'] },
+        enabled: { $ne: false },
+        deleted: { $ne: true }
+      });
+      
+      if (activeProviders.length === 0) {
         return [];
       }
 
-      const channels = await this._channelManager.getChannelsByUsername(user.username);
+      const activeProviderIds = activeProviders.map(p => p.id);
+      const channels = await this._channelManager._repository.findByQuery({
+        provider_id: { $in: activeProviderIds }
+      });
+      
       const categories = new Map();
       let categoryCounter = 1;
 
@@ -545,9 +567,8 @@ class XtreamManager extends BaseWatchlistFormattingManager {
 
       // Convert to Xtream format
       return filteredChannels.map((channel, index) => {
-        // Use Xtream Code API format for Live TV streams: /live/{username}/{password}/{channelId}.m3u8
-        // The route handler will recognize this and redirect to the actual channel URL
-        const streamUrl = `${baseUrl}/live/${user.username}/${user.api_key}/${channel.channel_id}.m3u8`;
+        // Use channel_key for stream URL: /api/livetv/stream/{channelKey}
+        const streamUrl = `${baseUrl}/api/livetv/stream/${encodeURIComponent(channel.channel_key)}?api_key=${user.api_key}`;
         const categoryIdForChannel = channel.group_title ? categories.get(channel.group_title) : 0;
 
         return {

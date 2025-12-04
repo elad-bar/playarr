@@ -29,11 +29,12 @@ class BaseWatchlistFormattingManager extends BaseFormattingManager {
    */
   async _getWatchlistTitles(user, mediaType) {
     // Get titles in watchlist from user only (no fallbacks)
-    if (!user || !user.watchlist || !Array.isArray(user.watchlist)) {
+    if (!user || !user.watchlist || typeof user.watchlist !== 'object') {
       return new Map();
     }
 
-    const watchlistTitleKeys = user.watchlist.filter(key => key.startsWith(`${mediaType}-`));
+    // Direct access by media type
+    const watchlistTitleKeys = user.watchlist[mediaType] || [];
     
     if (watchlistTitleKeys.length === 0) {
       return new Map();

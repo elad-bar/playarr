@@ -148,7 +148,8 @@ This feature refactors Live TV channel management from user-level configuration 
 - Entire `user.liveTV` object (if no other fields)
 
 **Add:**
-- `user.watchlist_channels: Array<String>` - Array of channel keys in user's watchlist (format: `live-{providerId}-{channelId}`)
+- `user.watchlist.live: Array<String>` - Array of channel keys in user's watchlist (format: `live-{providerId}-{channelId}`)
+- `user.watchlist` is now a unified object with `movies`, `tvshows`, and `live` arrays
 
 **Migration:**
 - Existing user `liveTV` configurations will be ignored
@@ -1529,10 +1530,11 @@ async getAllChannels(options = {}, userManager = null) {
 ### Watchlist Management
 
 **User Watchlist:**
-- Stored in `user.watchlist_channels` array (channel keys)
+- Stored in `user.watchlist.live` array (channel keys)
 - Default view shows only watchlist channels (`watchlist=true` by default)
 - Users can toggle between watchlist and all channels via query parameter
 - Watchlist filtering happens at API level after fetching channels
+- Unified structure: `watchlist.movies`, `watchlist.tvshows`, `watchlist.live`
 
 **Watchlist Operations:**
 - **Add**: `POST /api/livetv/watchlist` with `{ channelKey: "live-{providerId}-{channelId}" }`
@@ -1682,7 +1684,7 @@ async getAllChannels(options = {}, userManager = null) {
 2. **Provider Delete Cleanup** (in `ProvidersManager.deleteProvider()`):
    - Delete all channels for provider: `await this._channelManager.deleteByProvider(providerId)` (via ChannelManager)
    - Delete all programs for provider: `await this._programManager.deleteByProvider(providerId)` (via ProgramManager)
-   - Clean up watchlist entries: Remove channel keys matching `live-{providerId}-*` from all users' `watchlist_channels` arrays (via UserManager)
+   - Clean up watchlist entries: Remove channel keys matching `live-{providerId}-*` from all users' `watchlist.live` arrays (via UserManager)
 
 3. **API Response Filtering**:
    - `ChannelManager.getAllChannels()` should filter out channels from disabled/deleted providers

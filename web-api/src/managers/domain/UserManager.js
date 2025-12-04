@@ -403,7 +403,11 @@ class UserManager extends BaseDomainManager {
         last_name: lastName,
         password_hash: passwordHash,
         api_key: apiKey,
-        watchlist: [],
+        watchlist: {
+          movies: [],
+          tvshows: [],
+          live: []
+        },
         status: 'active',
         role: role || 'user',
         created_at: now,
@@ -750,6 +754,104 @@ class UserManager extends BaseDomainManager {
   }
 
   /**
+   * Add channel to user's watchlist
+   * @param {string} username - Username
+   * @param {string} channelKey - Channel key (format: live-{providerId}-{channelId})
+   * @returns {Promise<void>}
+   */
+  async addChannelToWatchlist(username, channelKey) {
+    try {
+      const user = await this.getUserByUsername(username);
+      if (!user) {
+        throw new NotFoundError(`User with username ${username} not found`);
+      }
+
+      // Ensure watchlist object exists with proper structure
+      const watchlist = user.watchlist || { movies: [], tvshows: [], live: [] };
+      const watchlistChannels = new Set(watchlist.live || []);
+      watchlistChannels.add(channelKey);
+
+      // Update entire watchlist object to preserve structure
+      const updatedWatchlist = {
+        movies: watchlist.movies || [],
+        tvshows: watchlist.tvshows || [],
+        live: Array.from(watchlistChannels)
+      };
+
+      await this._repository.updateOne(
+        { username },
+        { $set: { watchlist: updatedWatchlist } }
+      );
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      this.logger.error(`Failed to add channel to watchlist for user ${username}:`, error);
+      throw new AppError('Failed to add channel to watchlist', 500);
+    }
+  }
+
+  /**
+   * Remove channel from user's watchlist
+   * @param {string} username - Username
+   * @param {string} channelKey - Channel key (format: live-{providerId}-{channelId})
+   * @returns {Promise<void>}
+   */
+  async removeChannelFromWatchlist(username, channelKey) {
+    try {
+      const user = await this.getUserByUsername(username);
+      if (!user) {
+        throw new NotFoundError(`User with username ${username} not found`);
+      }
+
+      // Ensure watchlist object exists with proper structure
+      const watchlist = user.watchlist || { movies: [], tvshows: [], live: [] };
+      const watchlistChannels = new Set(watchlist.live || []);
+      watchlistChannels.delete(channelKey);
+
+      // Update entire watchlist object to preserve structure
+      const updatedWatchlist = {
+        movies: watchlist.movies || [],
+        tvshows: watchlist.tvshows || [],
+        live: Array.from(watchlistChannels)
+      };
+
+      await this._repository.updateOne(
+        { username },
+        { $set: { watchlist: updatedWatchlist } }
+      );
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      this.logger.error(`Failed to remove channel from watchlist for user ${username}:`, error);
+      throw new AppError('Failed to remove channel from watchlist', 500);
+    }
+  }
+
+  /**
+   * Get user's watchlist channel keys
+   * @param {string} username - Username
+   * @returns {Promise<Array<string>>} Array of channel keys
+   */
+  async getWatchlistChannelKeys(username) {
+    try {
+      const user = await this.getUserByUsername(username);
+      if (!user) {
+        throw new NotFoundError(`User with username ${username} not found`);
+      }
+      const watchlist = user.watchlist || { movies: [], tvshows: [], live: [] };
+      return watchlist.live || [];
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      this.logger.error(`Failed to get watchlist channel keys for user ${username}:`, error);
+      throw new AppError('Failed to get watchlist channel keys', 500);
+    }
+  }
+
+  /**
    * Update user watchlist (add or remove title keys)
    * Matches Python's AuthenticationManager.update_user_watchlist()
    * @param {string} username - Username
@@ -764,15 +866,35 @@ class UserManager extends BaseDomainManager {
         return false;
       }
 
-      const watchlist = new Set(user.watchlist || []);
+      // Ensure watchlist object exists with proper structure
+      const watchlist = user.watchlist || { movies: [], tvshows: [], live: [] };
       
-      if (add) {
-        titleKeys.forEach(key => watchlist.add(key));
-      } else {
-        titleKeys.forEach(key => watchlist.delete(key));
-      }
+      // Separate title keys by media type
+      const movies = new Set(watchlist.movies || []);
+      const tvshows = new Set(watchlist.tvshows || []);
+      
+      titleKeys.forEach(key => {
+        if (key.startsWith('movies-')) {
+          if (add) {
+            movies.add(key);
+          } else {
+            movies.delete(key);
+          }
+        } else if (key.startsWith('tvshows-')) {
+          if (add) {
+            tvshows.add(key);
+          } else {
+            tvshows.delete(key);
+          }
+        }
+      });
 
-      const updatedWatchlist = Array.from(watchlist);
+      const updatedWatchlist = {
+        movies: Array.from(movies),
+        tvshows: Array.from(tvshows),
+        live: watchlist.live || []
+      };
+      
       const updateData = {
         watchlist: updatedWatchlist,
         updated_at: new Date(),

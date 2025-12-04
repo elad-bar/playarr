@@ -34,13 +34,17 @@ class LiveTVRouter extends BaseRouter {
    * @param {import('../managers/domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance
    * @param {import('../managers/domain/ProgramManager.js').ProgramManager} programManager - Program manager instance
    * @param {import('../managers/formatting/LiveTVFormattingManager.js').LiveTVFormattingManager} liveTVFormattingManager - Live TV formatting manager instance
+   * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager instance (for watchlist operations)
+   * @param {import('../managers/domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance (for getting enabled provider IDs)
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
    */
-  constructor(channelManager, programManager, liveTVFormattingManager, middleware) {
+  constructor(channelManager, programManager, liveTVFormattingManager, userManager, iptvProviderManager, middleware) {
     super(middleware, 'LiveTVRouter');
     this._channelManager = channelManager;
     this._programManager = programManager;
     this._liveTVFormattingManager = liveTVFormattingManager;
+    this._userManager = userManager;
+    this._iptvProviderManager = iptvProviderManager;
   }
 
   /**
@@ -48,46 +52,217 @@ class LiveTVRouter extends BaseRouter {
    */
   initialize() {
     /**
+     * GET /api/livetv/categories
+     * Get all unique categories from all channels (across all enabled providers)
+     */
+    this.router.get('/categories', this.middleware.requireAuth, async (req, res) => {
+      try {
+        // Get enabled provider IDs
+        const enabledProviderIds = await this._iptvProviderManager.getEnabledProviderIds();
+        
+        if (!enabledProviderIds || enabledProviderIds.length === 0) {
+          this.logger.warn('No enabled providers found, returning empty categories');
+          return res.status(200).json({ categories: [] });
+        }
+        
+        // Get all unique group_title values from channels
+        const categories = await this._channelManager.getUniqueCategories(enabledProviderIds);
+        
+        this.logger.debug(`Found ${categories.length} unique categories from ${enabledProviderIds.length} enabled providers`);
+        
+        return res.status(200).json({ categories });
+      } catch (error) {
+        this.logger.error(`Error fetching categories: ${error.message}`, error);
+        return this.returnErrorResponse(res, 500, 'Failed to get categories', error.message);
+      }
+    });
+
+    /**
      * GET /api/livetv/channels
-     * Get user's Live TV channels (with current program if EPG available)
+     * Get Live TV channels from all active providers
+     * Query params: watchlist (true/false, default: true), providerId, search, category (can be multiple), page, per_page
      */
     this.router.get('/channels', this.middleware.requireAuth, async (req, res) => {
       try {
         const user = req.user;
-        const channels = await this._channelManager.getChannelsByUsername(user.username);
+        const { watchlist, providerId, search, category, page = 1, per_page = 50 } = req.query;
         
-        // Get current programs for all channels
+        // Parse watchlist param (default: undefined to show all channels)
+        const watchlistFilter = watchlist !== undefined ? watchlist === 'true' : undefined;
+        
+        // Parse category param (can be single value or array)
+        let categoryArray = undefined;
+        if (category) {
+          categoryArray = Array.isArray(category) ? category : [category];
+        }
+        
+        // Get enabled provider IDs
+        const enabledProviderIds = await this._iptvProviderManager.getEnabledProviderIds();
+        
+        // Get user data for watchlist filtering
+        const userData = await this._userManager.getUserByUsername(user.username);
+        const userWatchlist = userData?.watchlist || { movies: [], tvshows: [], live: [] };
+        
+        // Get channels with filtering and pagination
+        const options = {
+          userId: user.username,
+          watchlistFilter: watchlistFilter,
+          providerId: providerId || undefined,
+          search: search || undefined,
+          category: categoryArray,
+          watchlist: userWatchlist,
+          page: parseInt(page, 10),
+          perPage: parseInt(per_page, 10),
+          enabledProviderIds
+        };
+        
+        const result = await this._channelManager.getAllChannels(options);
+        const channels = result.items;
+        
+        // Get current programs for channels (by provider_id and channel_id)
         const now = new Date();
-        const currentPrograms = await this._programManager.getCurrentPrograms(user.username, now);
-        
-        // Map programs by channel_id
         const programMap = new Map();
-        currentPrograms.forEach(prog => {
-          if (!programMap.has(prog.channel_id)) {
-            programMap.set(prog.channel_id, prog);
+        
+        // Group channels by provider_id for efficient program lookup
+        const providerChannelMap = new Map();
+        channels.forEach(ch => {
+          if (!providerChannelMap.has(ch.provider_id)) {
+            providerChannelMap.set(ch.provider_id, []);
           }
+          providerChannelMap.get(ch.provider_id).push(ch.channel_id);
         });
         
-        // Add current program to channels
+        // Fetch programs for each provider
+        for (const [providerId, channelIds] of providerChannelMap.entries()) {
+          try {
+            const programs = await this._programManager._repository.findByQuery({
+              provider_id: providerId,
+              channel_id: { $in: channelIds },
+              start: { $lte: now },
+              stop: { $gte: now }
+            });
+            
+            programs.forEach(prog => {
+              const key = `${prog.provider_id}-${prog.channel_id}`;
+              if (!programMap.has(key)) {
+                programMap.set(key, prog);
+              }
+            });
+          } catch (error) {
+            // Log but continue
+            this.logger.warn(`Error fetching programs for provider ${providerId}: ${error.message}`);
+          }
+        }
+        
+        // Get watchlist keys for status
+        const watchlistKeys = new Set(userWatchlist.live || []);
+        
+        // Add current program and watchlist status to channels
         const channelsWithPrograms = channels.map(channel => ({
           ...channel,
-          currentProgram: programMap.get(channel.channel_id) || null
+          currentProgram: programMap.get(`${channel.provider_id}-${channel.channel_id}`) || null,
+          watchlist: watchlistKeys.has(channel.channel_key)
         }));
-        return res.status(200).json(channelsWithPrograms);
+        
+        return res.status(200).json({
+          items: channelsWithPrograms,
+          pagination: result.pagination
+        });
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Failed to get channels', error.message);
       }
     });
 
     /**
-     * GET /api/livetv/channels/:channelId/programs
-     * Get programs for a channel
+     * GET /api/livetv/providers/:providerId/channels
+     * Get channels for a specific provider
      */
-    this.router.get('/channels/:channelId/programs', this.middleware.requireApiKey, async (req, res) => {
+    this.router.get('/providers/:providerId/channels', this.middleware.requireAuth, async (req, res) => {
       try {
         const user = req.user;
-        const { channelId } = req.params;
-        const programs = await this._programManager.getProgramsByChannel(user.username, decodeURIComponent(channelId));
+        const { providerId } = req.params;
+        const { watchlist, search } = req.query;
+        
+        const watchlistFilter = watchlist !== undefined ? watchlist === 'true' : undefined;
+        
+        // Get user data for watchlist filtering
+        const userData = await this._userManager.getUserByUsername(user.username);
+        const userWatchlist = userData?.watchlist || { movies: [], tvshows: [], live: [] };
+        
+        const options = {
+          userId: user.username,
+          watchlistFilter: watchlistFilter,
+          providerId: providerId,
+          search: search || undefined,
+          watchlist: userWatchlist
+        };
+        
+        const channels = await this._channelManager.getAllChannels(options);
+        return res.status(200).json(channels);
+      } catch (error) {
+        return this.returnErrorResponse(res, 500, 'Failed to get channels', error.message);
+      }
+    });
+
+    /**
+     * POST /api/livetv/watchlist
+     * Add channel to user's watchlist
+     * Body: { channelKey }
+     */
+    this.router.post('/watchlist', this.middleware.requireAuth, async (req, res) => {
+      try {
+        const user = req.user;
+        const { channelKey } = req.body;
+        
+        if (!channelKey) {
+          return this.returnErrorResponse(res, 400, 'channelKey is required');
+        }
+        
+        await this._userManager.addChannelToWatchlist(user.username, channelKey);
+        return res.status(200).json({ success: true, message: 'Channel added to watchlist' });
+      } catch (error) {
+        return this.returnErrorResponse(res, 500, 'Failed to add channel to watchlist', error.message);
+      }
+    });
+
+    /**
+     * DELETE /api/livetv/watchlist/:channelKey
+     * Remove channel from user's watchlist
+     */
+    this.router.delete('/watchlist/:channelKey', this.middleware.requireAuth, async (req, res) => {
+      try {
+        const user = req.user;
+        const { channelKey } = req.params;
+        const decodedChannelKey = decodeURIComponent(channelKey);
+        
+        await this._userManager.removeChannelFromWatchlist(user.username, decodedChannelKey);
+        return res.status(200).json({ success: true, message: 'Channel removed from watchlist' });
+      } catch (error) {
+        return this.returnErrorResponse(res, 500, 'Failed to remove channel from watchlist', error.message);
+      }
+    });
+
+    /**
+     * GET /api/livetv/channels/:channelKey/programs
+     * Get programs for a channel (channelKey format: live-{providerId}-{channelId})
+     */
+    this.router.get('/channels/:channelKey/programs', this.middleware.requireApiKey, async (req, res) => {
+      try {
+        const { channelKey } = req.params;
+        const decodedChannelKey = decodeURIComponent(channelKey);
+        
+        // Parse channel key: live-{providerId}-{channelId}
+        const match = decodedChannelKey.match(/^live-(.+?)-(.+)$/);
+        if (!match) {
+          return this.returnErrorResponse(res, 400, 'Invalid channel key format');
+        }
+        
+        const [, providerId, channelId] = match;
+        const programs = await this._programManager._repository.findByQuery({
+          provider_id: providerId,
+          channel_id: channelId
+        }, { sort: { start: 1 } });
+        
         return res.status(200).json(programs);
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Failed to get programs', error.message);
@@ -119,28 +294,35 @@ class LiveTVRouter extends BaseRouter {
     this.router.get('/epg', this.middleware.requireApiKey, async (req, res) => {
       try {
         const user = req.user;
-        const epgPath = await this._liveTVFormattingManager.getEPGPath(user.username);
-        if (!epgPath) {
-          return this.returnErrorResponse(res, 404, 'EPG not available');
-        }
+        const epgContent = await this._liveTVFormattingManager.getEPGContent(user.username);
         res.setHeader('Content-Type', 'application/xml');
-        return res.sendFile(epgPath);
+        return res.send(epgContent);
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Failed to get EPG', error.message);
       }
     });
 
     /**
-     * GET /api/livetv/stream/:channelId
-     * Stream redirect for channel
+     * GET /api/livetv/stream/:channelKey
+     * Stream redirect for channel (channelKey format: live-{providerId}-{channelId})
      */
-    this.router.get('/stream/:channelId', this.middleware.requireApiKey, async (req, res) => {
+    this.router.get('/stream/:channelKey', this.middleware.requireApiKey, async (req, res) => {
       try {
-        const user = req.user;
-        const { channelId } = req.params;
-        const decodedChannelId = decodeURIComponent(channelId);
+        const { channelKey } = req.params;
+        const decodedChannelKey = decodeURIComponent(channelKey);
         
-        const channel = await this._channelManager.getChannelByUsernameAndId(user.username, decodedChannelId);
+        // Parse channel key: live-{providerId}-{channelId}
+        const match = decodedChannelKey.match(/^live-(.+?)-(.+)$/);
+        if (!match) {
+          return this.returnErrorResponse(res, 400, 'Invalid channel key format');
+        }
+        
+        const [, providerId, channelId] = match;
+        const channel = await this._channelManager._repository.findOneByQuery({
+          provider_id: providerId,
+          channel_id: channelId
+        });
+        
         if (!channel) {
           return this.returnErrorResponse(res, 404, 'Channel not found');
         }

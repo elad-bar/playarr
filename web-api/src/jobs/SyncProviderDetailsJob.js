@@ -108,11 +108,23 @@ export class SyncProviderDetailsJob extends BaseJob {
           this.logger.debug(`[${providerId}] Authenticating with ${providerType} provider...`);
           const authDetails = await providerInstance.authenticate(providerId);
 
+          // Check if provider is inactive (active === false)
+          if (authDetails.active === false && provider.enabled !== false) {
+            this.logger.warn(`[${providerId}] Provider is inactive, disabling provider automatically`);
+            try {
+              await this.providersManager.updateProvider(providerId, { enabled: false });
+              this.logger.info(`[${providerId}] Provider disabled due to inactive status`);
+            } catch (disableError) {
+              this.logger.error(`[${providerId}] Failed to disable provider: ${disableError.message}`);
+            }
+          }
+
           // Prepare details object for update
           const details = {
             expiration_date: authDetails.expiration_date ?? null,
             max_connections: authDetails.max_connections ?? 0,
-            active_connections: authDetails.active_connections ?? 0
+            active_connections: authDetails.active_connections ?? 0,
+            active: authDetails.active ?? null
           };
 
           // Update provider details via lightweight method
@@ -133,6 +145,7 @@ export class SyncProviderDetailsJob extends BaseJob {
               expiration_date: null,
               max_connections: 0,
               active_connections: 0,
+              active: null,
               last_error: error.message
             });
           } catch (updateError) {

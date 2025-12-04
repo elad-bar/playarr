@@ -84,10 +84,10 @@ class StremioManager extends BaseFormattingManager {
   /**
    * Get manifest for Stremio addon
    * @param {string} baseUrl - Base URL for the addon (e.g., "https://yourdomain.com/stremio/{api_key}")
-   * @param {Object} user - User object (used to check for Live TV configuration)
-   * @returns {Object} Stremio manifest object
+   * @param {Object} user - User object (not used for Live TV check anymore)
+   * @returns {Promise<Object>} Stremio manifest object
    */
-  getManifest(baseUrl, user = null) {
+  async getManifest(baseUrl, user = null) {
     // Use fixed addon name
     const addonName = 'Playarr';
 
@@ -96,7 +96,29 @@ class StremioManager extends BaseFormattingManager {
     
     // Build resources with all types merged (no duplicates)
     const resourceTypes = ['movie', 'series'];
-    if (user?.liveTV?.m3u_url) {
+    
+    // Check if channels exist from active providers
+    let hasChannels = false;
+    try {
+      const activeProviders = await this._iptvProviderManager.findByQuery({
+        type: { $in: ['agtv', 'xtream'] },
+        enabled: { $ne: false },
+        deleted: { $ne: true }
+      });
+      
+      if (activeProviders.length > 0) {
+        const activeProviderIds = activeProviders.map(p => p.id);
+        const channelCount = await this._channelManager._repository.count({
+          provider_id: { $in: activeProviderIds }
+        });
+        hasChannels = channelCount > 0;
+      }
+    } catch (error) {
+      this.logger.warn(`Error checking for channels in manifest: ${error.message}`);
+      // Default to false if check fails
+    }
+    
+    if (hasChannels) {
       resourceTypes.push('tv');
       types.push('tv');
     }
@@ -129,8 +151,8 @@ class StremioManager extends BaseFormattingManager {
       }
     ];
 
-    // Add Live TV catalog if user has it configured
-    if (user?.liveTV?.m3u_url) {
+    // Add Live TV catalog if channels exist
+    if (hasChannels) {
       catalogs.push({
         type: 'tv',
         id: 'live-tv',
@@ -140,7 +162,7 @@ class StremioManager extends BaseFormattingManager {
 
     return {
       id: 'com.playarr.addon',
-      version: '1.1.0',
+      version: '1.2.0',
       name: addonName,
       description: 'Playarr IPTV streaming addon',
       resources,
@@ -164,28 +186,30 @@ class StremioManager extends BaseFormattingManager {
     try {
       // Handle Live TV type
       if (type === 'tv') {
-        if (!this._channelManager) {
-          this.logger.warn('ChannelManager not available for TV catalog');
+        // Get active providers
+        const activeProviders = await this._iptvProviderManager.findByQuery({
+          type: { $in: ['agtv', 'xtream'] },
+          enabled: { $ne: false },
+          deleted: { $ne: true }
+        });
+        
+        if (activeProviders.length === 0) {
           return { metas: [] };
         }
         
-        if (!user?.liveTV?.m3u_url) {
-          this.logger.warn(`User ${user?.username || 'unknown'} does not have Live TV configured (m3u_url missing)`);
-          return { metas: [] };
-        }
-        
-        this.logger.debug(`Getting channels for user: ${user.username}`);
-        const channels = await this._channelManager.getChannelsByUsername(user.username);
-        this.logger.debug(`Found ${channels.length} channels for user: ${user.username}`);
+        const activeProviderIds = activeProviders.map(p => p.id);
+        const channels = await this._channelManager._repository.findByQuery({
+          provider_id: { $in: activeProviderIds }
+        });
         
         if (!channels || channels.length === 0) {
-          this.logger.warn(`No channels found for user: ${user.username}. Make sure Live TV sync job has run.`);
+          this.logger.warn('No channels found. Make sure Live TV sync job has run.');
           return { metas: [] };
         }
         
         const metas = channels.map(channel => {
-          // URL-encode the channel ID to ensure proper URL construction by Stremio
-          const encodedId = encodeURIComponent(channel.channel_id);
+          // Use channel_key for ID (format: live-{providerId}-{channelId})
+          const encodedId = encodeURIComponent(channel.channel_key);
           return {
             id: encodedId,
             type: 'tv',
@@ -193,7 +217,7 @@ class StremioManager extends BaseFormattingManager {
             poster: channel.tvg_logo || null,
             background: channel.tvg_logo || null,
             logo: channel.tvg_logo || null,
-            description: channel.currentProgram ? `Now: ${channel.currentProgram.title}${channel.currentProgram.desc ? ` - ${channel.currentProgram.desc}` : ''}` : channel.name,
+            description: channel.name,
             genres: channel.group_title ? [channel.group_title] : []
           };
         });
@@ -245,30 +269,32 @@ class StremioManager extends BaseFormattingManager {
   async getMeta(type, stremioId, user) {
     // Handle Live TV type
     if (type === 'tv') {
-      if (!this._channelManager || !user?.liveTV?.m3u_url) {
-        return { meta: null };
-      }
       
       try {
-        // Decode the channel ID (since we encode it in the catalog)
-        const decodedChannelId = decodeURIComponent(stremioId);
+        // Decode the channel key (format: live-{providerId}-{channelId})
+        const decodedChannelKey = decodeURIComponent(stremioId);
         
-        // Try with decoded ID first
-        let channel = await this._channelManager.getChannelByUsernameAndId(user.username, decodedChannelId);
-        
-        // If not found, try with the ID as-is (in case it wasn't encoded)
-        if (!channel && decodedChannelId !== stremioId) {
-          channel = await this._channelManager.getChannelByUsernameAndId(user.username, stremioId);
-        }
+        // Find channel by channel_key
+        const channel = await this._channelManager._repository.findOneByQuery({
+          channel_key: decodedChannelKey
+        });
         
         if (!channel) {
           return { meta: null };
         }
         
-        const channelId = channel.channel_id;
-        const programs = await this._programManager.getProgramsByChannel(user.username, channelId);
+        // Get programs for this channel
+        const programs = await this._programManager._repository.findByQuery({
+          provider_id: channel.provider_id,
+          channel_id: channel.channel_id
+        }, { sort: { start: 1 } });
+        
         const now = new Date();
-        const currentProgram = programs.find(p => p.start <= now && p.stop >= now);
+        const currentProgram = programs.find(p => {
+          const start = p.start instanceof Date ? p.start : new Date(p.start);
+          const stop = p.stop instanceof Date ? p.stop : new Date(p.stop);
+          return start <= now && stop >= now;
+        });
         
         // Build videos array for EPG data (required for Stremio to recognize TV channels as playable)
         const videos = programs.map(program => {
@@ -277,17 +303,17 @@ class StremioManager extends BaseFormattingManager {
           const duration = Math.floor((stopTime - startTime) / 1000); // Duration in seconds
           
           return {
-            id: `${channelId}-${startTime.getTime()}`,
+            id: `${channel.channel_key}-${startTime.getTime()}`,
             title: program.title || 'Unknown Program',
             released: startTime.toISOString(),
             duration: duration > 0 ? duration : 3600 // Default to 1 hour if duration is invalid
           };
         });
         
-        // Return meta with encoded ID to match catalog format
+        // Return meta with encoded channel_key to match catalog format
         return {
           meta: {
-            id: encodeURIComponent(channelId), // Match the encoded ID from catalog
+            id: encodeURIComponent(channel.channel_key), // Match the encoded ID from catalog
             type: 'tv',
             name: channel.name,
             poster: channel.tvg_logo || null,
@@ -363,27 +389,28 @@ class StremioManager extends BaseFormattingManager {
   async getStreams(type, stremioId, user, season = null, episode = null, baseUrl = '') {
     // Handle Live TV type
     if (type === 'tv') {
-      if (!this._channelManager || !user?.liveTV?.m3u_url) {
-        return { streams: [] };
-      }
       
       try {
         // For TV channels, stremioId might be:
-        // 1. Just the channel ID (e.g., "12-kanal-il")
-        // 2. A program ID from videos array (e.g., "12-kanal-il-1234567890")
-        // Extract the channel ID by removing the timestamp suffix if present
-        let channelIdFromRequest = decodeURIComponent(stremioId);
+        // 1. Channel key (e.g., "live-provider1-channel123")
+        // 2. A program ID from videos array (e.g., "live-provider1-channel123-1234567890")
+        // Extract the channel key by removing the timestamp suffix if present
+        let channelKeyFromRequest = decodeURIComponent(stremioId);
         
-        // Check if it's a program ID (format: channelId-timestamp)
-        const programIdMatch = channelIdFromRequest.match(/^(.+)-(\d+)$/);
-        const actualChannelId = programIdMatch ? programIdMatch[1] : channelIdFromRequest;
+        // Check if it's a program ID (format: channelKey-timestamp)
+        const programIdMatch = channelKeyFromRequest.match(/^(.+)-(\d+)$/);
+        const actualChannelKey = programIdMatch ? programIdMatch[1] : channelKeyFromRequest;
         
-        // Try with extracted channel ID first
-        let channel = await this._channelManager.getChannelByUsernameAndId(user.username, actualChannelId);
+        // Find channel by channel_key
+        let channel = await this._channelManager._repository.findOneByQuery({
+          channel_key: actualChannelKey
+        });
         
-        // If not found, try with the ID as-is (in case it wasn't in program format)
-        if (!channel && actualChannelId !== channelIdFromRequest) {
-          channel = await this._channelManager.getChannelByUsernameAndId(user.username, channelIdFromRequest);
+        // If not found, try with the key as-is (in case it wasn't in program format)
+        if (!channel && actualChannelKey !== channelKeyFromRequest) {
+          channel = await this._channelManager._repository.findOneByQuery({
+            channel_key: channelKeyFromRequest
+          });
         }
         
         if (!channel) {
@@ -392,8 +419,8 @@ class StremioManager extends BaseFormattingManager {
         
         // Remove /stremio/{api_key} from baseUrl to get the actual API base
         const apiBase = baseUrl.replace(/\/stremio\/[^/]+$/, '');
-        const channelId = encodeURIComponent(channel.channel_id);
-        const streamUrl = `${apiBase}/api/livetv/stream/${channelId}?api_key=${user.api_key}`;
+        const channelKey = encodeURIComponent(channel.channel_key);
+        const streamUrl = `${apiBase}/api/livetv/stream/${channelKey}?api_key=${user.api_key}`;
         
         // For Live TV, always return the live stream URL regardless of which program was selected
         return {
@@ -401,7 +428,7 @@ class StremioManager extends BaseFormattingManager {
             url: streamUrl,
             title: channel.name,
             behaviorHints: {
-              bingeGroup: `livetv-${channel.channel_id}`
+              bingeGroup: `livetv-${channel.channel_key}`
             }
           }]
         };

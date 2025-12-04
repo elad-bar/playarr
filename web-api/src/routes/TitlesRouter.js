@@ -37,14 +37,17 @@ class TitlesRouter extends BaseRouter {
           starts_with = '',
         } = req.query;
 
-        this.logger.info(`Watchlist: ${watchlist}`);
-
         // Get enabled provider IDs
         const enabledProviderIds = await this._providersManager.getEnabledProviderIds();
 
         // Get user data and extract watchlist
         const userData = await this._userManager.getUserByUsername(req.user.username);
-        const watchlistArray = userData?.watchlist || [];
+        const userWatchlist = userData?.watchlist || { movies: [], tvshows: [], live: [] };
+        // Combine movies and tvshows arrays for titles query
+        const watchlistArray = [
+          ...(userWatchlist.movies || []),
+          ...(userWatchlist.tvshows || [])
+        ];
 
         const result = await this._titlesManager.getTitles({
           watchlist: watchlistArray,
@@ -77,7 +80,12 @@ class TitlesRouter extends BaseRouter {
         
         // Get user data and extract watchlist
         const userData = await this._userManager.getUserByUsername(req.user.username);
-        const watchlistArray = userData?.watchlist || [];
+        const userWatchlist = userData?.watchlist || { movies: [], tvshows: [], live: [] };
+        // Combine movies and tvshows arrays for titles query
+        const watchlistArray = [
+          ...(userWatchlist.movies || []),
+          ...(userWatchlist.tvshows || [])
+        ];
         
         const result = await this._titlesManager.getTitleDetails(title_key, watchlistArray, enabledProviderIds);
         return res.status(200).json(result);

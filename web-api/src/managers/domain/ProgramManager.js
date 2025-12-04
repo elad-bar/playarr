@@ -109,13 +109,73 @@ export class ProgramManager extends BaseDomainManager {
       }));
 
       // Use bulkUpsert from BaseDomainManager
-      // Match on username, channel_id, start, and stop
+      // Match on provider_id, channel_id, start, and stop
       return await this.bulkUpsert(programsWithTimestamps, {
-        matchFields: ['username', 'channel_id', 'start', 'stop'],
+        matchFields: ['provider_id', 'channel_id', 'start', 'stop'],
         setTimestamps: false // Already set above
       });
     } catch (error) {
       this.logger.error(`Error inserting programs: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all programs for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<number>} Number of deleted programs
+   */
+  async deleteByProvider(providerId) {
+    try {
+      return await this._repository.deleteByProvider(providerId);
+    } catch (error) {
+      this.logger.error(`Error deleting programs for provider ${providerId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete programs matching a query
+   * @param {Object} query - MongoDB query object
+   * @returns {Promise<number>} Number of deleted programs
+   */
+  async deleteMany(query) {
+    try {
+      const result = await this._repository.deleteManyByQuery(query);
+      return result.deletedCount || 0;
+    } catch (error) {
+      this.logger.error(`Error deleting programs: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get programs for multiple provider-channel combinations
+   * @param {Array<Object>} channels - Array of channel objects with provider_id and channel_id
+   * @param {Object} [options={}] - Query options (sort, etc.)
+   * @returns {Promise<Array<Object>>} Array of program objects
+   */
+  async getProgramsByChannels(channels, options = {}) {
+    try {
+      if (!channels || channels.length === 0) {
+        return [];
+      }
+
+      const programsQuery = {
+        $or: channels.map(channel => ({
+          provider_id: channel.provider_id,
+          channel_id: channel.channel_id
+        }))
+      };
+
+      const findOptions = {
+        sort: { start: 1 },
+        ...options
+      };
+
+      return await this._repository.findByQuery(programsQuery, findOptions);
+    } catch (error) {
+      this.logger.error(`Error getting programs for channels: ${error.message}`);
       throw error;
     }
   }

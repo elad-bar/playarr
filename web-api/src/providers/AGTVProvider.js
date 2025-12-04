@@ -59,6 +59,7 @@ export class AGTVProvider extends BaseIPTVProvider {
       // Parse expiration date from expiration_date_timestamp
       const expirationTimestamp = userResponse.data?.expiration_date_timestamp;
       const expirationDate = expirationTimestamp ? expirationTimestamp : null;
+      const active = userResponse.data?.active ?? null;
 
       // AGTV does not provide connection information via API
       // Return hardcoded values as per specification
@@ -68,7 +69,8 @@ export class AGTVProvider extends BaseIPTVProvider {
       return {
         expiration_date: expirationDate,
         max_connections: 5,
-        active_connections: 0
+        active_connections: 0,
+        active: active
       };
     } catch (error) {
       this.logger.error(`[${providerId}] Error authenticating with AGTV provider: ${error.message}`);
@@ -76,7 +78,8 @@ export class AGTVProvider extends BaseIPTVProvider {
       return {
         expiration_date: null,
         max_connections: 5,
-        active_connections: 0
+        active_connections: 0,
+        active: null
       };
     }
   }
@@ -108,6 +111,59 @@ export class AGTVProvider extends BaseIPTVProvider {
       url,
       headers: {},
       limiter
+    });
+  }
+
+  /**
+   * Fetch live TV M3U playlist from AGTV provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<string>} M3U content as string
+   */
+  async fetchLiveM3U(providerId) {
+    const provider = this._getProviderConfig(providerId);
+    const url = `${provider.api_url}/api/list/${provider.username}/${provider.password}/m3u8/livetv`;
+    const limiter = this._getLimiter(providerId);
+    
+    return await this._fetchTextWithCacheAxios({
+      providerId,
+      type: 'live',
+      endpoint: 'm3u8',
+      url,
+      headers: {},
+      limiter
+    });
+  }
+
+  /**
+   * Fetch live TV EPG from shared EPG source
+   * @param {string} providerId - Provider ID (not used, but kept for consistency)
+   * @returns {Promise<string>} EPG XML content as string (decompressed)
+   */
+  async fetchLiveEPG(providerId) {
+    // Shared EPG URL for AGTV providers
+    const epgUrl = 'https://epg.starlite.best/utc.xml.gz';
+    const limiter = this._getLimiter(providerId);
+    
+    // Decompress gzip transform function
+    const decompressGzip = async (data) => {
+      const zlib = await import('zlib');
+      const { promisify } = await import('util');
+      const gunzip = promisify(zlib.gunzip);
+      const decompressed = await gunzip(data);
+      return decompressed.toString('utf8');
+    };
+    
+    return await this._fetchTextWithCacheAxios({
+      providerId,
+      type: 'live',
+      endpoint: 'epg',
+      url: epgUrl,
+      headers: {},
+      limiter,
+      timeout: 60000, // Longer timeout for large EPG files
+      responseType: 'arraybuffer', // For gzipped content
+      transform: decompressGzip, // Decompress before caching
+      skipCache: true // Don't read from cache, only store
     });
   }
 
@@ -168,6 +224,32 @@ export class AGTVProvider extends BaseIPTVProvider {
           const dirPath = path.join(cacheDir, providerId, type, 'metadata');
           const filename = params.page ? `list-${params.page}.m3u8` : 'list.m3u8';
           return path.join(dirPath, filename);
+        },
+        ttl: 6 // 6 hours
+      },
+      // Live TV M3U8
+      'm3u8-live': {
+        type: 'live',
+        endpoint: 'm3u8',
+        dirBuilder: (cacheDir, providerId, params) => {
+          return path.join(cacheDir, providerId, 'live', 'metadata');
+        },
+        fileBuilder: (cacheDir, providerId, type, params) => {
+          const dirPath = path.join(cacheDir, providerId, 'live', 'metadata');
+          return path.join(dirPath, 'list.m3u8');
+        },
+        ttl: 6 // 6 hours
+      },
+      // Live TV EPG
+      'epg-live': {
+        type: 'live',
+        endpoint: 'epg',
+        dirBuilder: (cacheDir, providerId, params) => {
+          return path.join(cacheDir, providerId, 'live', 'metadata');
+        },
+        fileBuilder: (cacheDir, providerId, type, params) => {
+          const dirPath = path.join(cacheDir, providerId, 'live', 'metadata');
+          return path.join(dirPath, 'epg.xml');
         },
         ttl: 6 // 6 hours
       }

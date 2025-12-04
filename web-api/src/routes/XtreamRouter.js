@@ -145,14 +145,12 @@ class XtreamRouter extends BaseRouter {
   /**
    * @param {import('../managers/formatting/XtreamManager.js').XtreamManager} xtreamManager - Xtream manager instance (extends BaseFormattingManager, has getBestSource method)
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
-   * @param {import('../managers/domain/ChannelManager.js').ChannelManager} [channelManager] - Channel manager instance (optional, for LiveTV)
-   * @param {import('../managers/domain/ProgramManager.js').ProgramManager} [programManager] - Program manager instance (optional, for LiveTV)
+   * @param {import('../managers/domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance (for LiveTV)
+   * @param {import('../managers/domain/ProgramManager.js').ProgramManager} programManager - Program manager instance (for LiveTV)
    */
-  constructor(xtreamManager, middleware, channelManager = null, programManager = null) {
+  constructor(xtreamManager, middleware, channelManager, programManager) {
     super(middleware, 'XtreamRouter');
     this._xtreamManager = xtreamManager;
-    this._channelManager = channelManager;
-    this._programManager = programManager;
     this._channelManager = channelManager;
     this._programManager = programManager;
     

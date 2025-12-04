@@ -16,8 +16,11 @@ class ProvidersManager extends BaseManager {
    * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider titles repository (for cross-domain cleanup)
    * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Titles repository (for cross-domain cleanup)
    * @param {Function<string>} triggerJob - Function to trigger jobs by name
+   * @param {import('./domain/ChannelManager.js').ChannelManager} channelManager - Channel manager (for live TV cleanup)
+   * @param {import('./domain/ProgramManager.js').ProgramManager} programManager - Program manager (for live TV cleanup)
+   * @param {import('./domain/UserManager.js').UserManager} userManager - User manager (for watchlist cleanup)
    */
-  constructor(webSocketService, providerTypeMap, iptvProviderManager, providerTitlesManager, providerTitleRepo, titleRepo, triggerJob) {
+  constructor(webSocketService, providerTypeMap, iptvProviderManager, providerTitlesManager, providerTitleRepo, titleRepo, triggerJob, channelManager, programManager, userManager) {
     super('ProvidersManager');
     this._webSocketService = webSocketService;
     this._providerTypeMap = providerTypeMap;
@@ -25,6 +28,9 @@ class ProvidersManager extends BaseManager {
     // Domain Managers
     this._iptvProviderManager = iptvProviderManager;
     this._providerTitlesManager = providerTitlesManager;
+    this._channelManager = channelManager;
+    this._programManager = programManager;
+    this._userManager = userManager;
     
     // Repositories for cross-domain cleanup operations only
     this._providerTitleRepo = providerTitleRepo;
@@ -530,7 +536,41 @@ class ProvidersManager extends BaseManager {
       // 2. Delete all provider_titles for this provider (only on delete, not disable)
       const deletedTitles = await this._providerTitlesManager.deleteByProvider(providerId);
       
-      // 3. Clear provider API cache (disk storage)
+      // 3. Delete all channels and programs for this provider
+      const deletedPrograms = await this._programManager.deleteByProvider(providerId);
+      const deletedChannels = await this._channelManager.deleteByProvider(providerId);
+      
+      // Clean up watchlist entries matching provider pattern
+      const watchlistPattern = `live-${providerId}-`;
+      // Find all users with watchlist entries matching this pattern
+      const users = await this._userManager._repository.findByQuery({
+        'watchlist.live': { $regex: `^live-${providerId}-` }
+      });
+      
+      // Filter watchlist arrays in JavaScript and update each user
+      let watchlistEntriesRemoved = 0;
+      for (const user of users) {
+        if (user.watchlist && user.watchlist.live && Array.isArray(user.watchlist.live)) {
+          const originalLength = user.watchlist.live.length;
+          const filteredWatchlist = user.watchlist.live.filter(
+            key => !key.startsWith(watchlistPattern)
+          );
+          
+          if (filteredWatchlist.length !== originalLength) {
+            await this._userManager._repository.updateOne(
+              { id: user.id },
+              { $set: { 'watchlist.live': filteredWatchlist } }
+            );
+            watchlistEntriesRemoved += (originalLength - filteredWatchlist.length);
+          }
+        }
+      }
+      
+      if (watchlistEntriesRemoved > 0) {
+        this.logger.info(`Removed ${watchlistEntriesRemoved} watchlist entries for deleted provider ${providerId}`);
+      }
+      
+      // 4. Clear provider API cache (disk storage)
       // Get storage from any provider instance (they all share the same storage)
       const firstProvider = Object.values(this._providerTypeMap)[0];
       if (firstProvider && firstProvider._storage) {
@@ -540,7 +580,8 @@ class ProvidersManager extends BaseManager {
       this.logger.info(
         `Provider ${providerId} cleanup: ${titlesUpdated} titles updated, ` +
         `${streamsRemoved} streams removed, ${deletedTitles} provider titles deleted, ` +
-        `${emptyTitlesDeleted} empty titles deleted`
+        `${emptyTitlesDeleted} empty titles deleted, ${deletedChannels} channels deleted, ${deletedPrograms} programs deleted, ` +
+        `${watchlistEntriesRemoved} watchlist entries removed`
       );
     } catch (error) {
       // Log error but don't fail the provider deletion
@@ -564,7 +605,7 @@ class ProvidersManager extends BaseManager {
   }
 
   /**
-   * Get all categories for a provider (movies + tvshows)
+   * Get all categories for a provider (movies + tvshows + live)
    * Fetches from provider API and merges with enabled_categories from provider config
    * @param {string} providerId - Provider ID
    * @returns {Promise<Array<Object>>}
@@ -580,11 +621,27 @@ class ProvidersManager extends BaseManager {
         this.fetchCategories(providerId, 'tvshows').catch(() => [])
       ]);
 
+      // Fetch live categories
+      let liveCategories = [];
+      try {
+        const provider = await this._getProvider(providerId);
+        if (providerData.type === 'xtream' && provider.fetchLiveCategories) {
+          liveCategories = await provider.fetchLiveCategories(providerId);
+        } else if (providerData.type === 'agtv') {
+          // For AGTV, categories are extracted from channels during sync
+          const channels = await this._channelManager.findByProvider(providerId);
+          liveCategories = this._extractCategoriesFromChannels(channels);
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch live categories for ${providerId}: ${error.message}`);
+      }
+
       // Get enabled categories from provider config
-      const enabledCategories = providerData.enabled_categories || { movies: [], tvshows: [] };
+      const enabledCategories = providerData.enabled_categories || { movies: [], tvshows: [], live: [] };
       const enabledCategoryKeys = new Set([
         ...(enabledCategories.movies || []),
-        ...(enabledCategories.tvshows || [])
+        ...(enabledCategories.tvshows || []),
+        ...(enabledCategories.live || [])
       ]);
 
       // Transform and combine categories
@@ -602,7 +659,20 @@ class ProvidersManager extends BaseManager {
           category_id: cat.category_id,
           category_name: cat.category_name,
           enabled: enabledCategoryKeys.has(`tvshows-${cat.category_id}`)
-        }))
+        })),
+        ...liveCategories.map(cat => {
+          const categoryKey = providerData.type === 'xtream' 
+            ? `live-${cat.category_id}`
+            : `live-${this._normalizeCategoryName(cat.category_name || cat.normalized_name)}`;
+          
+          return {
+            key: categoryKey,
+            type: 'live',
+            category_id: cat.category_id || null,
+            category_name: cat.category_name,
+            enabled: enabledCategoryKeys.has(categoryKey)
+          };
+        })
       ];
 
       return allCategories;
@@ -616,10 +686,50 @@ class ProvidersManager extends BaseManager {
   }
 
   /**
+   * Extract categories from channels (for AGTV)
+   * @private
+   * @param {Array} channels - Array of channel objects
+   * @returns {Array} Array of category objects
+   */
+  _extractCategoriesFromChannels(channels) {
+    const categoryMap = new Map();
+    
+    channels.forEach(channel => {
+      if (channel.group_title) {
+        const normalizedName = this._normalizeCategoryName(channel.group_title);
+        const categoryKey = `live-${normalizedName}`;
+        
+        if (!categoryMap.has(categoryKey)) {
+          categoryMap.set(categoryKey, {
+            category_name: channel.group_title,
+            normalized_name: normalizedName
+          });
+        }
+      }
+    });
+    
+    return Array.from(categoryMap.values());
+  }
+
+  /**
+   * Normalize category name (slugify, lowercase)
+   * @private
+   * @param {string} categoryName - Original category name
+   * @returns {string} Normalized category name
+   */
+  _normalizeCategoryName(categoryName) {
+    return categoryName
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  /**
    * Update enabled categories for a provider
    * Orchestrates domain operation with cleanup, job triggering, and WebSocket events
    * @param {string} providerId - Provider ID
-   * @param {Object} enabledCategories - Object with movies and tvshows arrays of category keys
+   * @param {Object} enabledCategories - Object with movies, tvshows, and live arrays of category keys
    * @returns {Promise<Object>}
    */
   async updateEnabledCategories(providerId, enabledCategories) {
@@ -628,43 +738,136 @@ class ProvidersManager extends BaseManager {
 
     // Delegate domain operation to IPTVProviderManager
     await this._iptvProviderManager.updateEnabledCategories(providerId, enabledCategories);
-      // Orchestration: Perform cleanup for disabled categories using repositories
-      try {
-        // Remove provider from titles for disabled categories
-        const isProviderEnabled = provider.enabled !== false;
-        const { titlesUpdated, streamsRemoved, titleKeys, providerTitlesDeleted, emptyTitlesDeleted } = 
-          await this._removeProviderFromTitles(providerId, isProviderEnabled, enabledCategories);
-        
-        this.logger.info(
-          `Provider ${providerId} categories changed cleanup: ${providerTitlesDeleted} provider titles deleted, ` +
-          `${titlesUpdated} titles updated, ${streamsRemoved} streams removed, ${emptyTitlesDeleted} empty titles deleted`
-        );
-      } catch (error) {
-        this.logger.error(`Error cleaning up categories for provider ${providerId}: ${error.message}`);
-      }
-
-      // Orchestration: Reload provider configs in provider instances (non-blocking - errors logged but don't fail the update)
-      try {
-        await this._reloadProviderConfigs();
-      } catch (error) {
-        this.logger.error(`Error reloading provider configs: ${error.message}`);
-        // Continue - config reload failure shouldn't prevent category update from succeeding
-      }
-
-      // Orchestration: Trigger sync job to fetch fresh data with new categories (async, non-blocking)
-      this._triggerJobAsync('syncIPTVProviderTitles');
-
-      // Orchestration: Broadcast WebSocket event
-      this._webSocketService.broadcastEvent('provider_changed', {
-        provider_id: providerId,
-        action: 'categories_updated'
-      });
     
+    // Orchestration: Perform cleanup for disabled categories using repositories
+    try {
+      // Remove provider from titles for disabled categories (movies/tvshows)
+      const isProviderEnabled = provider.enabled !== false;
+      const { titlesUpdated, streamsRemoved, titleKeys, providerTitlesDeleted, emptyTitlesDeleted } = 
+        await this._removeProviderFromTitles(providerId, isProviderEnabled, enabledCategories);
+      
+      // Remove provider from channels for disabled live categories
+      await this._removeProviderFromChannels(providerId, isProviderEnabled, enabledCategories);
+      
+      this.logger.info(
+        `Provider ${providerId} categories changed cleanup: ${providerTitlesDeleted} provider titles deleted, ` +
+        `${titlesUpdated} titles updated, ${streamsRemoved} streams removed, ${emptyTitlesDeleted} empty titles deleted`
+      );
+    } catch (error) {
+      this.logger.error(`Error cleaning up categories for provider ${providerId}: ${error.message}`);
+    }
+
+    // Orchestration: Reload provider configs in provider instances (non-blocking - errors logged but don't fail the update)
+    try {
+      await this._reloadProviderConfigs();
+    } catch (error) {
+      this.logger.error(`Error reloading provider configs: ${error.message}`);
+      // Continue - config reload failure shouldn't prevent category update from succeeding
+    }
+
+    // Orchestration: Trigger sync jobs to fetch fresh data with new categories (async, non-blocking)
+    this._triggerJobAsync('syncIPTVProviderTitles');
+    this._triggerJobAsync('syncLiveTV'); // Trigger Live TV sync for live category changes
+
+    // Orchestration: Broadcast WebSocket event
+    this._webSocketService.broadcastEvent('provider_changed', {
+      provider_id: providerId,
+      action: 'categories_updated'
+    });
+  
     return {
       success: true,
       message: 'Categories updated successfully',
       enabled_categories: enabledCategories
     };
+  }
+
+  /**
+   * Remove provider from channels for disabled live categories
+   * @private
+   * @param {string} providerId - Provider ID
+   * @param {boolean} isEnabled - Whether provider is enabled
+   * @param {Object} enabledCategories - Enabled categories object
+   * @returns {Promise<void>}
+   */
+  async _removeProviderFromChannels(providerId, isEnabled, enabledCategories) {
+    try {
+      const enabledLiveCategories = enabledCategories.live || [];
+      const enabledLiveCategoryKeys = new Set(enabledLiveCategories);
+
+      // Get all channels for this provider
+      const channels = await this._channelManager.findByProvider(providerId);
+      
+      if (channels.length === 0) {
+        return; // No channels to clean up
+      }
+
+      // Determine which channels to delete based on provider type
+      const provider = await this._iptvProviderManager.getProvider(providerId);
+      const channelsToDelete = [];
+
+      for (const channel of channels) {
+        let shouldDelete = false;
+
+        if (provider.type === 'xtream') {
+          // For Xtream, check category_id against enabled categories
+          if (channel.category_id) {
+            const categoryKey = `live-${channel.category_id}`;
+            shouldDelete = !enabledLiveCategoryKeys.has(categoryKey);
+          } else {
+            // Channels without category are excluded
+            shouldDelete = true;
+          }
+        } else if (provider.type === 'agtv') {
+          // For AGTV, check group_title against enabled categories
+          if (channel.group_title) {
+            const normalizedName = this._normalizeCategoryName(channel.group_title);
+            const categoryKey = `live-${normalizedName}`;
+            shouldDelete = !enabledLiveCategoryKeys.has(categoryKey);
+          } else {
+            // Channels without category are excluded
+            shouldDelete = true;
+          }
+        }
+
+        // If provider is disabled, delete all channels
+        if (!isEnabled) {
+          shouldDelete = true;
+        }
+
+        if (shouldDelete) {
+          channelsToDelete.push(channel.channel_id);
+        }
+      }
+
+      // Delete channels and programs
+      if (channelsToDelete.length > 0) {
+        // Delete programs first (foreign key constraint)
+        await this._programManager.deleteMany({
+          provider_id: providerId,
+          channel_id: { $in: channelsToDelete }
+        });
+
+        // Delete channels
+        await this._channelManager._repository.deleteManyByQuery({
+          provider_id: providerId,
+          channel_id: { $in: channelsToDelete }
+        });
+
+        // Clean up watchlist entries for deleted channels
+        const deletedChannelKeys = channelsToDelete.map(chId => `live-${providerId}-${chId}`);
+        // Update all users to remove these channel keys from watchlist
+        await this._userManager._repository.updateMany(
+          { 'watchlist.live': { $in: deletedChannelKeys } },
+          { $pull: { 'watchlist.live': { $in: deletedChannelKeys } } }
+        );
+
+        this.logger.info(`Deleted ${channelsToDelete.length} channels from disabled categories for provider ${providerId}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error removing provider ${providerId} from channels: ${error.message}`);
+      throw error;
+    }
   }
 
   /**

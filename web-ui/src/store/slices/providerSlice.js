@@ -53,7 +53,10 @@ const providerSlice = createSlice({
       })
       .addCase(fetchProviders.fulfilled, (state, action) => {
         state.loading = false;
-        state.providers = action.payload;
+        // API returns { providers: [...] }, extract the array
+        state.providers = Array.isArray(action.payload) 
+          ? action.payload 
+          : (action.payload?.providers || []);
       })
       .addCase(fetchProviders.rejected, (state, action) => {
         state.loading = false;
