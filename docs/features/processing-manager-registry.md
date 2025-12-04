@@ -1,4 +1,4 @@
-# Processing Manager Registry Refactoring
+# Processing Manager Registry Refactoring [New]
 
 ## Overview
 

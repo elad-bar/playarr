@@ -1,4 +1,4 @@
-# Channel Deduplication and Best Source Selection Feature
+# Channel Deduplication and Best Source Selection Feature [New]
 
 ## Overview
 
