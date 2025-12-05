@@ -28,19 +28,33 @@ This document tracks known issues that need to be addressed in the Playarr proje
 
 ### 2. Stremio Endpoints for TV Shows Not Working
 
-**Status:** Open  
+**Status:** Resolved  
 **Priority:** High  
-**Description:** The Stremio addon endpoints for TV shows are not functioning correctly. This prevents users from accessing TV show content through Stremio.
+**Description:** The Stremio addon endpoints for TV shows appeared to not be functioning correctly, preventing users from accessing TV show content through Stremio.
+
+**Root Cause:** The issue was not with the Stremio endpoints themselves, but was caused by a cleanup failure when providers are disabled or deleted. When a provider was disabled/deleted, its associated media sources were not being removed from the main `titles` collection. This left stale sources in the database that referenced disabled/deleted providers, causing the Stremio stream endpoint to correctly skip these invalid sources, resulting in empty stream responses.
+
+**Solution:** Implemented a comprehensive cleanup mechanism that runs as part of the main title update job:
+- Added cleanup methods to `TitleRepository.js` for removing provider sources, empty media items, and empty titles
+- Added public wrapper methods to `TitlesManager.js` to expose cleanup functionality
+- Fixed architecture violation in `ProvidersManager.js` by replacing direct database access with repository method calls
+- Added `cleanupOutdatedMainTitles()` method to `TMDBProcessingManager.js` that uses `TitlesManager` public methods
+- Updated `ProviderTitlesMonitorJob.js` to automatically cleanup disabled/deleted providers after processing main titles
 
 **Impact:**
-- TV shows are not accessible via Stremio addon
-- Users cannot browse or stream TV shows through Stremio interface
-- Movies may still work (needs verification)
+- TV shows are now accessible via Stremio addon
+- Users can browse and stream TV shows through Stremio interface
+- Cleanup now runs automatically during the main title update job, preventing stale data accumulation
 
 **Related Components:**
-- `StremioRouter.js`
-- `StremioManager.js`
-- TV show formatting/processing logic
+- `StremioRouter.js` (was working correctly)
+- `StremioManager.js` (was working correctly)
+- `BaseFormattingManager.js` (correctly skips disabled/deleted providers)
+- `TitleRepository.js` (added cleanup methods)
+- `TitlesManager.js` (added cleanup wrapper methods)
+- `ProvidersManager.js` (fixed architecture violation)
+- `TMDBProcessingManager.js` (added cleanup method)
+- `ProviderTitlesMonitorJob.js` (orchestrates cleanup)
 
 ---
 
