@@ -254,11 +254,12 @@ class ProvidersManager extends BaseManager {
         deletedProviderTitles = await this._providerTitleRepo.deleteManyByQuery(query);
       }
 
-      // Step 4: Remove provider sources from titles.media[].sources using MongoDB $pull
+      // Step 4: Remove provider sources from titles.media[].sources using MongoDB $pull with arrayFilters
       const collection = this._titleRepo.db.collection(this._titleRepo.collectionName);
       const pullResult = await collection.updateMany(
         { title_key: { $in: titleKeys } },
-        { $pull: { 'media.$[].sources': { provider_id: providerId } } }
+        { $pull: { 'media.$[elem].sources': { provider_id: providerId } } },
+        { arrayFilters: [{ 'elem.sources': { $exists: true } }] }
       );
 
       // Step 5: Remove empty media items (media items with no sources)
