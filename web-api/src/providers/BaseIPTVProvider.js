@@ -94,6 +94,24 @@ export class BaseIPTVProvider extends BaseProvider {
   }
 
   /**
+   * HTTP request with caching and rate limiting (IPTV-specific override)
+   * Automatically resolves per-provider limiter if not provided
+   * @protected
+   * @override
+   * @param {Object} options - Request options (same as BaseProvider._httpRequest)
+   * @returns {Promise<any>} Response data
+   */
+  async _httpRequest(options) {
+    // Extract limiter based on providerId if not provided
+    if (!options.limiter && options.providerId) {
+      options.limiter = this._getLimiter(options.providerId);
+    }
+    
+    // Call parent implementation with resolved limiter
+    return super._httpRequest(options);
+  }
+
+  /**
    * Get provider configuration from internal map
    * @protected
    * @param {string} providerId - Provider ID

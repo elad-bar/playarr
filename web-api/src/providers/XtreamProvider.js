@@ -50,15 +50,12 @@ export class XtreamProvider extends BaseIPTVProvider {
     });
     
     const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
-    const limiter = this._getLimiter(providerId);
 
-    return await this._fetchJsonWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type,
       endpoint: 'categories',
       url,
-      headers: {},
-      limiter,
       transform: (data) => {
         const categories = Array.isArray(data) ? data : [];
         return categories.map(cat => ({
@@ -91,15 +88,12 @@ export class XtreamProvider extends BaseIPTVProvider {
     });
     
     const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
-    const limiter = this._getLimiter(providerId);
 
-    return await this._fetchJsonWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type,
       endpoint: 'metadata',
-      url,
-      headers: {},
-      limiter
+      url
     });
   }
 
@@ -119,15 +113,12 @@ export class XtreamProvider extends BaseIPTVProvider {
       });
       
       const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
-      const limiter = this._getLimiter(providerId);
 
-      const data = await this._fetchJsonWithCacheAxios({
+      const data = await this._httpGet({
         providerId,
         type: 'auth', // Use 'auth' as type for cache key
         endpoint: 'authenticate',
         url,
-        headers: {},
-        limiter,
         skipCache: true // Don't cache authentication calls
       });
 
@@ -192,16 +183,13 @@ export class XtreamProvider extends BaseIPTVProvider {
     });
     
     const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
-    const limiter = this._getLimiter(providerId);
 
-    return await this._fetchJsonWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type,
       endpoint: 'extended',
       cacheParams: { titleId },
-      url,
-      headers: {},
-      limiter
+      url
     });
   }
 
@@ -218,15 +206,12 @@ export class XtreamProvider extends BaseIPTVProvider {
       action: 'get_live_categories'
     });
     const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
-    const limiter = this._getLimiter(providerId);
     
-    return await this._fetchJsonWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type: 'live',
       endpoint: 'live_categories',
       url,
-      headers: {},
-      limiter,
       transform: (data) => {
         const categories = Array.isArray(data) ? data : [];
         return categories.map(cat => ({
@@ -254,16 +239,13 @@ export class XtreamProvider extends BaseIPTVProvider {
       queryParams.append('category_id', categoryId);
     }
     const url = `${provider.api_url}/player_api.php?${queryParams.toString()}`;
-    const limiter = this._getLimiter(providerId);
     
-    return await this._fetchJsonWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type: 'live',
       endpoint: 'live_streams',
       cacheParams: categoryId ? { categoryId } : {},
-      url,
-      headers: {},
-      limiter
+      url
     });
   }
 
@@ -281,15 +263,13 @@ export class XtreamProvider extends BaseIPTVProvider {
       output: 'm3u8'
     });
     const url = `${provider.api_url}/get.php?${queryParams.toString()}`;
-    const limiter = this._getLimiter(providerId);
     
-    return await this._fetchTextWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type: 'live',
       endpoint: 'm3u',
       url,
-      headers: {},
-      limiter,
+      responseType: 'text',
       timeout: 60000 // Longer timeout for large M3U files
     });
   }
@@ -306,15 +286,13 @@ export class XtreamProvider extends BaseIPTVProvider {
       password: provider.password
     });
     const url = `${provider.api_url}/xmltv.php?${queryParams.toString()}`;
-    const limiter = this._getLimiter(providerId);
     
-    return await this._fetchTextWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type: 'live',
       endpoint: 'epg',
       url,
-      headers: {},
-      limiter,
+      responseType: 'text',
       timeout: 60000 // Longer timeout for large EPG files
     });
   }

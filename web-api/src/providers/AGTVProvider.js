@@ -18,11 +18,10 @@ export class AGTVProvider extends BaseIPTVProvider {
   async authenticate(providerId) {
     try {
       const provider = this._getProviderConfig(providerId);
-      const limiter = this._getLimiter(providerId);
 
       // Step 1: Login to get token
       const loginUrl = `${provider.api_url}/api/login`;
-      const loginResponse = await this._fetchJsonPostWithCacheAxios({
+      const loginResponse = await this._httpPost({
         providerId,
         type: 'auth',
         endpoint: 'login',
@@ -31,8 +30,6 @@ export class AGTVProvider extends BaseIPTVProvider {
           username: provider.username,
           password: provider.password
         },
-        headers: {},
-        limiter,
         skipCache: true
       });
 
@@ -44,7 +41,7 @@ export class AGTVProvider extends BaseIPTVProvider {
 
       // Step 2: Get user info with token
       const userUrl = `${provider.api_url}/api/user`;
-      const userResponse = await this._fetchJsonWithCacheAxios({
+      const userResponse = await this._httpGet({
         providerId,
         type: 'auth',
         endpoint: 'user',
@@ -52,7 +49,6 @@ export class AGTVProvider extends BaseIPTVProvider {
         headers: {
           'Authorization': `Bearer ${token}`
         },
-        limiter,
         skipCache: true
       });
 
@@ -101,16 +97,13 @@ export class AGTVProvider extends BaseIPTVProvider {
       url += `/${page}`;
     }
     
-    const limiter = this._getLimiter(providerId);
-
-    return await this._fetchTextWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type,
       endpoint: 'm3u8',
       cacheParams: page ? { page } : {},
       url,
-      headers: {},
-      limiter
+      responseType: 'text'
     });
   }
 
@@ -122,15 +115,13 @@ export class AGTVProvider extends BaseIPTVProvider {
   async fetchLiveM3U(providerId) {
     const provider = this._getProviderConfig(providerId);
     const url = `${provider.api_url}/api/list/${provider.username}/${provider.password}/m3u8/livetv`;
-    const limiter = this._getLimiter(providerId);
     
-    return await this._fetchTextWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type: 'live',
       endpoint: 'm3u8',
       url,
-      headers: {},
-      limiter
+      responseType: 'text'
     });
   }
 
@@ -142,7 +133,6 @@ export class AGTVProvider extends BaseIPTVProvider {
   async fetchLiveEPG(providerId) {
     // Shared EPG URL for AGTV providers
     const epgUrl = 'https://epg.starlite.best/utc.xml.gz';
-    const limiter = this._getLimiter(providerId);
     
     // Decompress gzip transform function
     const decompressGzip = async (data) => {
@@ -153,15 +143,13 @@ export class AGTVProvider extends BaseIPTVProvider {
       return decompressed.toString('utf8');
     };
     
-    return await this._fetchTextWithCacheAxios({
+    return await this._httpGet({
       providerId,
       type: 'live',
       endpoint: 'epg',
       url: epgUrl,
-      headers: {},
-      limiter,
-      timeout: 60000, // Longer timeout for large EPG files
       responseType: 'arraybuffer', // For gzipped content
+      timeout: 60000, // Longer timeout for large EPG files
       transform: decompressGzip, // Decompress before caching
       skipCache: true // Don't read from cache, only store
     });
