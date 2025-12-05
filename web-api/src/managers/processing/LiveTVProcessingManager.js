@@ -5,7 +5,6 @@ import path from 'path';
 import { createReadStream, createWriteStream } from 'fs';
 import { createGunzip } from 'zlib';
 import { pipeline } from 'stream/promises';
-import { parseM3U } from '@iptv/playlist';
 import { parseXmltv } from '@iptv/xmltv';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
@@ -127,61 +126,6 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
     }
   }
 
-  /**
-   * Parse M3U file and extract channels using @iptv/playlist library
-   * @param {string} filePath - Path to M3U file (or M3U content as string)
-   * @param {string} providerId - Provider ID
-   * @returns {Promise<Array>} Array of channel objects
-   */
-  async parseM3U(filePath, providerId) {
-    try {
-      // Support both file path and content string
-      let content;
-      if (typeof filePath === 'string' && filePath.includes('\n')) {
-        // Looks like content, not a path
-        content = filePath;
-      } else {
-        content = await fs.readFile(filePath, 'utf8');
-      }
-      
-      const playlist = parseM3U(content);
-      const channels = [];
-
-      for (const channelData of playlist.channels) {
-        const channel = {
-          provider_id: providerId,
-          channel_id: channelData.tvgId,
-          channel_key: this._generateChannelKey(providerId, channelData.tvgId),
-          name: channelData.name,
-          url: channelData.url,
-          tvg_id: channelData.tvgId,
-          tvg_name: channelData.name,
-          tvg_logo: channelData.tvgLogo,
-          group_title: channelData.groupTitle,
-          duration: channelData.duration,
-          createdAt: new Date(),
-          lastUpdated: new Date()
-        };
-        channels.push(channel);
-      }
-
-      return channels;
-    } catch (error) {
-      this.logger.error(`Error parsing M3U for provider ${providerId}: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Generate channel key (unique per provider)
-   * @private
-   * @param {string} providerId - Provider ID
-   * @param {string} channelId - Channel ID
-   * @returns {string} Channel key in format "live-{providerId}-{channelId}"
-   */
-  _generateChannelKey(providerId, channelId) {
-    return `live-${providerId}-${channelId}`;
-  }
 
   /**
    * Normalize category name for AGTV (slugify, lowercase)
@@ -237,13 +181,14 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
     try {
       // Get channels for this provider from database to filter EPG programs
       const channels = await this._channelManager.findByProvider(providerId);
-      const channelIds = new Set(channels.map(ch => ch.channel_id));
+      // Use tvg_id for EPG matching (EPG XML uses tvg_id values in <programme channel="...">)
+      const channelIds = new Set(channels.map(ch => ch.tvg_id).filter(id => id != null));
       this.logger.debug(`Found ${formatNumber(channelIds.size)} channels in database for provider ${providerId}, filtering EPG programs`);
       
       // Log sample channel IDs for debugging
       if (channelIds.size > 0) {
         const sampleIds = Array.from(channelIds).slice(0, 5);
-        this.logger.debug(`Sample channel IDs from database: ${sampleIds.join(', ')}`);
+        this.logger.debug(`Sample channel IDs from database (using tvg_id): ${sampleIds.join(', ')}`);
       }
       
       // Check file size - use streaming parser for files > 10MB
@@ -764,14 +709,17 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
       const epgContent = await providerInstance.fetchLiveEPG(provider.id);
       this.logger.debug(`EPG content fetched: ${formatFileSize(epgContent.length)}`);
       
-      const cacheDir = path.join(this._cacheDir, 'liveTV', provider.id);
-      await fs.ensureDir(cacheDir);
-      const epgPath = path.join(cacheDir, 'epg.xml');
+      // EPG is already cached by the provider via _httpGet -> _setCache
+      // Use the provider's cache path: {cacheDir}/{providerId}/live/metadata/epg.xml
+      const epgPath = path.join(this._cacheDir, provider.id, 'live', 'metadata', 'epg.xml');
       
-      // Write file and verify it exists
-      await fs.writeFile(epgPath, epgContent, 'utf8');
+      // Verify the cached file exists
+      if (!await fs.pathExists(epgPath)) {
+        throw new Error(`EPG file was not cached at ${epgPath}`);
+      }
+      
       const stats = await fs.stat(epgPath);
-      this.logger.info(`EPG file saved to cache: ${epgPath} (${formatFileSize(stats.size)})`);
+      this.logger.info(`EPG file cached at: ${epgPath} (${formatFileSize(stats.size)})`);
       
       if (!stats.isFile()) {
         throw new Error(`EPG file was not created at ${epgPath}`);
@@ -836,18 +784,15 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
         throw new Error(`Unsupported provider type: ${provider.type}`);
       }
 
-      // Fetch M3U content
-      const m3uContent = await providerInstance.fetchLiveM3U(provider.id);
-
-      // Parse M3U and extract all channels
-      const newChannels = await this.parseM3U(m3uContent, provider.id);
+      // Fetch channels from provider (already parsed and formatted)
+      const channels = await providerInstance.fetchLiveChannels(provider.id);
       
       // Load existing channels map (channel_key -> url)
       const existingChannelsMap = await this._channelManager.getChannelsMapByKey(provider.id);
       
       // Build new channels map for comparison
       const newChannelsMap = new Map();
-      for (const channel of newChannels) {
+      for (const channel of channels) {
         newChannelsMap.set(channel.channel_key, channel);
       }
       

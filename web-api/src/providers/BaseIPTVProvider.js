@@ -178,5 +178,27 @@ export class BaseIPTVProvider extends BaseProvider {
   async fetchM3U8(providerId, type, page = null) {
     throw new Error('fetchM3U8() must be implemented by subclass');
   }
+
+  /**
+   * Fetch live TV channels from provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<Array>} Array of channel objects with uniform structure:
+   *   - provider_id: string
+   *   - channel_id: string
+   *   - channel_key: string (format: "live-{providerId}-{channelId}")
+   *   - name: string
+   *   - url: string
+   *   - tvg_id: string | null
+   *   - tvg_name: string | null
+   *   - tvg_logo: string | null
+   *   - group_title: string | null
+   *   - duration: number
+   *   - createdAt: Date
+   *   - lastUpdated: Date
+   * @abstract
+   */
+  async fetchLiveChannels(providerId) {
+    throw new Error('fetchLiveChannels() must be implemented by subclass');
+  }
 }
 

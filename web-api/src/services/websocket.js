@@ -100,19 +100,19 @@ class WebSocketService {
       // Send to API namespace only
       if (this._apiNamespace) {
         this._apiNamespace.emit(event, message);
-        logger.debug(`Broadcasted event '${event}' to API namespace`);
+        // logger.debug(`Broadcasted event '${event}' to API namespace`);
       }
     } else if (namespace === 'default') {
       // Send to default namespace only
       this._io.emit(event, message);
-      logger.debug(`Broadcasted event '${event}' to default namespace`);
+      // logger.debug(`Broadcasted event '${event}' to default namespace`);
     } else {
       // Send to both namespaces
       this._io.emit(event, message);
       if (this._apiNamespace) {
         this._apiNamespace.emit(event, message);
       }
-      logger.debug(`Broadcasted event '${event}' to all namespaces`);
+      //logger.debug(`Broadcasted event '${event}' to all namespaces`);
     }
   }
 

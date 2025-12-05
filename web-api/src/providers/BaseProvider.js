@@ -499,12 +499,9 @@ export class BaseProvider {
       }
 
       // Transform data if transform function provided
-      const finalData = transform ? transform(rawData, responseStatus) : rawData;
+      const finalData = transform ? await transform(rawData, responseStatus) : rawData;
 
-      // Cache the result (unless skipping cache)
-      if (!skipCache) {
-        this._setCache(providerId, type, endpoint, finalData, cacheParams);
-      }
+      this._setCache(providerId, type, endpoint, finalData, cacheParams);
 
       return finalData;
     } catch (error) {

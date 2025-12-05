@@ -1,5 +1,7 @@
 import { BaseIPTVProvider } from './BaseIPTVProvider.js';
 import path from 'path';
+import { parseM3U } from '@iptv/playlist';
+import { generateChannelKey } from '../utils/channelUtils.js';
 
 /**
  * Apollo Group TV provider implementation
@@ -115,21 +117,50 @@ export class AGTVProvider extends BaseIPTVProvider {
   }
 
   /**
-   * Fetch live TV M3U playlist from AGTV provider
+   * Fetch live TV channels from AGTV provider
+   * Parses M3U content and returns uniform channel objects
    * @param {string} providerId - Provider ID
-   * @returns {Promise<string>} M3U content as string
+   * @returns {Promise<Array>} Array of channel objects with uniform structure
    */
-  async fetchLiveM3U(providerId) {
+  async fetchLiveChannels(providerId) {
     const provider = this._getProviderConfig(providerId);
     const url = `${provider.api_url}/api/list/${provider.username}/${provider.password}/m3u8/livetv`;
     
-    return await this._httpGet({
+    // Fetch M3U content (cached via _httpGet)
+    const m3uContent = await this._httpGet({
       providerId,
       type: 'live',
       endpoint: 'm3u8',
       url,
       responseType: 'text'
     });
+
+    // Parse M3U content
+    const playlist = parseM3U(m3uContent);
+    const channels = [];
+
+    for (const channelData of playlist.channels) {
+      // Determine channel_id - use tvgId if available, otherwise fallback to URL
+      const channelId = channelData.tvgId || channelData.url || 'unknown';
+      
+      const channel = {
+        provider_id: providerId,
+        channel_id: channelId,
+        channel_key: generateChannelKey(providerId, channelId),
+        name: channelData.name || 'Unknown',
+        url: channelData.url || '',
+        tvg_id: channelData.tvgId || null,
+        tvg_name: channelData.tvgId ? (channelData.name || null) : null,
+        tvg_logo: channelData.tvgLogo || null,
+        group_title: channelData.groupTitle || null,
+        duration: channelData.duration !== undefined ? channelData.duration : -1,
+        createdAt: new Date(),
+        lastUpdated: new Date()
+      };
+      channels.push(channel);
+    }
+
+    return channels;
   }
 
   /**

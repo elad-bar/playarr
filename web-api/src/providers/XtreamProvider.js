@@ -1,5 +1,6 @@
 import { BaseIPTVProvider } from './BaseIPTVProvider.js';
 import path from 'path';
+import { generateChannelKey } from '../utils/channelUtils.js';
 
 /**
  * Xtream Codec provider implementation
@@ -258,28 +259,71 @@ export class XtreamProvider extends BaseIPTVProvider {
   }
 
   /**
-   * Fetch live TV M3U playlist from Xtream provider
+   * Fetch live TV channels from Xtream provider
+   * Uses get_live_streams API to get only live channels (excludes VOD)
    * @param {string} providerId - Provider ID
-   * @returns {Promise<string>} M3U playlist content as string
+   * @returns {Promise<Array>} Array of channel objects with uniform structure
    */
-  async fetchLiveM3U(providerId) {
+  async fetchLiveChannels(providerId) {
+    // Fetch streams and categories in parallel
+    const [streams, categories] = await Promise.all([
+      this.fetchLiveStreams(providerId),
+      this.fetchLiveCategories(providerId)
+    ]);
+
+    // Build category map (category_id -> category_name)
+    const categoryMap = new Map();
+    if (Array.isArray(categories)) {
+      for (const cat of categories) {
+        const categoryId = String(cat.category_id || cat.id);
+        const categoryName = cat.category_name || cat.name;
+        if (categoryId && categoryName) {
+          categoryMap.set(categoryId, categoryName);
+        }
+      }
+    }
+
+    // Map streams to uniform channel format
     const provider = this._getProviderConfig(providerId);
-    const queryParams = new URLSearchParams({
-      username: provider.username,
-      password: provider.password,
-      type: 'm3u_plus',
-      output: 'm3u8'
-    });
-    const url = `${provider.api_url}/get.php?${queryParams.toString()}`;
-    
-    return await this._httpGet({
-      providerId,
-      type: 'live',
-      endpoint: 'm3u',
-      url,
-      responseType: 'text',
-      timeout: 60000 // Longer timeout for large M3U files
-    });
+    const channels = [];
+    if (Array.isArray(streams)) {
+      for (const stream of streams) {
+        const streamId = String(stream.stream_id);
+        if (!streamId) {
+          continue; // Skip invalid streams
+        }
+
+        const epgChannelId = String(stream.epg_channel_id);
+        if (!epgChannelId) {
+          continue; // Skip streams without epg_channel_id
+        }
+
+        // Construct stream URL from stream_id
+        // Format: {api_url}/live/{username}/{password}/{stream_id}.m3u8
+        const streamUrl = `${provider.api_url}/live/${provider.username}/${provider.password}/${streamId}.m3u8`;
+
+        const categoryId = String(stream.category_id || '');
+        const groupTitle = categoryMap.get(categoryId) || null;
+
+        const channel = {
+          provider_id: providerId,
+          channel_id: epgChannelId, // Use epg_channel_id for EPG matching
+          channel_key: generateChannelKey(providerId, epgChannelId),
+          name: stream.name || 'Unknown',
+          url: streamUrl, // Constructed from stream_id
+          tvg_id: epgChannelId,
+          tvg_name: stream.name || null,
+          tvg_logo: stream.stream_icon || null,
+          group_title: groupTitle,
+          duration: -1, // Live streams
+          createdAt: new Date(),
+          lastUpdated: new Date()
+        };
+        channels.push(channel);
+      }
+    }
+
+    return channels;
   }
 
   /**
