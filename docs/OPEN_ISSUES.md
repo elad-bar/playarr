@@ -6,15 +6,20 @@ This document tracks known issues that need to be addressed in the Playarr proje
 
 ### 1. Xtream Providers Not Syncing Movies
 
-**Status:** Open  
+**Status:** Resolved  
 **Priority:** High  
-**Description:** Xtream providers are not properly syncing movies from the provider API. This affects the ability to aggregate movie content from Xtream-based IPTV providers.
+**Description:** Xtream providers were not properly syncing movies from the provider API. This affected the ability to aggregate movie content from Xtream-based IPTV providers.
+
+**Root Cause:** The `_shouldSkipMovies` method in `BaseIPTVProcessingManager.js` was using strict equality (`!== null`) to check if a movie already exists. However, `Map.get()` returns `undefined` (not `null`) when a key doesn't exist, causing `undefined !== null` to evaluate to `true`, which incorrectly skipped all movies even when they didn't exist in the database.
+
+**Solution:** Changed `existingTitle !== null` to `existingTitle != null` in the `_shouldSkipMovies` method. The loose equality operator correctly handles both `null` and `undefined` values.
 
 **Impact:**
 - Movies from Xtream providers are not available in the content library
 - Users cannot access movies through any client interface (Stremio, M3U8, Xtream API, etc.)
 
 **Related Components:**
+- `BaseIPTVProcessingManager.js` (fixed)
 - `XtreamProvider.js`
 - `XtreamProcessingManager.js`
 - `SyncIPTVProviderTitlesJob.js`

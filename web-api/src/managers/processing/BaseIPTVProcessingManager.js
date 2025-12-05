@@ -310,7 +310,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
    * @returns {boolean} True if title should be skipped
    */
   _shouldSkipMovies(title, existingTitle) {
-    const shouldSkip = existingTitle !== null;
+    const shouldSkip = existingTitle != null;
 
     return shouldSkip;
   }
