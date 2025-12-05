@@ -1,4 +1,5 @@
 import { BaseJob } from './BaseJob.js';
+import { formatNumber } from '../utils/numberFormat.js';
 
 /**
  * Job for syncing provider account details (expiration, connections) from authentication endpoints
@@ -74,7 +75,7 @@ export class SyncProviderDetailsJob extends BaseJob {
         return false;
       });
 
-      this.logger.info(`Starting provider details sync for ${providersToProcess.length} provider(s) (${activeProviders.length} total active)...`);
+      this.logger.info(`Starting provider details sync for ${formatNumber(providersToProcess.length)} provider(s) (${formatNumber(activeProviders.length)} total active)...`);
 
       if (providersToProcess.length === 0) {
         this.logger.info('No providers to process. Skipping sync.');

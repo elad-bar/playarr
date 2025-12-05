@@ -1,4 +1,5 @@
 import { BaseIPTVProcessingManager } from './BaseIPTVProcessingManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 
 /**
  * Xtream Codec handler implementation
@@ -276,7 +277,7 @@ export class XtreamProcessingManager extends BaseIPTVProcessingManager {
       throw new Error(`Unexpected response format from providersManager for ${type}: expected array or object with ${config.dataKey}`);
     }
     
-    this.logger.info(`${type}: Loaded ${titles.length} titles in ${metadataDuration}ms`);
+    this.logger.info(`${type}: Loaded ${formatNumber(titles.length)} titles in ${formatNumber(metadataDuration)}ms`);
 
     return titles;
   }

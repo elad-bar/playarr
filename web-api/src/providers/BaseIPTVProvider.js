@@ -1,4 +1,5 @@
 import { BaseProvider } from './BaseProvider.js';
+import { formatNumber } from '../utils/numberFormat.js';
 
 /**
  * Base class for all IPTV providers (Xtream, AGTV)
@@ -47,7 +48,7 @@ export class BaseIPTVProvider extends BaseProvider {
       }
     }
     
-    this.logger.debug(`Loaded ${this._providerConfigs.size} provider config(s)`);
+    this.logger.debug(`Loaded ${formatNumber(this._providerConfigs.size)} provider config(s)`);
   }
 
   /**
@@ -77,7 +78,7 @@ export class BaseIPTVProvider extends BaseProvider {
       }
     }
     
-    this.logger.debug(`Reloaded provider configs: ${this._providerConfigs.size} provider(s)`);
+    this.logger.debug(`Reloaded provider configs: ${formatNumber(this._providerConfigs.size)} provider(s)`);
   }
 
   /**

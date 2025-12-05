@@ -1,4 +1,5 @@
 import { BaseProcessingManager } from './BaseProcessingManager.js';
+import { formatNumber, formatFileSize, formatPercentage } from '../../utils/numberFormat.js';
 import fs from 'fs-extra';
 import path from 'path';
 import { createReadStream, createWriteStream } from 'fs';
@@ -237,7 +238,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
       // Get channels for this provider from database to filter EPG programs
       const channels = await this._channelManager.findByProvider(providerId);
       const channelIds = new Set(channels.map(ch => ch.channel_id));
-      this.logger.debug(`Found ${channelIds.size} channels in database for provider ${providerId}, filtering EPG programs`);
+      this.logger.debug(`Found ${formatNumber(channelIds.size)} channels in database for provider ${providerId}, filtering EPG programs`);
       
       // Log sample channel IDs for debugging
       if (channelIds.size > 0) {
@@ -250,7 +251,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
       const useStreaming = stats.size > 10 * 1024 * 1024; // 10MB threshold
 
       if (useStreaming) {
-        this.logger.info(`EPG file for provider ${providerId} is large (${(stats.size / 1024 / 1024).toFixed(2)}MB), using streaming parser`);
+        this.logger.info(`EPG file for provider ${providerId} is large (${formatFileSize(stats.size)}), using streaming parser`);
         return await this._parseEPGStreaming(filePath, providerId, channelIds);
       } else {
         // Try standard parser first for smaller files
@@ -292,7 +293,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
     // Process programmes in batches to avoid memory issues
     if (epg.programmes) {
       const totalProgrammes = epg.programmes.length;
-      this.logger.debug(`Processing ${totalProgrammes} programmes for provider ${providerId} in batches of ${BATCH_SIZE}`);
+      this.logger.debug(`Processing ${formatNumber(totalProgrammes)} programmes for provider ${providerId} in batches of ${formatNumber(BATCH_SIZE)}`);
 
       for (let i = 0; i < epg.programmes.length; i += BATCH_SIZE) {
         const batch = epg.programmes.slice(i, i + BATCH_SIZE);
@@ -305,7 +306,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
         }
 
         if ((i + BATCH_SIZE) % (BATCH_SIZE * 10) === 0) {
-          this.logger.debug(`Processed ${Math.min(i + BATCH_SIZE, totalProgrammes)}/${totalProgrammes} programmes for provider ${providerId}`);
+          this.logger.debug(`Processed ${formatNumber(Math.min(i + BATCH_SIZE, totalProgrammes))}/${formatNumber(totalProgrammes)} programmes for provider ${providerId}`);
         }
       }
     }
@@ -421,7 +422,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
       const timeout = setTimeout(() => {
         stream.destroy();
         parser.end();
-        reject(new Error(`EPG parsing timeout after 30 minutes (processed ${processedCount} programmes, matched ${matchedCount} channels)`));
+        reject(new Error(`EPG parsing timeout after 30 minutes (processed ${formatNumber(processedCount)} programmes, matched ${formatNumber(matchedCount)} channels)`));
       }, 30 * 60 * 1000);
 
       // Helper function to complete parsing (prevent double completion)
@@ -429,8 +430,8 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
         if (isCompleted) return;
         isCompleted = true;
         clearTimeout(timeout);
-        const matchRate = processedCount > 0 ? ((matchedCount / processedCount) * 100).toFixed(2) : 0;
-        this.logger.info(`Streaming parser completed: ${programs.length} programs extracted from ${processedCount} programmes (${matchedCount} matched channels, ${matchRate}% match rate) for provider ${providerId}`);
+        const matchRate = processedCount > 0 ? ((matchedCount / processedCount) * 100) : 0;
+        this.logger.info(`Streaming parser completed: ${formatNumber(programs.length)} programs extracted from ${formatNumber(processedCount)} programmes (${formatNumber(matchedCount)} matched channels, ${formatPercentage(matchRate)} match rate) for provider ${providerId}`);
         
         if (matchedCount === 0 && processedCount > 0) {
           this.logger.warn(`No channel ID matches found! This suggests EPG channel IDs don't match database channel IDs. Check channel_id field mapping.`);
@@ -470,7 +471,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
           // Log progress periodically
           const now = Date.now();
           if (now - lastProgressLog >= PROGRESS_INTERVAL) {
-            this.logger.info(`EPG parsing progress for ${providerId}: processed ${processedCount} programmes, matched ${matchedCount} channels, extracted ${programs.length} programs`);
+            this.logger.info(`EPG parsing progress for ${providerId}: processed ${formatNumber(processedCount)} programmes, matched ${formatNumber(matchedCount)} channels, extracted ${formatNumber(programs.length)} programs`);
             lastProgressLog = now;
           }
         } else if (node.name === 'icon' && currentProgram) {
@@ -716,7 +717,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
         return { providers_processed: 0, results: [] };
       }
 
-      this.logger.info(`Syncing Live TV for ${providers.length} provider(s)...`);
+      this.logger.info(`Syncing Live TV for ${formatNumber(providers.length)} provider(s)...`);
 
       const results = [];
 
@@ -761,7 +762,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
     try {
       this.logger.info(`Fetching EPG for ${provider.type} provider ${provider.id}...`);
       const epgContent = await providerInstance.fetchLiveEPG(provider.id);
-      this.logger.debug(`EPG content fetched: ${(epgContent.length / 1024 / 1024).toFixed(2)}MB`);
+      this.logger.debug(`EPG content fetched: ${formatFileSize(epgContent.length)}`);
       
       const cacheDir = path.join(this._cacheDir, 'liveTV', provider.id);
       await fs.ensureDir(cacheDir);
@@ -770,7 +771,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
       // Write file and verify it exists
       await fs.writeFile(epgPath, epgContent, 'utf8');
       const stats = await fs.stat(epgPath);
-      this.logger.info(`EPG file saved to cache: ${epgPath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+      this.logger.info(`EPG file saved to cache: ${epgPath} (${formatFileSize(stats.size)})`);
       
       if (!stats.isFile()) {
         throw new Error(`EPG file was not created at ${epgPath}`);
@@ -778,7 +779,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
       
       this.logger.info(`Parsing EPG file for provider ${provider.id}...`);
       const programs = await this.parseEPG(epgPath, provider.id);
-      this.logger.info(`Parsed ${programs.length} programs from EPG for provider ${provider.id}`);
+      this.logger.info(`Parsed ${formatNumber(programs.length)} programs from EPG for provider ${provider.id}`);
       
       if (programs.length > 0) {
         // Filter out any programs with invalid dates before inserting
@@ -796,7 +797,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
         });
         
         if (validPrograms.length < programs.length) {
-          this.logger.warn(`Filtered out ${programs.length - validPrograms.length} invalid programs (invalid dates)`);
+          this.logger.warn(`Filtered out ${formatNumber(programs.length - validPrograms.length)} invalid programs (invalid dates)`);
         }
         
         if (validPrograms.length > 0) {
@@ -805,7 +806,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
           
           // Insert new programs
           const result = await this._programManager.insertPrograms(validPrograms);
-          this.logger.info(`Synced ${validPrograms.length} programs (${result.inserted} inserted, ${result.updated} updated) from ${provider.type} provider ${provider.id}`);
+          this.logger.info(`Synced ${formatNumber(validPrograms.length)} programs (${formatNumber(result.inserted)} inserted, ${formatNumber(result.updated)} updated) from ${provider.type} provider ${provider.id}`);
         } else {
           this.logger.warn(`No valid programs to sync for provider ${provider.id} (all programs had invalid dates)`);
         }
@@ -884,7 +885,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
           toUpdate,
           toRemove
         });
-        this.logger.info(`Synced channels from ${provider.type} provider ${provider.id}: ${result.inserted} inserted, ${result.updated} updated, ${result.deleted} deleted`);
+        this.logger.info(`Synced channels from ${provider.type} provider ${provider.id}: ${formatNumber(result.inserted)} inserted, ${formatNumber(result.updated)} updated, ${formatNumber(result.deleted)} deleted`);
       } else {
         this.logger.info(`No channels to sync for ${provider.type} provider ${provider.id} (no changes detected)`);
       }

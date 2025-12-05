@@ -1,4 +1,5 @@
 import { BaseFormattingManager } from './BaseFormattingManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 import fs from 'fs-extra';
 import path from 'path';
 import { parseM3U } from '@iptv/playlist';
@@ -142,7 +143,7 @@ export class LiveTVFormattingManager extends BaseFormattingManager {
       // Query programs for those channels using public method
       const programs = await this._programManager.getProgramsByChannels(channels, { sort: { start: 1 } });
 
-      this.logger.debug(`EPG generation for ${username}: Found ${channels.length} channels, ${programs.length} programs`);
+      this.logger.debug(`EPG generation for ${username}: Found ${formatNumber(channels.length)} channels, ${formatNumber(programs.length)} programs`);
 
       // Group programs by channel
       const programsByChannel = new Map();
@@ -156,11 +157,11 @@ export class LiveTVFormattingManager extends BaseFormattingManager {
         }
       }
 
-      this.logger.debug(`EPG generation for ${username}: Grouped programs into ${programsByChannel.size} channels with programs`);
+      this.logger.debug(`EPG generation for ${username}: Grouped programs into ${formatNumber(programsByChannel.size)} channels with programs`);
       
       // Log if we have channels but no programs (for debugging)
       if (channels.length > 0 && programs.length === 0) {
-        this.logger.warn(`EPG generation for ${username}: Found ${channels.length} channels but no programs in database`);
+        this.logger.warn(`EPG generation for ${username}: Found ${formatNumber(channels.length)} channels but no programs in database`);
       }
 
       // Generate XMLTV EPG XML format

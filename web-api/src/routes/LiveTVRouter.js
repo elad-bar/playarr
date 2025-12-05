@@ -1,4 +1,5 @@
 import BaseRouter from './BaseRouter.js';
+import { formatNumber } from '../utils/numberFormat.js';
 
 /**
  * Get the base URL from the request, respecting X-Forwarded-* headers
@@ -68,7 +69,7 @@ class LiveTVRouter extends BaseRouter {
         // Get all unique group_title values from channels
         const categories = await this._channelManager.getUniqueCategories(enabledProviderIds);
         
-        this.logger.debug(`Found ${categories.length} unique categories from ${enabledProviderIds.length} enabled providers`);
+        this.logger.debug(`Found ${formatNumber(categories.length)} unique categories from ${formatNumber(enabledProviderIds.length)} enabled providers`);
         
         return res.status(200).json({ categories });
       } catch (error) {

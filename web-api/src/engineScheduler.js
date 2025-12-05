@@ -1,4 +1,5 @@
 import { createLogger } from './utils/logger.js';
+import { formatNumber } from './utils/numberFormat.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -59,7 +60,7 @@ export class EngineScheduler {
     }));
 
     if (scheduledJobs.length > 0) {
-      this.logger.info(`Scheduler initialized with ${scheduledJobs.length} job(s) (not started yet)`);
+      this.logger.info(`Scheduler initialized with ${formatNumber(scheduledJobs.length)} job(s) (not started yet)`);
     }
 
     this.logger.info('EngineScheduler initialized');
@@ -108,7 +109,7 @@ export class EngineScheduler {
       })();
     });
 
-    this.logger.info(`Scheduler started with ${this._scheduledJobs.length} job(s) at their configured intervals`);
+    this.logger.info(`Scheduler started with ${formatNumber(this._scheduledJobs.length)} job(s) at their configured intervals`);
   }
 
   /**

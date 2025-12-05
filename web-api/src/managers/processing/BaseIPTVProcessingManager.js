@@ -21,6 +21,7 @@
  */
 
 import { BaseProcessingManager } from './BaseProcessingManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 import { generateTitleKey, generateCategoryKey } from '../../utils/titleUtils.js';
 
 /**
@@ -125,7 +126,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
     // Step 2: Filter titles (provider-specific)
     const filteredTitles = await this._filterTitles(titles, type);
 
-    this.logger.debug(`${type}: Filtered ${filteredTitles.length} titles to process`);
+    this.logger.debug(`${type}: Filtered ${formatNumber(filteredTitles.length)} titles to process`);
 
     // Step 3: Process in batches for memory efficiency
     // Batch size controls memory usage (max concurrent promises), not save frequency
@@ -135,7 +136,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
       batches.push(filteredTitles.slice(i, i + batchSize));
     }
 
-    this.logger.info(`${type}: Processing ${batches.length} batch(es) of up to ${batchSize} titles each`);
+    this.logger.info(`${type}: Processing ${formatNumber(batches.length)} batch(es) of up to ${formatNumber(batchSize)} titles each`);
 
     let totalProcessed = 0;
     let totalRemaining = filteredTitles.length;
@@ -148,7 +149,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
       if (processedTitles.length > 0) {
         try {
           await this.saveTitles(type, processedTitles);
-          this.logger.debug(`${type}: Saved ${processedTitles.length} accumulated title(s) via progress callback`);
+          this.logger.debug(`${type}: Saved ${formatNumber(processedTitles.length)} accumulated title(s) via progress callback`);
           processedTitles.length = 0; // Clear after saving
         } catch (error) {
           this.logger.error(`Error saving accumulated titles for ${type}: ${error.message}`);
@@ -169,7 +170,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
           await this.saveAllIgnoredTitles(ignoredByTitleKey);
           
           const count = Object.keys(this._accumulatedIgnoredTitles[type]).length;
-          this.logger.debug(`${type}: Saved ${count} accumulated ignored title(s) via progress callback`);
+          this.logger.debug(`${type}: Saved ${formatNumber(count)} accumulated ignored title(s) via progress callback`);
           this._accumulatedIgnoredTitles[type] = {}; // Clear after saving
         } catch (error) {
           this.logger.error(`Error saving accumulated ignored titles for ${type}: ${error.message}`);
@@ -187,7 +188,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
         const batchStart = batchIndex * batchSize + 1;
         const batchEnd = Math.min((batchIndex + 1) * batchSize, filteredTitles.length);
 
-        this.logger.debug(`${type}: Starting batch ${batchIndex + 1}/${batches.length} (titles ${batchStart}-${batchEnd})`);
+        this.logger.debug(`${type}: Starting batch ${formatNumber(batchIndex + 1)}/${formatNumber(batches.length)} (titles ${formatNumber(batchStart)}-${formatNumber(batchEnd)})`);
 
         // Process batch titles in parallel (rate limiting happens in provider-specific methods via limiter.schedule())
         const batchPromises = batch.map(title => 
@@ -211,7 +212,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
         this.updateProgress(type, totalRemaining);
 
         // Log progress every batch
-        this.logger.info(`${type}: Completed batch ${batchIndex + 1}/${batches.length} - ${totalProcessed} title(s) processed, ${totalRemaining} remaining`);
+        this.logger.info(`${type}: Completed batch ${formatNumber(batchIndex + 1)}/${formatNumber(batches.length)} - ${formatNumber(totalProcessed)} title(s) processed, ${formatNumber(totalRemaining)} remaining`);
       }
     } finally {
       // Save any remaining accumulated titles before unregistering
@@ -295,7 +296,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
       return !config.shouldSkip(title, existingTitle);
     });
 
-    this.logger.debug(`${type}: Filtered to ${filteredTitles.length} titles to process`);
+    this.logger.debug(`${type}: Filtered to ${formatNumber(filteredTitles.length)} titles to process`);
 
     return filteredTitles;
   }
@@ -570,7 +571,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
       return { saved: 0, inserted: 0, updated: 0 };
     }
 
-    this.logger.debug(`Saving ${titles.length} titles to MongoDB`);
+    this.logger.debug(`Saving ${formatNumber(titles.length)} titles to MongoDB`);
 
     const now = new Date().toISOString();
     
@@ -615,7 +616,7 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
       this._titlesCache = Array.from(titleKeyMap.values());
       
       const totalSaved = result.inserted + result.updated;
-      this.logger.info(`Saved ${totalSaved} titles to MongoDB (${result.inserted} inserted, ${result.updated} updated)`);
+      this.logger.info(`Saved ${formatNumber(totalSaved)} titles to MongoDB (${formatNumber(result.inserted)} inserted, ${formatNumber(result.updated)} updated)`);
       
       return { saved: totalSaved, inserted: result.inserted, updated: result.updated };
     } catch (error) {

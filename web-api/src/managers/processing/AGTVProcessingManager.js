@@ -1,4 +1,5 @@
 import { BaseIPTVProcessingManager } from './BaseIPTVProcessingManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 
 /**
  * Apollo Group TV handler implementation
@@ -301,7 +302,7 @@ export class AGTVProcessingManager extends BaseIPTVProcessingManager {
 
     const { titles } = this._parseM3U8Content(m3u8ContentLines, type);
           
-    this.logger.info(`${type}: Loaded ${titles.length} titles`);
+    this.logger.info(`${type}: Loaded ${formatNumber(titles.length)} titles`);
 
     return titles;
   }

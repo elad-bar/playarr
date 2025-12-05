@@ -1,4 +1,5 @@
 import { BaseDomainManager } from './BaseDomainManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 import { DatabaseCollections, toCollectionName } from '../../config/collections.js';
 import { NotFoundError, ValidationError, AppError } from '../../errors/AppError.js';
 
@@ -86,7 +87,7 @@ class TitlesManager extends BaseDomainManager {
         }
       }
       
-      this.logger.info(`Loaded ${titlesMap.size} titles`);
+      this.logger.info(`Loaded ${formatNumber(titlesMap.size)} titles`);
       return titlesMap;
     } catch (error) {
       this.logger.error('Error loading titles:', error);

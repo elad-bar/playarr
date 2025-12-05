@@ -1,4 +1,5 @@
 import { BaseJob } from './BaseJob.js';
+import { formatNumber } from '../utils/numberFormat.js';
 
 /**
  * Job for processing provider titles (fetching metadata from IPTV providers)
@@ -66,7 +67,7 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
 
       // Fetch metadata from enabled providers only
       // Note: fetchMetadata() will load all provider titles internally for comparison
-      this.logger.info(`Starting metadata fetch process for ${enabledHandlers.length} enabled provider(s) (${this.handlers.size} total)...`);
+      this.logger.info(`Starting metadata fetch process for ${formatNumber(enabledHandlers.length)} enabled provider(s) (${formatNumber(this.handlers.size)} total)...`);
       
       const results = await Promise.all(
         enabledHandlers.map(async ([providerId, handler]) => {

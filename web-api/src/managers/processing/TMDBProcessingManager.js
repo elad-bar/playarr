@@ -1,4 +1,5 @@
 import { BaseProcessingManager } from './BaseProcessingManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 import { extractYearFromTitle, extractBaseTitle, extractYearFromReleaseDate, generateTitleKey } from '../../utils/titleUtils.js';
 
 /**
@@ -190,7 +191,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
         consecutiveFailures++;
         
         if (consecutiveFailures >= 3) {
-          this.logger.warn(`Failed 3 times in a row for ${type} ID ${tmdbId}, returning ${allResults.length} similar titles`);
+          this.logger.warn(`Failed 3 times in a row for ${type} ID ${tmdbId}, returning ${formatNumber(allResults.length)} similar titles`);
           break;
         } else {
           this.logger.warn(`Error fetching similar titles page ${page} for ${type} ID ${tmdbId}: ${error.message}`);
@@ -345,7 +346,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
     // Create a Set of available title_keys for matching similar titles
     const availableTitleKeys = new Set(allMainTitles.map(t => t.title_key || generateTitleKey(t.type, t.title_id)));
     
-    this.logger.info(`Enriching similar titles for ${titlesToProcess.length} newly created titles (${allMainTitles.length - titlesToProcess.length} skipped)...`);
+    this.logger.info(`Enriching similar titles for ${formatNumber(titlesToProcess.length)} newly created titles (${formatNumber(allMainTitles.length - titlesToProcess.length)} skipped)...`);
 
     const updatedTitles = [];
     let processedCount = 0;
@@ -360,7 +361,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       if (updatedTitles.length > 0) {
         try {
           await this._saveMainTitles(updatedTitles, existingMainTitleMap);
-          this.logger.debug(`Saved ${updatedTitles.length} accumulated titles with similar titles via progress callback`);
+          this.logger.debug(`Saved ${formatNumber(updatedTitles.length)} accumulated titles with similar titles via progress callback`);
           updatedTitles.length = 0; // Clear after saving
         } catch (error) {
           this.logger.error(`Error saving accumulated titles: ${error.message}`);
@@ -589,7 +590,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
     to_update.push(...gaps.to_update);
     to_delete.push(...gaps.to_delete);
 
-    this.logger.info(`Gap detection: ${to_create.length} to create, ${to_update.length} to update, ${to_delete.length} to delete`);
+    this.logger.info(`Gap detection: ${formatNumber(to_create.length)} to create, ${formatNumber(to_update.length)} to update, ${formatNumber(to_delete.length)} to delete`);
 
     // Step 1: Process deletions
     if (to_delete.length > 0) {
@@ -598,7 +599,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       const deleteResult = await this.titlesManager.deleteManyByQuery({
         title_key: { $in: deleteTitleKeys }
       });
-      this.logger.info(`Deleted ${deleteResult.deletedCount || 0} main titles`);
+      this.logger.info(`Deleted ${formatNumber(deleteResult.deletedCount || 0)} main titles`);
     }
 
     // Step 2: Cleanup title streams for both delete and update title keys
@@ -617,7 +618,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       // Fetch FULL provider titles for titles that need processing
       // The getProviderTitlesForChangeDetection() only returns a projection,
       // but we need full provider title objects with streams data for stream generation
-      this.logger.debug(`Fetching full provider titles for ${toProcess.length} title(s) to process`);
+      this.logger.debug(`Fetching full provider titles for ${formatNumber(toProcess.length)} title(s) to process`);
       
       const allProviderTitles = [];
       const titlesByType = new Map();
@@ -749,7 +750,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
           // Save accumulated data
           if (mainTitles.length > 0) {
             await this._saveMainTitles(mainTitles, existingMainTitleMap);
-            this.logger.debug(`Saved ${mainTitles.length} main titles (periodic save)`);
+            this.logger.debug(`Saved ${formatNumber(mainTitles.length)} main titles (periodic save)`);
             mainTitles.length = 0;
           }
 
@@ -769,7 +770,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       // Final save for any remaining data
       if (mainTitles.length > 0) {
         await this._saveMainTitles(mainTitles, existingMainTitleMap);
-        this.logger.debug(`Saved ${mainTitles.length} main titles (final save)`);
+        this.logger.debug(`Saved ${formatNumber(mainTitles.length)} main titles (final save)`);
       }
 
       // Final progress log
@@ -829,7 +830,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
           );
 
           if (result.modifiedCount > 0) {
-            this.logger.info(`Marked ${result.modifiedCount} provider title(s) as ignored for ${type} (reason: ${reason})`);
+            this.logger.info(`Marked ${formatNumber(result.modifiedCount)} provider title(s) as ignored for ${type} (reason: ${reason})`);
           }
         }
       }
@@ -973,7 +974,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
     if (titlesToProcess.length > 0) {
       const titleKeysToFetch = titlesToProcess.map(t => t.titleKey);
       const tmdbIdsToFetch = titlesToProcess.map(t => t.tmdbId);
-      this.logger.debug(`Fetching all provider titles for ${titleKeysToFetch.length} title(s) needing regeneration`);
+      this.logger.debug(`Fetching all provider titles for ${formatNumber(titleKeysToFetch.length)} title(s) needing regeneration`);
       
       try {
         // Group titles by type
@@ -1036,7 +1037,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       }
     }
     
-    this.logger.info(`Generating ${titlesToProcess.length} main titles (${skippedCount} skipped)...`);
+    this.logger.info(`Generating ${formatNumber(titlesToProcess.length)} main titles (${formatNumber(skippedCount)} skipped)...`);
 
     const mainTitles = [];
     let processedCount = 0;
@@ -1051,7 +1052,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       if (mainTitles.length > 0) {
         try {
           await this._saveMainTitles(mainTitles, existingMainTitleMap);
-          this.logger.debug(`Saved ${mainTitles.length} accumulated main titles via progress callback`);
+          this.logger.debug(`Saved ${formatNumber(mainTitles.length)} accumulated main titles via progress callback`);
           mainTitles.length = 0; // Clear after saving
         } catch (error) {
           this.logger.error(`Error saving accumulated main titles: ${error.message}`);
@@ -1161,7 +1162,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       const allTitles = await this.titlesManager.findTitlesByQuery({});
       this._mainTitlesCache = allTitles;
       
-      this.logger.info(`Saved ${result.inserted + result.updated} main titles to MongoDB (${result.inserted} inserted, ${result.updated} updated, total: ${allTitles.length} titles)`);
+      this.logger.info(`Saved ${formatNumber(result.inserted + result.updated)} main titles to MongoDB (${formatNumber(result.inserted)} inserted, ${formatNumber(result.updated)} updated, total: ${formatNumber(allTitles.length)} titles)`);
       
       return allTitles;
     } catch (error) {
@@ -1450,7 +1451,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       // Convert map to array
       media.push(...Array.from(mediaMap.values()));
 
-      this.logger.debug(`Built ${media.length} media items from ${providerTitles.length} provider titles for ${type} ${tmdbId}`);
+      this.logger.debug(`Built ${formatNumber(media.length)} media items from ${formatNumber(providerTitles.length)} provider titles for ${type} ${tmdbId}`);
     } catch (error) {
       this.logger.error(`Error building media streams for ${type} ${tmdbId}: ${error.message}`);
     }
@@ -1517,7 +1518,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
           }
           
           if (invalidSeasons.length > 0) {
-            this.logger.debug(`Filtered out ${invalidSeasons.length} invalid season(s) [${invalidSeasons.join(', ')}] for TV show ${tmdbId} (TMDB has ${availableSeasons.size} seasons)`);
+            this.logger.debug(`Filtered out ${formatNumber(invalidSeasons.length)} invalid season(s) [${invalidSeasons.join(', ')}] for TV show ${tmdbId} (TMDB has ${formatNumber(availableSeasons.size)} seasons)`);
           }
         }
       } catch (error) {

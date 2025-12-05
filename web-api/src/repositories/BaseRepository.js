@@ -1,4 +1,5 @@
 import { createLogger } from '../utils/logger.js';
+import { formatNumber } from '../utils/numberFormat.js';
 import { DB_NAME } from '../config/database.js';
 
 const logger = createLogger('BaseRepository');
@@ -564,7 +565,7 @@ export class BaseRepository {
       return 0;
     }
 
-    logger.info(`Found ${duplicateGroups.length} duplicate key groups in ${this.collectionName}, removing duplicates...`);
+    logger.info(`Found ${formatNumber(duplicateGroups.length)} duplicate key groups in ${this.collectionName}, removing duplicates...`);
     let totalRemoved = 0;
 
     // Now fetch only minimal fields for groups that have duplicates
@@ -586,7 +587,7 @@ export class BaseRepository {
         const idsToRemove = toRemove.map(d => d._id);
         const result = await collection.deleteMany({ _id: { $in: idsToRemove } });
         totalRemoved += result.deletedCount;
-        logger.debug(`Removed ${result.deletedCount} duplicate(s) for key: ${JSON.stringify(dupGroup._id)}`);
+        logger.debug(`Removed ${formatNumber(result.deletedCount)} duplicate(s) for key: ${JSON.stringify(dupGroup._id)}`);
       }
     }
 

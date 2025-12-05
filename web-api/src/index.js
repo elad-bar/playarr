@@ -16,6 +16,7 @@ const __dirname = path.dirname(__filename);
 
 // Import logger
 import { createLogger } from './utils/logger.js';
+import { formatNumber } from './utils/numberFormat.js';
 
 // Import service classes
 import { WebSocketService } from './services/websocket.js';
@@ -194,7 +195,7 @@ async function initialize() {
 
     // Load all provider configurations from database
     const allProviders = await providerRepo.findByQuery({}) || [];
-    logger.info(`Loaded ${allProviders.length} provider(s) from database`);
+    logger.info(`Loaded ${formatNumber(allProviders.length)} provider(s) from database`);
 
     // Group providers by type for each provider type
     const xtreamConfigs = {};

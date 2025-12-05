@@ -1,4 +1,5 @@
 import { BaseDomainManager } from './BaseDomainManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 
 /**
  * ChannelManager for managing Live TV channel data
@@ -164,14 +165,14 @@ export class ChannelManager extends BaseDomainManager {
       // Use repository method to get distinct values
       const categories = await this._repository.getDistinct('group_title', query);
       
-      this.logger.debug(`Found ${categories.length} distinct group_title values (before filtering)`);
+      this.logger.debug(`Found ${formatNumber(categories.length)} distinct group_title values (before filtering)`);
       
       // Filter out null/undefined/empty values and sort
       const filteredCategories = categories
         .filter(cat => cat && typeof cat === 'string' && cat.trim().length > 0)
         .sort();
       
-      this.logger.debug(`Returning ${filteredCategories.length} valid categories after filtering`);
+      this.logger.debug(`Returning ${formatNumber(filteredCategories.length)} valid categories after filtering`);
       
       return filteredCategories;
     } catch (error) {

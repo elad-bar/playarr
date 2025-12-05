@@ -1,4 +1,5 @@
 import { createLogger } from '../utils/logger.js';
+import { formatNumber } from '../utils/numberFormat.js';
 import Bottleneck from 'bottleneck';
 import fs from 'fs-extra';
 import path from 'path';
@@ -70,7 +71,7 @@ export class BaseProvider {
     const limiter = this._createLimiter(normalizedConfig);
     
     this._limiters.set(providerId, limiter);
-    this.logger.debug(`Created rate limiter for provider ${providerId}: ${normalizedConfig.concurrent} requests per ${normalizedConfig.duration_seconds} second(s)`);
+    this.logger.debug(`Created rate limiter for provider ${providerId}: ${formatNumber(normalizedConfig.concurrent)} requests per ${formatNumber(normalizedConfig.duration_seconds)} second(s)`);
     
     return limiter;
   }
@@ -95,7 +96,7 @@ export class BaseProvider {
       minTime: 0
     });
 
-    this.logger.debug(`Created rate limiter: ${concurrent} requests per ${durationSeconds} second(s)`);
+    this.logger.debug(`Created rate limiter: ${formatNumber(concurrent)} requests per ${formatNumber(durationSeconds)} second(s)`);
     
     return limiter;
   }
@@ -489,7 +490,7 @@ export class BaseProvider {
       const waitTime = totalDuration - requestDuration;
       this.logger.debug(
         `API ${finalFetchOptions.method} request: ${endpoint} ${providerId}/${type}${cacheKey} - ` +
-        `${totalDuration}ms (request: ${requestDuration}ms, wait: ${waitTime}ms)`
+        `${formatNumber(totalDuration)}ms (request: ${formatNumber(requestDuration)}ms, wait: ${formatNumber(waitTime)}ms)`
       );
 
       // Clear timeout if it was set

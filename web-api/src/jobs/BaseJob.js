@@ -1,4 +1,5 @@
 import { createLogger } from '../utils/logger.js';
+import { formatNumber } from '../utils/numberFormat.js';
 import { AGTVProcessingManager } from '../managers/processing/AGTVProcessingManager.js';
 import { XtreamProcessingManager } from '../managers/processing/XtreamProcessingManager.js';
 import { TMDBProcessingManager } from '../managers/processing/TMDBProcessingManager.js';
@@ -80,7 +81,7 @@ export class BaseJob {
         return handlers;
       }
       
-      this.logger.info(`Creating processing managers for ${providers.length} provider(s)...`);
+      this.logger.info(`Creating processing managers for ${formatNumber(providers.length)} provider(s)...`);
       
       // Create processing manager for each provider
       for (const providerData of providers) {
@@ -112,7 +113,7 @@ export class BaseJob {
         }
       }
       
-      this.logger.info(`Created ${handlers.size} processing manager(s)`);
+      this.logger.info(`Created ${formatNumber(handlers.size)} processing manager(s)`);
       return handlers;
     } catch (error) {
       this.logger.error(`Error creating handlers: ${error.message}`);

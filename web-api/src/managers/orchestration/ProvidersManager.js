@@ -1,4 +1,5 @@
 import { BaseManager } from '../BaseManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 import { DataProvider } from '../../config/collections.js';
 import { NotFoundError, AppError } from '../../errors/AppError.js';
 
@@ -862,7 +863,7 @@ class ProvidersManager extends BaseManager {
           { $pull: { 'watchlist.live': { $in: deletedChannelKeys } } }
         );
 
-        this.logger.info(`Deleted ${channelsToDelete.length} channels from disabled categories for provider ${providerId}`);
+        this.logger.info(`Deleted ${formatNumber(channelsToDelete.length)} channels from disabled categories for provider ${providerId}`);
       }
     } catch (error) {
       this.logger.error(`Error removing provider ${providerId} from channels: ${error.message}`);

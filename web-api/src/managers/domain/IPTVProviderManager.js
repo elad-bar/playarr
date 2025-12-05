@@ -1,4 +1,5 @@
 import { BaseDomainManager } from './BaseDomainManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 import { DatabaseCollections, DataProvider, toCollectionName } from '../../config/collections.js';
 import slugify from 'slugify';
 import { NotFoundError, ValidationError, ConflictError, AppError } from '../../errors/AppError.js';
@@ -107,7 +108,7 @@ class IPTVProviderManager extends BaseDomainManager {
         await this._repository.bulkWrite(operations);
       }
       
-      this.logger.info(`Saved ${providers.length} providers to MongoDB`);
+      this.logger.info(`Saved ${formatNumber(providers.length)} providers to MongoDB`);
     } catch (error) {
       this.logger.error('Error writing providers to MongoDB:', error);
       throw error;

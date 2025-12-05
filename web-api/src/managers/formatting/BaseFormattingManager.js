@@ -1,4 +1,5 @@
 import { BaseManager } from '../BaseManager.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 import http from 'http';
 import https from 'https';
 import { URL } from 'url';
@@ -77,23 +78,23 @@ class BaseFormattingManager extends BaseManager {
         return null;
       }
 
-      this.logger.info(`Found ${sources.length} source(s) for title ${mediaType} ${titleId}`);
+      this.logger.info(`Found ${formatNumber(sources.length)} source(s) for title ${mediaType} ${titleId}`);
 
       // Check each source and return the first valid one
       for (let i = 0; i < sources.length; i++) {
         const source = sources[i];
         const sourceUrl = typeof source === 'string' ? source : source.url;
         const providerType = typeof source === 'object' ? source.providerType : null;
-        this.logger.info(`Checking source ${i + 1}/${sources.length}: ${sourceUrl}`);
+        this.logger.info(`Checking source ${formatNumber(i + 1)}/${formatNumber(sources.length)}: ${sourceUrl}`);
         if (await this._checkUrl(sourceUrl, providerType)) {
           this.logger.info(`Best source for title ${mediaType} ${titleId} is valid: ${sourceUrl}`);
           return sourceUrl;
         } else {
-          this.logger.warn(`Source ${i + 1}/${sources.length} is invalid for title ${mediaType} ${titleId}: ${sourceUrl}`);
+          this.logger.warn(`Source ${formatNumber(i + 1)}/${formatNumber(sources.length)} is invalid for title ${mediaType} ${titleId}: ${sourceUrl}`);
         }
       }
 
-      this.logger.warn(`No valid sources found for title ${mediaType} ${titleId} after checking ${sources.length} source(s)`);
+      this.logger.warn(`No valid sources found for title ${mediaType} ${titleId} after checking ${formatNumber(sources.length)} source(s)`);
       return null;
     } catch (error) {
       this.logger.error(`Error getting best source for title ${mediaType} ${titleId}:`, error);
@@ -148,12 +149,12 @@ class BaseFormattingManager extends BaseManager {
         return [];
       }
 
-      this.logger.debug(`Found ${mediaItem.sources.length} source(s) for ${mediaType} ${titleId}`);
+      this.logger.debug(`Found ${formatNumber(mediaItem.sources.length)} source(s) for ${mediaType} ${titleId}`);
 
       // Get enabled providers using IPTVProviderManager
       const providersMap = await this._iptvProviderManager.getEnabledProvidersMap({ excludeDeleted: true });
 
-      this.logger.debug(`Loaded ${providersMap.size} enabled provider(s)`);
+      this.logger.debug(`Loaded ${formatNumber(providersMap.size)} enabled provider(s)`);
 
       const sources = [];
       
@@ -186,7 +187,7 @@ class BaseFormattingManager extends BaseManager {
         } else if (providerUrl.startsWith('/')) {
           // Relative URL - need to concatenate with base URLs
           if (provider && provider.streams_urls && Array.isArray(provider.streams_urls) && provider.streams_urls.length > 0) {
-            this.logger.debug(`Provider ${providerId} has ${provider.streams_urls.length} stream URL(s) configured`);
+            this.logger.debug(`Provider ${providerId} has ${formatNumber(provider.streams_urls.length)} stream URL(s) configured`);
             // For each base URL in streams_urls, create a full URL
             for (const baseUrl of provider.streams_urls) {
               if (baseUrl && typeof baseUrl === 'string' && baseUrl.trim()) {
@@ -244,7 +245,7 @@ class BaseFormattingManager extends BaseManager {
         return priorityA - priorityB;
       });
 
-      this.logger.debug(`Found ${sources.length} source URL(s) for title ${titleId} (sorted by priority)`);
+      this.logger.debug(`Found ${formatNumber(sources.length)} source URL(s) for title ${titleId} (sorted by priority)`);
       return sources;
     } catch (error) {
       this.logger.error(`Error getting sources for title ${titleId}:`, error);
