@@ -8,7 +8,7 @@ This feature adds the ability to selectively enable or disable syncing of differ
 
 1. **Selective Media Type Syncing**: Allow users to choose which media types (Movies, TV Shows, Live TV) to sync per provider
 2. **Reduced Resource Usage**: Skip syncing unused media types to reduce API calls, processing time, and storage
-3. **Conditional Category Display**: Only show category selection tabs for enabled media types
+3. **Conditional Category Display**: Only show category selection step for enabled media types (Movies/TV Shows only, Live TV categories not shown)
 4. **Clean Data Management**: Properly handle data cleanup when media types are disabled
 5. **Backward Compatibility**: Existing providers automatically have all media types enabled via migration
 
@@ -17,24 +17,33 @@ This feature adds the ability to selectively enable or disable syncing of differ
 ### Existing Implementation
 
 **Provider Configuration:**
-- Providers have `enabled_categories` field with `movies`, `tvshows`, and `live` arrays
+- Providers have `enabled_categories` field with `movies` and `tvshows` arrays (v1 schema)
+- **No `enabled_categories.live` field exists yet** (will be added in v2)
+- **No `sync_media_types` field exists** - all media types are synced by default
+- Schema version is `v1` (only movies and tvshows categories)
 - Categories control which specific categories are synced within each media type
-- All media types are synced by default (no way to disable entire media type)
 
 **Sync Jobs:**
-- `SyncIPTVProviderTitlesJob`: Syncs both movies and TV shows from all enabled providers
-- `SyncLiveTVJob`: Syncs Live TV channels from all enabled providers
+- `SyncIPTVProviderTitlesJob`: Syncs both movies and TV shows from all enabled providers (no media type filtering)
+- `SyncLiveTVJob`: Syncs Live TV channels from all enabled providers (no media type filtering)
 - Jobs process all enabled providers regardless of media type preferences
 
 **UI:**
-- Category tabs (Movies, TV Shows) are always shown for Xtream providers
+- Uses `ProviderWizard` component with step-based navigation
+- Category selection handled in `CategoriesStep` component (Movies and TV Shows only)
+- No Live TV category selection (Live TV categories are extracted automatically from synced channels)
 - No way to disable syncing of entire media types
+
+**Cleanup Methods:**
+- `_removeProviderFromTitles()`: Removes provider from titles based on enabled categories
+- `_removeProviderFromChannels()`: Signature is `(providerId, isEnabled, enabledCategories)` - removes channels based on enabled live categories
 
 **Limitations:**
 - Cannot disable syncing of entire media types (only specific categories)
 - All media types are always synced, even if not needed
 - Wastes API calls and processing time for unused media types
 - No way to selectively enable/disable media types per provider
+- No Live TV category filtering in provider settings (v2 feature)
 
 ## Feature Requirements
 
@@ -46,10 +55,11 @@ This feature adds the ability to selectively enable or disable syncing of differ
    - Checkboxes should be visible for both AGTV and Xtream providers
    - Save state as part of provider configuration
 
-2. **Conditional Category Tabs:**
-   - Movies tab: Only show if `sync_media_types.movies === true`
-   - TV Shows tab: Only show if `sync_media_types.tvshows === true`
-   - Live TV categories: Handled differently (no separate tab, categories extracted from channels)
+2. **Conditional Category Step:**
+   - Categories step: Only show if `sync_media_types.movies === true` OR `sync_media_types.tvshows === true`
+   - Categories step shows ONLY Movies and TV Shows categories (no Live TV categories)
+   - Live TV categories are NOT shown in provider settings - they are extracted automatically from synced channels
+   - Live TV category filtering is handled internally, not via user selection in settings
 
 3. **Visual Feedback:**
    - Show which media types are enabled/disabled in provider card
@@ -72,8 +82,15 @@ This feature adds the ability to selectively enable or disable syncing of differ
 ```
 
 **Schema Version:**
-- Current: v2 (includes `enabled_categories.live`)
-- New: v3 (adds `sync_media_types`)
+- Current: v1 (only has `enabled_categories.movies` and `enabled_categories.tvshows`)
+- New: v2 (adds `enabled_categories.live` AND `sync_media_types`)
+
+**Note on `enabled_categories.live`:**
+- The `enabled_categories.live` array exists in the provider schema
+- It is managed automatically during channel sync, NOT by user selection
+- Users do NOT see or select Live TV categories in provider settings
+- When channels are synced, their categories are automatically added to `enabled_categories.live`
+- When channels are removed (due to category filtering or sync disable), categories are automatically removed
 
 ### Behavior Changes
 
@@ -91,6 +108,7 @@ This feature adds the ability to selectively enable or disable syncing of differ
 2. **Delete Channels**: Delete all channels for this provider
 3. **Delete Programs**: Delete associated programs
 4. **Clean Up Watchlist**: Remove channel keys from all user watchlists
+5. **Note**: Live TV categories are NOT user-selectable in provider settings. The `enabled_categories.live` array is managed automatically based on which channels are synced. When Live TV sync is disabled, all channels (and thus all categories) are removed.
 
 #### When Media Type is Enabled
 
@@ -110,24 +128,33 @@ This feature adds the ability to selectively enable or disable syncing of differ
 
 #### ProviderRepository Schema Versioning
 
-**Add v3 Schema:**
+**Update v2 Schema:**
 ```javascript
-"v3": {
-  "id": 3,
+"v2": {
+  "id": 2,
   "structure": {
-    // ... existing v2 fields ...
-    sync_media_types: {
+    // ... existing v1 fields ...
+    enabled_categories: {
+      movies: Array,
+      tvshows: Array,
+      live: Array // NEW: Live channel categories (managed automatically)
+    },
+    sync_media_types: {  // NEW: Media type sync control
       movies: Boolean,
       tvshows: Boolean,
       live: Boolean
     }
   },
   "transformation": async (doc) => {
-    // Migration: For existing providers, enable all media types
+    // Migration: For existing providers (v1), add both new fields
     return {
       ...doc,
+      enabled_categories: {
+        ...doc.enabled_categories,
+        live: doc.enabled_categories?.live || [] // Empty array, populated during sync
+      },
       sync_media_types: {
-        movies: true,
+        movies: true,  // Existing providers: enable all by default
         tvshows: true,
         live: true
       }
@@ -137,8 +164,10 @@ This feature adds the ability to selectively enable or disable syncing of differ
 ```
 
 **Update Repository:**
-- Change default schema version from `v2` to `v3`
-- Ensure transformation runs for all existing documents
+- Update v2 schema definition to include both `enabled_categories.live` and `sync_media_types`
+- Default schema version remains `v2` (already set)
+- Transformation handles migration from v1 to v2 (adds both fields)
+- Migration runs automatically when documents are accessed (via BaseRepository schema versioning system)
 
 ### 2. Backend Changes
 
@@ -146,8 +175,9 @@ This feature adds the ability to selectively enable or disable syncing of differ
 
 **Update `createProvider()`:**
 - Validate `sync_media_types` structure
-- Default to `{ movies: false, tvshows: false, live: false }` if not provided
+- Default to `{ movies: false, tvshows: false, live: false }` if not provided (new providers)
 - Store in provider document
+- Also initialize `enabled_categories.live: []` for v2 schema
 
 **Update `updateProvider()`:**
 - Validate `sync_media_types` structure
@@ -155,6 +185,7 @@ This feature adds the ability to selectively enable or disable syncing of differ
 
 **Add Validation:**
 ```javascript
+// Note: ValidationError is imported from '../../errors/AppError.js'
 if (providerData.sync_media_types) {
   if (typeof providerData.sync_media_types !== 'object') {
     throw new ValidationError('sync_media_types must be an object');
@@ -182,12 +213,17 @@ async updateProvider(providerId, providerData) {
   const existingProvider = await this._iptvProviderManager.getProvider(providerId);
   
   // Get existing and new sync_media_types
+  // For existing providers without sync_media_types (v1), default to true (backward compatibility)
+  // For new providers, default to false
   const existingSyncTypes = existingProvider.sync_media_types || { 
-    movies: false, tvshows: false, live: false 
+    movies: true,  // Default true for v1 providers
+    tvshows: true,
+    live: true
   };
-  const newSyncTypes = providerData.sync_media_types || { 
-    movies: false, tvshows: false, live: false 
-  };
+  // For updates, if not provided, keep existing values (don't default to false)
+  const newSyncTypes = providerData.sync_media_types !== undefined 
+    ? { ...existingSyncTypes, ...providerData.sync_media_types } // Merge with existing
+    : existingSyncTypes; // Keep existing if not provided
   
   // Detect changes
   const moviesRemoved = existingSyncTypes.movies && !newSyncTypes.movies;
@@ -227,7 +263,12 @@ async updateProvider(providerId, providerData) {
   // Handle Live TV removal
   if (liveRemoved) {
     // Delete all channels and programs for this provider
-    await this._removeProviderFromChannels(providerId, []);
+    // When disabling entire media type, pass isEnabled: false
+    await this._removeProviderFromChannels(
+      providerId, 
+      false, // isEnabled: false means delete all
+      { movies: [], tvshows: [], live: [] } // No enabled categories
+    );
   }
   
   // Handle Movies/TV Shows addition
@@ -275,7 +316,9 @@ async _removeProviderFromTitles(providerId, isEnabled, enabledCategories, delete
 
 **Update `execute()` Method:**
 
-Only fetch metadata for enabled media types:
+Process all enabled providers, but only fetch metadata for enabled media types per provider:
+
+**Note:** The job processes all enabled providers (doesn't skip providers), but only fetches the media types that are enabled for each provider. If a provider has both movies and tvshows disabled, it will still be processed but will return 0 for both counts.
 
 ```javascript
 async execute() {
@@ -288,8 +331,11 @@ async execute() {
         this.logger.info(`Fetching metadata from provider ${providerId}...`);
         
         // Get sync_media_types from provider config
+        // Default to true for v1 providers (backward compatibility during migration)
         const syncTypes = handler.providerData.sync_media_types || { 
-          movies: false, tvshows: false, live: false 
+          movies: true,  // Default true for v1 providers
+          tvshows: true,
+          live: true
         };
         
         // Build fetch promises based on enabled types
@@ -346,11 +392,19 @@ async execute() {
 }
 ```
 
+**Note on SyncProviderDetailsJob:**
+- `SyncProviderDetailsJob` is NOT affected by `sync_media_types`
+- It syncs provider metadata (expiration, connections, etc.), not content
+- It continues to run for all enabled providers regardless of `sync_media_types` settings
+- No changes needed to this job
+
 #### SyncLiveTVJob
 
 **Update `execute()` Method:**
 
 Filter providers to only those with Live TV sync enabled:
+
+**Note:** Providers with `sync_media_types.live === false` are NOT processed at all. The query filter ensures only providers with live TV enabled are included in the sync.
 
 ```javascript
 async execute() {
@@ -389,7 +443,9 @@ async execute() {
 
 **Update Method:**
 
-Only fetch categories for enabled media types:
+Only fetch categories for enabled media types (Movies and TV Shows only - NO Live TV):
+
+**Note:** This method is used for the provider settings UI. Live TV categories are NOT shown in settings - they are extracted automatically from synced channels and managed internally.
 
 ```javascript
 async getCategories(providerId) {
@@ -398,11 +454,15 @@ async getCategories(providerId) {
     const providerData = await this._iptvProviderManager.getProvider(providerId);
     
     // Get sync_media_types
+    // Default to true for v1 providers (backward compatibility during migration)
     const syncTypes = providerData.sync_media_types || { 
-      movies: false, tvshows: false, live: false 
+      movies: true,  // Default true for v1 providers
+      tvshows: true,
+      live: true
     };
     
-    // Fetch categories only for enabled types
+    // Fetch categories only for enabled types (Movies and TV Shows only)
+    // NOTE: Live TV categories are NOT included - they are managed automatically
     const fetchPromises = [];
     
     if (syncTypes.movies) {
@@ -423,32 +483,37 @@ async getCategories(providerId) {
     
     const [moviesCategories, tvshowsCategories] = await Promise.all(fetchPromises);
     
-    // Fetch live categories if enabled
-    let liveCategories = [];
-    if (syncTypes.live) {
-      try {
-        const provider = await this._getProvider(providerId);
-        if (providerData.type === 'xtream' && provider.fetchLiveCategories) {
-          liveCategories = await provider.fetchLiveCategories(providerId);
-        } else if (providerData.type === 'agtv') {
-          const channels = await this._channelManager.findByProvider(providerId);
-          liveCategories = this._extractCategoriesFromChannels(channels);
-        }
-      } catch (error) {
-        this.logger.warn(`Failed to fetch live categories for ${providerId}: ${error.message}`);
-      }
-    }
+    // DO NOT fetch live categories - they are not shown in provider settings
+    // Live TV categories are extracted automatically from synced channels
     
-    // Get enabled categories from provider config
+    // Get enabled categories from provider config (movies and tvshows only)
     const enabledCategories = providerData.enabled_categories || { movies: [], tvshows: [], live: [] };
     const enabledCategoryKeys = new Set([
       ...(enabledCategories.movies || []),
-      ...(enabledCategories.tvshows || []),
-      ...(enabledCategories.live || [])
+      ...(enabledCategories.tvshows || [])
+      // Note: live categories excluded - not shown in UI
     ]);
     
-    // Transform and combine categories
-    // ... rest of existing logic ...
+    // Transform and combine categories (Movies and TV Shows only)
+    const allCategories = [
+      ...moviesCategories.map(cat => ({
+        key: `movies-${cat.category_id}`,
+        type: 'movies',
+        category_id: cat.category_id,
+        category_name: cat.category_name,
+        enabled: enabledCategoryKeys.has(`movies-${cat.category_id}`)
+      })),
+      ...tvshowsCategories.map(cat => ({
+        key: `tvshows-${cat.category_id}`,
+        type: 'tvshows',
+        category_id: cat.category_id,
+        category_name: cat.category_name,
+        enabled: enabledCategoryKeys.has(`tvshows-${cat.category_id}`)
+      }))
+      // Live TV categories NOT included
+    ];
+    
+    return allCategories;
   } catch (error) {
     this.logger.error(`Error getting categories for ${providerId}: ${error.message}`);
     throw new AppError(`Failed to get categories: ${error.message}`, 500);
@@ -456,11 +521,15 @@ async getCategories(providerId) {
 }
 ```
 
+**Important:** The `enabled_categories.live` array exists in the provider config and is managed automatically during channel sync. Users do NOT select Live TV categories in the provider settings.
+
 ### 3. Frontend Changes
 
-#### ProviderDetailsForm.jsx
+#### ProviderDetailsStep.jsx (in ProviderWizard)
 
 **Add Sync Media Types Checkboxes:**
+
+The checkboxes should be added to the `ProviderDetailsStep` component within the wizard flow, after the `enabled` checkbox.
 
 ```jsx
 // Add to formData state
@@ -572,130 +641,66 @@ const handleSubmit = useCallback((e) => {
 }, [formData, onSave]);
 ```
 
-#### SettingsIPTVProviders.jsx
+#### ProviderWizard.jsx
 
-**Update `renderTabs()` Method:**
+**Update Step Logic:**
 
-Conditionally show category tabs based on `sync_media_types`:
+Conditionally include Categories step based on `sync_media_types`:
 
 ```jsx
-const renderTabs = () => {
-  const tabs = [
-    <Tab
-      key="details"
-      value="details"
-      label="Details"
-      sx={{
-        '&.Mui-selected': {
-          color: 'primary.main',
-        }
-      }}
-    />
-  ];
-
-  if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-    tabs.push(
-      <Tab
-        key="cleanup"
-        value="cleanup"
-        label="Cleanup Rules"
-        sx={{
-          '&.Mui-selected': {
-            color: 'primary.main',
-          }
-        }}
-      />
-    );
-    
-    // Only show Movies tab if movies sync is enabled
-    if (selectedProvider?.sync_media_types?.movies) {
-      tabs.push(
-        <Tab
-          key="movies"
-          value="movies"
-          label="Movies"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />
-      );
-    }
-    
-    // Only show TV Shows tab if tvshows sync is enabled
-    if (selectedProvider?.sync_media_types?.tvshows) {
-      tabs.push(
-        <Tab
-          key="tvshows"
-          value="tvshows"
-          label="TV Shows"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />
-      );
-    }
-  }
-
-  // Ignored Titles tab available for all providers
-  if (!isNewProvider) {
-    tabs.push(
-      <Tab
-        key="ignored"
-        value="ignored"
-        label="Ignored Titles"
-        sx={{
-          '&.Mui-selected': {
-            color: 'primary.main',
-          }
-        }}
-      />
-    );
-  }
-
-  return tabs;
+// In step configuration or step rendering logic
+const shouldShowCategoriesStep = (provider) => {
+  // Only show Categories step if at least one media type (movies or tvshows) is enabled
+  // Note: Live TV categories are NOT shown in settings
+  return provider?.sync_media_types?.movies || provider?.sync_media_types?.tvshows;
 };
+
+// When building steps array or rendering steps:
+const steps = [
+  { component: BasicDetailsStep, ... },
+  { component: ProviderDetailsStep, ... },
+  { component: CleanupRulesStep, ... },
+  // Only show Categories step if at least one media type is enabled
+  ...(shouldShowCategoriesStep(provider) 
+    ? [{ component: CategoriesStep, ... }] 
+    : []),
+  { component: IgnoredTitlesStep, ... }
+];
 ```
 
-**Update `renderTabContent()` Method:**
+#### CategoriesStep.jsx
 
-Add validation to prevent accessing disabled media type tabs:
+**Update Component:**
+
+The `CategoriesStep` component already exists and should:
+- Filter categories to only show `type === 'movies'` or `type === 'tvshows'` (exclude any `type === 'live'` categories)
+- Only display categories for enabled media types based on `sync_media_types`
+- Filter out Live TV categories if they appear in the response
 
 ```jsx
-case 'movies':
-  if (!isNewProvider && 
-      selectedProvider?.type?.toLowerCase() === 'xtream' &&
-      selectedProvider?.sync_media_types?.movies) {
-    return (
-      <ExcludedCategoriesForm
-        provider={selectedProvider}
-        categoryType="movies"
-        categories={categories}
-        loading={loadingCategories}
-        onCategoryUpdate={loadCategories}
-      />
-    );
+// In CategoriesStep component, filter categories:
+const filteredCategories = useMemo(() => {
+  // First, filter out categories that don't have a valid type (movies or tvshows)
+  // Also filter out live categories - they should never appear
+  let filtered = categories.filter(cat => {
+    const type = cat.type;
+    return (type === 'movies' || type === 'tvshows') && type !== 'live';
+  });
+
+  // Filter by enabled sync_media_types
+  if (provider?.sync_media_types) {
+    filtered = filtered.filter(cat => {
+      if (cat.type === 'movies') return provider.sync_media_types.movies;
+      if (cat.type === 'tvshows') return provider.sync_media_types.tvshows;
+      return false;
+    });
   }
-  return null;
-case 'tvshows':
-  if (!isNewProvider && 
-      selectedProvider?.type?.toLowerCase() === 'xtream' &&
-      selectedProvider?.sync_media_types?.tvshows) {
-    return (
-      <ExcludedCategoriesForm
-        provider={selectedProvider}
-        categoryType="tvshows"
-        categories={categories}
-        loading={loadingCategories}
-        onCategoryUpdate={loadCategories}
-      />
-    );
-  }
-  return null;
+
+  // ... rest of existing filtering logic (mediaTypeFilter, searchQuery) ...
+}, [categories, provider?.sync_media_types, mediaTypeFilter, searchQuery]);
 ```
+
+**Note:** The `CategoriesStep` component should only display categories with `type === 'movies'` or `type === 'tvshows'`. Any categories with `type === 'live'` should be filtered out and not shown to the user.
 
 ### 4. API Route Updates
 
@@ -716,19 +721,27 @@ if (providerData.sync_media_types) {
 // Same validation
 ```
 
+**Note:** The `/api/iptv/providers/:provider_id/categories` route already exists and uses `getCategories()`. No changes needed to the route itself - the `getCategories()` method update handles the filtering automatically.
+
 ## Migration Strategy
 
 ### Schema Migration
 
 1. **Update ProviderRepository:**
-   - Add v3 schema definition with `sync_media_types` field
-   - Add transformation function that sets all to `true` for existing providers
-   - Update default schema version to `v3`
+   - Update v2 schema definition to include both `enabled_categories.live` and `sync_media_types` fields
+   - Update transformation function to add both fields when migrating from v1 to v2
+   - Default schema version remains `v2` (already set)
+   - Migration runs automatically when documents are accessed (via BaseRepository schema versioning system)
 
 2. **Migration Execution:**
-   - Migration runs automatically when documents are accessed
-   - All existing providers get `sync_media_types: { movies: true, tvshows: true, live: true }`
-   - New providers default to `{ movies: false, tvshows: false, live: false }`
+   - Automatic migration via BaseRepository schema versioning
+   - All existing v1 providers get both:
+     - `enabled_categories.live: []` (empty array, populated during channel sync)
+     - `sync_media_types: { movies: true, tvshows: true, live: true }` (all enabled by default)
+   - New providers default to:
+     - `enabled_categories.live: []`
+     - `sync_media_types: { movies: false, tvshows: false, live: false }` (set in IPTVProviderManager.createProvider)
+   - Backups created automatically if needed (for configuration collections)
 
 ### Data Migration
 
@@ -776,16 +789,21 @@ if (providerData.sync_media_types) {
 
 3. **Category Display:**
    - Provider with only movies enabled
-   - Verify only Movies tab shown
+   - Verify only Movies categories shown in Categories step
    - Enable TV Shows
-   - Verify TV Shows tab appears
+   - Verify TV Shows categories appear in Categories step
+   - Verify Live TV categories are never shown in Categories step
 
 ### Edge Cases
 
 1. **Provider with no media types enabled:**
+   - This is a **valid situation** - provider can exist with all media types disabled
    - Should not crash
-   - Should skip provider in all sync jobs
-   - Should show no category tabs
+   - Provider is still considered "enabled" (can be enabled/disabled separately from media types)
+   - `SyncIPTVProviderTitlesJob` will process provider but return 0 for both movies and tvshows (no API calls made)
+   - `SyncLiveTVJob` will skip provider entirely (filtered by query - not processed)
+   - Should not show Categories step in wizard
+   - Optional UX improvement: Show a warning message in UI that no media types are enabled
 
 2. **Partial media type changes:**
    - Disable movies, keep TV Shows
@@ -800,16 +818,16 @@ if (providerData.sync_media_types) {
 ## Rollout Plan
 
 ### Phase 1: Backend Implementation
-1. Update ProviderRepository schema (v3)
-2. Update IPTVProviderManager validation
+1. Update ProviderRepository v2 schema (add both `enabled_categories.live` and `sync_media_types`)
+2. Update IPTVProviderManager validation and defaults
 3. Update ProvidersManager.updateProvider() logic
 4. Update sync jobs to respect sync_media_types
-5. Update ProvidersManager.getCategories()
+5. Update ProvidersManager.getCategories() (exclude Live TV categories)
 
 ### Phase 2: Frontend Implementation
-1. Update ProviderDetailsForm with checkboxes
-2. Update SettingsIPTVProviders with conditional tabs
-3. Update category loading logic
+1. Update ProviderDetailsStep with sync_media_types checkboxes
+2. Update ProviderWizard to conditionally show Categories step
+3. Update CategoriesStep to filter by sync_media_types and exclude Live TV categories
 
 ### Phase 3: Testing
 1. Unit tests for all changes
@@ -832,6 +850,7 @@ if (providerData.sync_media_types) {
 ### API Compatibility
 - API endpoints accept `sync_media_types` but don't require it
 - Missing `sync_media_types` defaults to all `false` for new providers
+- For v1 providers (during migration), `getCategories()` defaults to all `true` for backward compatibility
 - Existing API calls continue to work
 
 ### Data Compatibility
