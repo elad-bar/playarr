@@ -254,28 +254,14 @@ class ProvidersManager extends BaseManager {
         deletedProviderTitles = await this._providerTitleRepo.deleteManyByQuery(query);
       }
 
-      // Step 4: Remove provider sources from titles.media[].sources using MongoDB $pull with arrayFilters
-      const collection = this._titleRepo.db.collection(this._titleRepo.collectionName);
-      const pullResult = await collection.updateMany(
-        { title_key: { $in: titleKeys } },
-        { $pull: { 'media.$[elem].sources': { provider_id: providerId } } },
-        { arrayFilters: [{ 'elem.sources': { $exists: true } }] }
-      );
+      // Step 4: Remove provider sources from titles.media[].sources using repository method
+      const pullResult = await this._titleRepo.removeProviderSourcesFromTitles(titleKeys, providerId);
 
-      // Step 5: Remove empty media items (media items with no sources)
-      await collection.updateMany(
-        { title_key: { $in: titleKeys } },
-        { $pull: { media: { sources: { $size: 0 } } } }
-      );
+      // Step 5: Remove empty media items (media items with no sources) using repository method
+      await this._titleRepo.removeEmptyMediaItems(titleKeys);
 
-      // Step 6: Delete titles that have no media items left
-      const deleteResult = await collection.deleteMany({
-        title_key: { $in: titleKeys },
-        $or: [
-          { media: { $size: 0 } },
-          { media: { $exists: false } }
-        ]
-      });
+      // Step 6: Delete titles that have no media items left using repository method
+      const deleteResult = await this._titleRepo.deleteEmptyTitles(titleKeys);
 
       return {
         titlesUpdated: pullResult.modifiedCount || 0,

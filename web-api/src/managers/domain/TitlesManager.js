@@ -599,6 +599,34 @@ class TitlesManager extends BaseDomainManager {
   }
 
   /**
+   * Remove provider sources from all media items in specified titles
+   * @param {Array<string>} titleKeys - Array of title_key values
+   * @param {string} providerId - Provider ID to remove
+   * @returns {Promise<import('mongodb').UpdateResult>} Update result
+   */
+  async removeProviderSourcesFromTitles(titleKeys, providerId) {
+    return await this._repository.removeProviderSourcesFromTitles(titleKeys, providerId);
+  }
+
+  /**
+   * Remove empty media items (media items with no sources) from specified titles
+   * @param {Array<string>} titleKeys - Array of title_key values
+   * @returns {Promise<import('mongodb').UpdateResult>} Update result
+   */
+  async removeEmptyMediaItems(titleKeys) {
+    return await this._repository.removeEmptyMediaItems(titleKeys);
+  }
+
+  /**
+   * Delete titles that have no media items left
+   * @param {Array<string>} titleKeys - Array of title_key values to check
+   * @returns {Promise<import('mongodb').DeleteResult>} Delete result
+   */
+  async deleteEmptyTitles(titleKeys) {
+    return await this._repository.deleteEmptyTitles(titleKeys);
+  }
+
+  /**
    * Save main titles (bulk upsert)
    * Used by processing managers to save titles from TMDB
    * @param {Array<Object>} titles - Array of title objects

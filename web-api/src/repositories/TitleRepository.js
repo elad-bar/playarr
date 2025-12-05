@@ -191,5 +191,46 @@ export class TitleRepository extends BaseRepository {
       }
     );
   }
+
+  /**
+   * Remove provider sources from all media items in specified titles
+   * @param {Array<string>} titleKeys - Array of title_key values
+   * @param {string} providerId - Provider ID to remove
+   * @returns {Promise<import('mongodb').UpdateResult>} Update result
+   */
+  async removeProviderSourcesFromTitles(titleKeys, providerId) {
+    return await this.updateMany(
+      { title_key: { $in: titleKeys } },
+      { $pull: { 'media.$[elem].sources': { provider_id: providerId } } },
+      { arrayFilters: [{ 'elem.sources': { $exists: true } }] }
+    );
+  }
+
+  /**
+   * Remove empty media items (media items with no sources) from specified titles
+   * @param {Array<string>} titleKeys - Array of title_key values
+   * @returns {Promise<import('mongodb').UpdateResult>} Update result
+   */
+  async removeEmptyMediaItems(titleKeys) {
+    return await this.updateMany(
+      { title_key: { $in: titleKeys } },
+      { $pull: { media: { sources: { $size: 0 } } } }
+    );
+  }
+
+  /**
+   * Delete titles that have no media items left
+   * @param {Array<string>} titleKeys - Array of title_key values to check
+   * @returns {Promise<import('mongodb').DeleteResult>} Delete result
+   */
+  async deleteEmptyTitles(titleKeys) {
+    return await this.deleteMany({
+      title_key: { $in: titleKeys },
+      $or: [
+        { media: { $size: 0 } },
+        { media: { $exists: false } }
+      ]
+    });
+  }
 }
 

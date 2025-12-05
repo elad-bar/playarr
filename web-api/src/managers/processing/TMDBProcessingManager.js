@@ -498,22 +498,6 @@ export class TMDBProcessingManager extends BaseProcessingManager {
   }
 
   /**
-   * Cleanup title streams from title_streams collection
-   * @private
-   * @param {Array<string>} titleKeys - Array of title_key values
-   * @returns {Promise<void>}
-   */
-  async _cleanupTitleStreams(titleKeys) {
-    if (!titleKeys || titleKeys.length === 0) {
-      return;
-    }
-    
-    // Title streams are now embedded in titles.media, so no separate cleanup needed
-    // Media cleanup is handled by ProvidersManager when providers are removed
-    this.logger.debug(`Skipping title streams cleanup - media is now embedded in titles`);
-  }
-
-  /**
    * Process main titles: generate, enrich similar, and generate streams
    * Orchestrates the complete main title processing workflow after TMDB ID matching
    * @param {Map<string, Array<Object>>} providerTitlesByProvider - Map of providerId -> titles array
@@ -602,17 +586,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       this.logger.info(`Deleted ${formatNumber(deleteResult.deletedCount || 0)} main titles`);
     }
 
-    // Step 2: Cleanup title streams for both delete and update title keys
-    const titleKeysToCleanup = [
-      ...to_delete.map(t => generateTitleKey(t.type, t.tmdb_id)),
-      ...to_update.map(t => generateTitleKey(t.type, t.tmdb_id))
-    ];
-    
-    if (titleKeysToCleanup.length > 0) {
-      await this._cleanupTitleStreams(titleKeysToCleanup);
-    }
-
-    // Step 3: Process updates and creates (they use the same logic - rebuild streams)
+    // Step 2: Process updates and creates (they use the same logic - rebuild streams)
     const toProcess = [...to_update, ...to_create];
     if (toProcess.length > 0) {
       // Fetch FULL provider titles for titles that need processing
@@ -685,6 +659,80 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       await this.enrichSimilarTitles();
       return { movies: 0, tvShows: 0 };
     }
+  }
+
+  /**
+   * Cleanup outdated main titles by removing sources from disabled/deleted providers
+   * @param {Array<Object>} disabledProviders - Array of disabled/deleted provider objects
+   * @returns {Promise<Object>} Cleanup statistics
+   */
+  async cleanupOutdatedMainTitles(disabledProviders) {
+    if (!disabledProviders || disabledProviders.length === 0) {
+      this.logger.debug('No disabled/deleted providers to cleanup');
+      return {
+        providersProcessed: 0,
+        titlesUpdated: 0,
+        mediaItemsRemoved: 0,
+        titlesDeleted: 0
+      };
+    }
+
+    let totalTitlesUpdated = 0;
+    let totalMediaItemsRemoved = 0;
+    let totalTitlesDeleted = 0;
+
+    for (const provider of disabledProviders) {
+      const providerId = provider._id || provider.id;
+      if (!providerId) {
+        this.logger.warn(`Skipping provider without ID: ${JSON.stringify(provider)}`);
+        continue;
+      }
+
+      this.logger.info(`Cleaning up sources from disabled/deleted provider: ${providerId}`);
+
+      // Find all titles that have sources from this provider
+      const titlesWithProvider = await this.titlesManager.findTitlesByQuery({
+        'media.sources.provider_id': providerId
+      }, {
+        projection: { title_key: 1 }
+      });
+
+      if (titlesWithProvider.length === 0) {
+        this.logger.debug(`No titles found with sources from provider ${providerId}`);
+        continue;
+      }
+
+      const titleKeys = titlesWithProvider.map(t => t.title_key).filter(Boolean);
+      this.logger.info(`Found ${titleKeys.length} titles with sources from provider ${providerId}`);
+
+      // Step 1: Remove provider sources from titles
+      const pullResult = await this.titlesManager.removeProviderSourcesFromTitles(titleKeys, providerId);
+      const titlesUpdated = pullResult.modifiedCount || 0;
+      totalTitlesUpdated += titlesUpdated;
+      this.logger.info(`Removed sources from ${titlesUpdated} titles for provider ${providerId}`);
+
+      // Step 2: Remove empty media items
+      const mediaResult = await this.titlesManager.removeEmptyMediaItems(titleKeys);
+      const mediaItemsRemoved = mediaResult.modifiedCount || 0;
+      totalMediaItemsRemoved += mediaItemsRemoved;
+      this.logger.info(`Removed ${mediaItemsRemoved} empty media items for provider ${providerId}`);
+
+      // Step 3: Delete titles with no media items left
+      const deleteResult = await this.titlesManager.deleteEmptyTitles(titleKeys);
+      const titlesDeleted = deleteResult.deletedCount || 0;
+      totalTitlesDeleted += titlesDeleted;
+      this.logger.info(`Deleted ${titlesDeleted} empty titles for provider ${providerId}`);
+    }
+
+    const stats = {
+      providersProcessed: disabledProviders.length,
+      titlesUpdated: totalTitlesUpdated,
+      mediaItemsRemoved: totalMediaItemsRemoved,
+      titlesDeleted: totalTitlesDeleted
+    };
+
+    this.logger.info(`Cleanup completed: ${JSON.stringify(stats)}`);
+    return stats;
   }
 
   /**
