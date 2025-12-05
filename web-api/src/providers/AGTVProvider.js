@@ -7,6 +7,13 @@ import path from 'path';
  * @extends {BaseIPTVProvider}
  */
 export class AGTVProvider extends BaseIPTVProvider {
+  /**
+   * @param {Object<string, Object>} providerConfigs - Map of provider ID to provider configuration
+   * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
+   */
+  constructor(providerConfigs = {}, cacheDir = null) {
+    super('AGTVProvider', providerConfigs, cacheDir);
+  }
 
   /**
    * Authenticate with AGTV provider and get account details

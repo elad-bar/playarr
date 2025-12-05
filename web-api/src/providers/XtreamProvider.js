@@ -8,6 +8,14 @@ import path from 'path';
  */
 export class XtreamProvider extends BaseIPTVProvider {
   /**
+   * @param {Object<string, Object>} providerConfigs - Map of provider ID to provider configuration
+   * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
+   */
+  constructor(providerConfigs = {}, cacheDir = null) {
+    super('XtreamProvider', providerConfigs, cacheDir);
+  }
+
+  /**
    * Xtream type configuration mapping
    * @private
    * @type {Object<string, Object>}

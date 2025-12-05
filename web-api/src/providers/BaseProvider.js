@@ -10,11 +10,11 @@ import path from 'path';
  */
 export class BaseProvider {
   /**
-   * @param {string} [loggerName] - Optional logger name (defaults to class name)
+   * @param {string} loggerName - Logger name (required)
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
    */
-  constructor(loggerName = null, cacheDir = null) {
-    this.logger = createLogger(loggerName || this.constructor.name);
+  constructor(loggerName, cacheDir = null) {
+    this.logger = createLogger(loggerName);
     
     // Rate limiters per providerId: Map<providerId, Bottleneck>
     // Used by IPTV providers that need per-provider limiters
