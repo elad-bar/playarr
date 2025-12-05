@@ -39,7 +39,7 @@ Playarr solves the problem of managing content from multiple IPTV providers by:
 Playarr supports a wide variety of media clients through different protocols:
 
 - **Stremio Addon**: Use Playarr as a Stremio addon to access all your movies and TV shows directly in Stremio
-  - Live TV channels are also available if configured
+  - Live TV channels are automatically synced from your IPTV providers
   - Seamless streaming with automatic source selection
 
 - **M3U8 Playlist Support**: Generate M3U8 playlists for movies and TV shows

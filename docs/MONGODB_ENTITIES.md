@@ -201,7 +201,7 @@ The `iptv_providers` collection stores IPTV provider configurations and settings
   cleanup: Object,                   // Regex patterns for title cleanup (optional)
   ignored_titles: Object,            // Titles to ignore (optional)
   api_rate: Object,                  // Rate limiting configuration: { concurrent: Number, duration_seconds: Number }
-  enabled_categories: Object,       // Enabled categories: { movies: Array, tvshows: Array }
+  enabled_categories: Object,       // Enabled categories: { movies: Array, tvshows: Array, live: Array }
   deleted: Boolean,                  // Soft delete flag (optional)
   createdAt: ISODate,                // Document creation timestamp
   lastUpdated: ISODate               // Last update timestamp
@@ -225,6 +225,14 @@ The `iptv_providers` collection stores IPTV provider configurations and settings
 - **Related to `titles`**: 
   - `id` → `titles.media[].sources[].provider_id` (one-to-many via embedded media array)
   - Provider streams are embedded in titles.media array
+
+- **Related to `channels`**: 
+  - `id` → `channels.provider_id` (one-to-many)
+  - Provider has many channels
+
+- **Related to `programs`**: 
+  - `id` → `programs.provider_id` (one-to-many)
+  - Provider has many programs
 
 ---
 
@@ -381,27 +389,30 @@ The `job_history` collection tracks job execution history and status for engine 
 
 ### Purpose
 
-The `channels` collection stores Live TV channel information per user. Each user can have their own set of Live TV channels configured via M3U playlist.
+The `channels` collection stores Live TV channel information per provider. Channels are automatically synced from active IPTV providers (AGTV and Xtream) and made available to all users. This centralizes channel management and eliminates the need for per-user Live TV configuration.
 
 **Key Features:**
-- Stores channel information per user
+- Stores channel information per provider (not per user)
 - Contains channel metadata (name, logo, group, stream URL)
 - Used for Live TV streaming and EPG display
 - Supports Stremio Live TV integration
+- Channels are automatically synced from providers via scheduled jobs
 
 ### Structure
 
 ```javascript
 {
   _id: ObjectId,                     // MongoDB auto-generated ID
-  username: String,                  // Username (references users.username)
-  channel_id: String,                // Unique channel identifier
+  provider_id: String,               // Provider identifier (references iptv_providers.id)
+  channel_id: String,                // Unique channel identifier (within provider)
+  channel_key: String,                // Unique key per provider (format: "live-{providerId}-{channelId}")
   name: String,                      // Channel name
   url: String,                      // Stream URL
   tvg_id: String,                    // TV Guide ID (optional)
   tvg_name: String,                  // TV Guide name (optional)
   tvg_logo: String,                  // Channel logo URL (optional)
   group_title: String,               // Channel group/category (optional)
+  category_id: Number,               // Category ID for Xtream providers (optional)
   duration: Number,                 // Stream duration (-1 for live)
   createdAt: ISODate,                // Document creation timestamp
   lastUpdated: ISODate               // Last update timestamp
@@ -412,18 +423,23 @@ The `channels` collection stores Live TV channel information per user. Each user
 
 | Index Fields | Type | Options | Purpose | Query Patterns |
 |--------------|------|---------|---------|----------------|
-| `{ username: 1, channel_id: 1 }` | Unique Compound | `unique: true` | Primary lookup (unique compound key). Ensures one channel per user per channel_id. | `findOne({ username: "user1", channel_id: "channel123" })` |
-| `{ username: 1 }` | Standard | - | User channels lookup. Finds all channels for a specific user. | `find({ username: "user1" })` |
+| `{ provider_id: 1, channel_id: 1 }` | Unique Compound | `unique: true` | Primary lookup (unique compound key). Ensures one channel per provider per channel_id. | `findOne({ provider_id: "agtv", channel_id: "channel123" })` |
+| `{ provider_id: 1 }` | Standard | - | Provider channels lookup. Finds all channels for a specific provider. | `find({ provider_id: "agtv" })` |
+| `{ channel_key: 1 }` | Standard | - | Channel key lookup (for watchlist queries). Enables fast lookup by channel_key for watchlist filtering. | `find({ channel_key: "live-agtv-channel123" })` |
 
 ### Relationships
 
-- **Related to `users`**: 
-  - `username` → `users.username` (many-to-one)
-  - User has many channels
+- **Related to `iptv_providers`**: 
+  - `provider_id` → `iptv_providers.id` (many-to-one)
+  - Provider has many channels
 
 - **Related to `programs`**: 
-  - `username` + `channel_id` → `programs.username` + `programs.channel_id` (one-to-many)
+  - `provider_id` + `channel_id` → `programs.provider_id` + `programs.channel_id` (one-to-many)
   - Channel has many programs
+
+- **Related to `users`**: 
+  - `channel_key` referenced in `users.watchlist.live` array (many-to-many via array)
+  - Users can add channels to their watchlist
 
 ---
 
@@ -431,20 +447,21 @@ The `channels` collection stores Live TV channel information per user. Each user
 
 ### Purpose
 
-The `programs` collection stores EPG (Electronic Program Guide) program information per user and channel. This enables displaying what's currently playing and upcoming programs for Live TV channels.
+The `programs` collection stores EPG (Electronic Program Guide) program information per provider and channel. This enables displaying what's currently playing and upcoming programs for Live TV channels. Programs are automatically synced from provider EPG sources.
 
 **Key Features:**
-- Stores program schedule per user and channel
+- Stores program schedule per provider and channel (not per user)
 - Contains program metadata (title, description, start/stop times)
 - Used for EPG display in clients
 - Supports Stremio Live TV EPG integration
+- Programs are automatically synced from providers via scheduled jobs
 
 ### Structure
 
 ```javascript
 {
   _id: ObjectId,                     // MongoDB auto-generated ID
-  username: String,                  // Username (references users.username)
+  provider_id: String,               // Provider identifier (references iptv_providers.id)
   channel_id: String,                // Channel identifier (references channels.channel_id)
   start: ISODate,                    // Program start time
   stop: ISODate,                     // Program end time
@@ -462,18 +479,17 @@ The `programs` collection stores EPG (Electronic Program Guide) program informat
 
 | Index Fields | Type | Options | Purpose | Query Patterns |
 |--------------|------|---------|---------|----------------|
-| `{ username: 1, channel_id: 1, start: 1, stop: 1 }` | Unique Compound | `unique: true` | Primary lookup (unique compound key). Ensures one program per user per channel per time slot. | `findOne({ username: "user1", channel_id: "channel123", start: date1, stop: date2 })` |
-| `{ username: 1, channel_id: 1 }` | Compound | - | User channel programs lookup. Finds all programs for a specific user and channel. | `find({ username: "user1", channel_id: "channel123" })` |
-| `{ username: 1, channel_id: 1, start: 1 }` | Compound | - | Time range queries with sort by start time. Enables efficient time-based queries and sorting. | `find({ username: "user1", channel_id: "channel123", start: { $gte: date } }).sort({ start: 1 })` |
+| `{ provider_id: 1, channel_id: 1, start: 1, stop: 1 }` | Unique Compound | `unique: true` | Primary lookup (unique compound key). Ensures one program per provider per channel per time slot. | `findOne({ provider_id: "agtv", channel_id: "channel123", start: date1, stop: date2 })` |
+| `{ provider_id: 1, channel_id: 1 }` | Compound | - | Provider channel programs lookup. Finds all programs for a specific provider and channel. | `find({ provider_id: "agtv", channel_id: "channel123" })` |
 
 ### Relationships
 
-- **Related to `users`**: 
-  - `username` → `users.username` (many-to-one)
-  - User has many programs
+- **Related to `iptv_providers`**: 
+  - `provider_id` → `iptv_providers.id` (many-to-one)
+  - Provider has many programs
 
 - **Related to `channels`**: 
-  - `username` + `channel_id` → `channels.username` + `channels.channel_id` (many-to-one)
+  - `provider_id` + `channel_id` → `channels.provider_id` + `channels.channel_id` (many-to-one)
   - Channel has many programs
 
 ---
@@ -524,11 +540,10 @@ titles (1) ──< (many) users.watchlist.movies, users.watchlist.tvshows (via a
 channels (1) ──< (many) users.watchlist.live (via array)
 
 iptv_providers (1) ──< (many) provider_titles
+iptv_providers (1) ──< (many) channels
+iptv_providers (1) ──< (many) programs
 
-users (1) ──< (many) channels
-users (1) ──< (many) programs
-
-channels (1) ──< (many) programs
+channels (1) ──< (many) programs (via provider_id + channel_id)
 ```
 
 ### Key Design Decisions
@@ -537,7 +552,7 @@ channels (1) ──< (many) programs
 
 2. **Title Key as Foreign Key**: `title_key` is used consistently across collections (`titles`, `provider_titles`, `users.watchlist.movies`, `users.watchlist.tvshows`) as the primary relationship key.
 
-3. **Per-User Live TV**: Channels and programs are stored per user, allowing each user to have their own Live TV configuration.
+3. **Provider-Based Live TV**: Channels and programs are stored per provider, automatically synced from active IPTV providers. All users access the same provider-sourced channels, with personal watchlists for filtering.
 
 4. **Soft Delete for Providers**: Providers use a `deleted` flag for soft deletion, allowing data retention while hiding providers from active use.
 
@@ -551,8 +566,8 @@ channels (1) ──< (many) programs
 - `users.api_key`: Ensures unique API keys (sparse)
 - `iptv_providers.id`: Ensures unique provider IDs
 - `provider_titles.provider_id + title_key`: Ensures unique provider title per provider
-- `channels.username + channel_id`: Ensures unique channel per user
-- `programs.username + channel_id + start + stop`: Ensures unique program per time slot
+- `channels.provider_id + channel_id`: Ensures unique channel per provider
+- `programs.provider_id + channel_id + start + stop`: Ensures unique program per time slot
 
 ### Compound Indexes
 Used for common query patterns:
@@ -587,6 +602,7 @@ Used for common query patterns:
 - All collections include `createdAt` and `lastUpdated` timestamps (except `stats` which only has `lastUpdated`)
 - Timestamps are stored as MongoDB Date objects (ISODate) for efficient date range queries
 - The `title_key` format is consistent: `"{type}-{tmdbId}"` (e.g., `"movies-12345"`, `"tvshows-67890"`)
+- The `channel_key` format is consistent: `"live-{providerId}-{channelId}"` (e.g., `"live-agtv-channel123"`)
 - Indexes are automatically created on application startup
 - All indexes support efficient querying and are optimized for common access patterns
 
