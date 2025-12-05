@@ -46,6 +46,25 @@ export const fetchIPTVProviderCategories = async (providerId) => {
   return response.data;
 };
 
+export const validateIPTVProviderCredentials = async (api_url, username, password, type) => {
+  try {
+    const response = await axiosInstance.post(API_ENDPOINTS.providerValidate, {
+      api_url,
+      username,
+      password,
+      type
+    });
+    return response.data;
+  } catch (error) {
+    // Handle network errors or unexpected errors
+    return {
+      success: false,
+      valid: false,
+      error: error.response?.data?.error || error.message || 'Failed to validate credentials'
+    };
+  }
+};
+
 export const checkIPTVProviderStatus = async (providerId) => {
   const response = await axiosInstance.get(API_ENDPOINTS.providerStatus(providerId));
   return response.data;

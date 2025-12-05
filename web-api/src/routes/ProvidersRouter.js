@@ -1,4 +1,6 @@
 import BaseRouter from './BaseRouter.js';
+import { XtreamProvider } from '../providers/XtreamProvider.js';
+import { AGTVProvider } from '../providers/AGTVProvider.js';
 
 /**
  * Providers router for handling IPTV provider endpoints
@@ -80,6 +82,72 @@ class ProvidersRouter extends BaseRouter {
         return res.status(200).json(result);
       } catch (error) {
         return this.handleError(res, error, 'Failed to update provider priorities');
+      }
+    });
+
+    /**
+     * POST /api/iptv/providers/validate
+     * Validate IPTV provider credentials without creating a provider
+     */
+    this.router.post('/validate', this.middleware.requireAuth, async (req, res) => {
+      try {
+        const { api_url, username, password, type } = req.body;
+
+        // Validate required fields
+        if (!api_url || !username || !password || !type) {
+          return res.status(200).json({
+            success: false,
+            valid: false,
+            error: 'Missing required fields: api_url, username, password, and type are required'
+          });
+        }
+
+        // Validate type
+        const providerType = type.toLowerCase();
+        if (providerType !== 'xtream' && providerType !== 'agtv') {
+          return res.status(200).json({
+            success: false,
+            valid: false,
+            error: 'Invalid provider type. Must be "xtream" or "agtv"'
+          });
+        }
+
+        // Create temporary provider config
+        const tempProviderConfig = {
+          temp: {
+            id: 'temp',
+            api_url,
+            username,
+            password,
+            type: providerType,
+            enabled: true,
+            deleted: false
+          }
+        };
+
+        // Create temporary provider instance
+        let provider;
+        if (providerType === 'xtream') {
+          provider = new XtreamProvider(tempProviderConfig);
+        } else {
+          provider = new AGTVProvider(tempProviderConfig);
+        }
+
+        // Attempt authentication
+        const providerDetails = await provider.authenticate('temp');
+
+        return res.status(200).json({
+          success: true,
+          valid: true,
+          provider_details: providerDetails
+        });
+      } catch (error) {
+        // Return error response (200 status with success: false)
+        return res.status(200).json({
+          success: false,
+          valid: false,
+          error: error.message || 'Invalid credentials'
+        });
       }
     });
 

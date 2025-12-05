@@ -209,9 +209,6 @@ const SettingsLogger = () => {
     <Box sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box>
-          <Typography variant="h6" gutterBottom>
-            Application Logs
-          </Typography>
           <Typography variant="body2" color="text.secondary">
             Real-time logs from the current application run (max {MAX_LINES} lines)
           </Typography>

@@ -47,6 +47,7 @@ export const API_ENDPOINTS = {
 
     // Providers endpoints
     providers: `/iptv/providers`,
+    providerValidate: `/iptv/providers/validate`,
     providerCategories: (providerId) => `/iptv/providers/${providerId}/categories`,
     providerStatus: (providerId) => `/iptv/providers/${providerId}/status`,
     providerIgnoredTitles: (providerId) => `/iptv/providers/${providerId}/ignored`,

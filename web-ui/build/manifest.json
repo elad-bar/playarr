@@ -1,6 +1,6 @@
 {
-  "short_name": "IPTV Stream Manager",
-  "name": "IPTV Stream Manager",
+  "short_name": "Playarr",
+  "name": "Playarr",
   "icons": [],
   "start_url": ".",
   "display": "standalone",

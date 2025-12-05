@@ -7,7 +7,8 @@ import {
     Alert,
     IconButton,
     Tooltip,
-    Grid
+    Grid,
+    Divider
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import axiosInstance from '../../config/axios';
@@ -137,6 +138,7 @@ const JobCard = ({ job }) => {
                 <Typography variant="h6" gutterBottom>
                     {job.name}
                 </Typography>
+                <Divider sx={{ mb: 2 }} />
                 <Typography variant="body2" color="text.secondary" paragraph>
                     {job.description}
                 </Typography>
@@ -297,10 +299,7 @@ const SettingsJobs = () => {
 
     return (
         <Box sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                    Engine Jobs
-                </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 2 }}>
                 <Tooltip title="Refresh">
                     <span>
                         <IconButton 

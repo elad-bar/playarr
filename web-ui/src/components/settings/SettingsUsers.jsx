@@ -149,7 +149,7 @@ const SettingsUsers = () => {
   }
 
   return (
-    <Box>
+    <Box sx={{ p: 3 }}>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
@@ -163,8 +163,6 @@ const SettingsUsers = () => {
       )}
 
       <Box>
-        <Typography variant="h6" sx={{ mb: 3 }}>User Management</Typography>
-
         <Grid container spacing={3}>
           {/* Add New User Card */}
           <Grid item xs={12} sm={6} md={4} lg={3}>

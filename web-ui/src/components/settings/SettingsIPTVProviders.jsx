@@ -10,24 +10,16 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  Tabs,
-  Tab,
 } from '@mui/material';
 import {
   fetchIPTVProviders,
-  saveIPTVProvider,
   deleteIPTVProvider,
-  fetchIPTVProviderCategories
 } from './iptv/utils';
-import ProviderDetailsForm from './iptv/ProviderDetailsForm';
-import CleanupRulesForm from './iptv/CleanupRulesForm';
-import ExcludedCategoriesForm from './iptv/ExcludedCategoriesForm';
-import IgnoredTitlesForm from './iptv/IgnoredTitlesForm';
+import ProviderWizard from './iptv/ProviderWizard';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloseIcon from '@mui/icons-material/Close';
-import SaveIcon from '@mui/icons-material/Save';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 
@@ -39,9 +31,6 @@ function SettingsIPTVProviders() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('details');
-  const [categories, setCategories] = useState(null);
-  const [loadingCategories, setLoadingCategories] = useState(false);
 
   const loadProviders = useCallback(async () => {
     try {
@@ -57,49 +46,19 @@ function SettingsIPTVProviders() {
     }
   }, []);
 
-  const loadCategories = useCallback(async (providerId) => {
-    if (!providerId) return;
-
-    try {
-      setLoadingCategories(true);
-      const data = await fetchIPTVProviderCategories(providerId);
-      setCategories(data);
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-      setError('Failed to load categories');
-    } finally {
-      setLoadingCategories(false);
-    }
-  }, []);
-
   useEffect(() => {
     loadProviders();
   }, [loadProviders]);
 
-  useEffect(() => {
-    // Load categories when a non-new Xtream provider is selected
-    if (selectedProvider?.id && !isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-      loadCategories(selectedProvider.id);
-    } else {
-      setCategories(null);
-    }
-  }, [selectedProvider?.id, isNewProvider, selectedProvider?.type, loadCategories]);
-
   const handleEdit = (provider) => {
     setSelectedProvider(provider);
     setIsNewProvider(false);
-    setActiveTab('details');
     setDialogOpen(true);
   };
 
   const handleAdd = () => {
-    setSelectedProvider({
-      type: 'xtream',
-      enabled: true,
-      cleanup: {}
-    });
+    setSelectedProvider(null);
     setIsNewProvider(true);
-    setActiveTab('details');
     setDialogOpen(true);
   };
 
@@ -107,8 +66,6 @@ function SettingsIPTVProviders() {
     setDialogOpen(false);
     setSelectedProvider(null);
     setIsNewProvider(false);
-    setActiveTab('details');
-    setCategories(null);
   };
 
   const handleDelete = async (providerId) => {
@@ -126,13 +83,12 @@ function SettingsIPTVProviders() {
     }
   };
 
-  const handleSave = async (providerData) => {
+  const handleSave = async (savedProvider) => {
     try {
-      const savedProvider = await saveIPTVProvider(providerData, isNewProvider);
       setSuccess(isNewProvider ? 'Provider added successfully' : 'Provider updated successfully');
       setTimeout(() => setSuccess(null), 3000);
 
-      // Update local state instead of making another API call
+      // Update local state
       if (isNewProvider) {
         setProviders(prevProviders => [...prevProviders, savedProvider]);
       } else {
@@ -143,7 +99,6 @@ function SettingsIPTVProviders() {
 
       setSelectedProvider(savedProvider);
       setIsNewProvider(false);
-      handleCloseDialog();
 
       // Reload providers to get fresh data
       loadProviders();
@@ -153,178 +108,28 @@ function SettingsIPTVProviders() {
     }
   };
 
-  const handleSaveFromHeader = () => {
-    // Trigger save based on active tab
-    switch (activeTab) {
-      case 'details':
-        if (ProviderDetailsForm.saveHandler) {
-          ProviderDetailsForm.saveHandler();
-        }
-        break;
-      case 'cleanup':
-        if (CleanupRulesForm.saveHandler) {
-          CleanupRulesForm.saveHandler();
-        }
-        break;
-      case 'movies':
-      case 'tvshows':
-        // ExcludedCategoriesForm - changes are auto-saved, so just close
-        handleCloseDialog();
-        break;
-      case 'ignored':
-        // IgnoredTitlesForm is read-only, so just close
-        handleCloseDialog();
-        break;
-      default:
-        handleCloseDialog();
-    }
-  };
+  const handleSaveAndClose = async (savedProvider) => {
+    try {
+      setSuccess(isNewProvider ? 'Provider added successfully' : 'Provider updated successfully');
+      setTimeout(() => setSuccess(null), 3000);
 
-  // Removed handleDragEnd - priority support removed
-
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
-  };
-
-  const renderTabs = () => {
-    const tabs = [
-      <Tab
-        key="details"
-        value="details"
-        label="Details"
-        sx={{
-          '&.Mui-selected': {
-            color: 'primary.main',
-          }
-        }}
-      />
-    ];
-
-    if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-      tabs.push(
-        <Tab
-          key="cleanup"
-          value="cleanup"
-          label="Cleanup Rules"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />,
-        <Tab
-          key="movies"
-          value="movies"
-          label="Movies"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />,
-        <Tab
-          key="tvshows"
-          value="tvshows"
-          label="TV Shows"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />
-      );
-    }
-
-    // Ignored Titles tab available for all providers (not just Xtream)
-    if (!isNewProvider) {
-      tabs.push(
-        <Tab
-          key="ignored"
-          value="ignored"
-          label="Ignored Titles"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />
-      );
-    }
-
-    return tabs;
-  };
-
-  const renderTabContent = () => {
-    if (!selectedProvider) {
-      return (
-        <Box sx={{ p: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            IPTV Provider Management
-          </Typography>
-          <Typography color="textSecondary">
-            Select a provider from the list or add a new one to manage IPTV configurations.
-          </Typography>
-        </Box>
-      );
-    }
-
-    switch (activeTab) {
-      case 'details':
-        return (
-          <ProviderDetailsForm
-            provider={selectedProvider}
-            onSave={handleSave}
-            onCancel={handleCloseDialog}
-          />
+      // Update local state
+      if (isNewProvider) {
+        setProviders(prevProviders => [...prevProviders, savedProvider]);
+      } else {
+        setProviders(prevProviders =>
+          prevProviders.map(p => p.id === savedProvider.id ? savedProvider : p)
         );
-      case 'cleanup':
-        if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-          return (
-            <CleanupRulesForm
-              provider={selectedProvider}
-              onSave={handleSave}
-              onCancel={handleCloseDialog}
-            />
-          );
-        }
-        return null;
-      case 'movies':
-        if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-          return (
-            <ExcludedCategoriesForm
-              provider={selectedProvider}
-              categoryType="movies"
-              categories={categories}
-              loading={loadingCategories}
-              onCategoryUpdate={loadCategories}
-            />
-          );
-        }
-        return null;
-      case 'tvshows':
-        if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-          return (
-            <ExcludedCategoriesForm
-              provider={selectedProvider}
-              categoryType="tvshows"
-              categories={categories}
-              loading={loadingCategories}
-              onCategoryUpdate={loadCategories}
-            />
-          );
-        }
-        return null;
-      case 'ignored':
-        if (!isNewProvider) {
-          return (
-            <IgnoredTitlesForm
-              provider={selectedProvider}
-            />
-          );
-        }
-        return null;
-      default:
-        return null;
+      }
+
+      // Reload providers to get fresh data
+      loadProviders();
+
+      // Close dialog
+      handleCloseDialog();
+    } catch (error) {
+      console.error('Error saving provider:', error);
+      setError('Failed to save provider');
     }
   };
 
@@ -337,7 +142,7 @@ function SettingsIPTVProviders() {
   }
 
   return (
-    <Box>
+    <Box sx={{ p: 3 }}>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
@@ -351,8 +156,6 @@ function SettingsIPTVProviders() {
       )}
 
       <Box>
-        <Typography variant="h6" sx={{ mb: 3 }}>IPTV Provider Management</Typography>
-
         <Grid container spacing={3}>
           {/* Add New Provider Card */}
           <Grid item xs={12} sm={6} md={4} lg={3}>
@@ -473,49 +276,33 @@ function SettingsIPTVProviders() {
         fullWidth
         fullScreen
       >
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6" component="span">
+        <DialogTitle sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          pb: 2,
+          borderBottom: 1,
+          borderColor: 'divider',
+        }}>
+          <Typography variant="h5" component="span" fontWeight={600}>
             {isNewProvider ? 'Add New Provider' : `Edit Provider: ${selectedProvider?.id}`}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            {(activeTab === 'details' || activeTab === 'cleanup') && (
-              <Tooltip title="Save Changes">
-                <IconButton
-                  onClick={handleSaveFromHeader}
-                  color="primary"
-                  size="small"
-                >
-                  <SaveIcon />
-                </IconButton>
-              </Tooltip>
-            )}
-            <Tooltip title="Close">
-              <IconButton
-                onClick={handleCloseDialog}
-                size="small"
-              >
-                <CloseIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          {/* Tabs Header */}
-          <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-            <Tabs
-              value={activeTab}
-              onChange={handleTabChange}
-              variant="scrollable"
-              scrollButtons="auto"
+          <Tooltip title="Close">
+            <IconButton
+              onClick={handleCloseDialog}
+              size="small"
             >
-              {renderTabs()}
-            </Tabs>
-          </Box>
-
-          {/* Tab Content */}
-          <Box sx={{ mt: 2 }}>
-            {renderTabContent()}
-          </Box>
+              <CloseIcon />
+            </IconButton>
+          </Tooltip>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <ProviderWizard
+            provider={selectedProvider}
+            onSave={handleSave}
+            onCancel={handleCloseDialog}
+            onSaveAndClose={handleSaveAndClose}
+          />
         </DialogContent>
       </Dialog>
     </Box>
