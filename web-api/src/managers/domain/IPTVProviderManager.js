@@ -134,7 +134,30 @@ class IPTVProviderManager extends BaseDomainManager {
 
     providerData.streams_urls = urls;
 
+    // For Xtream providers: auto-select first URL as api_url if missing or empty
+    if (providerType === DataProvider.XTREAM && urls.length > 0) {
+      if (!providerData.api_url || providerData.api_url.trim() === '') {
+        providerData.api_url = urls[0];
+      }
+    }
+
     return providerData;
+  }
+
+  /**
+   * Validate that provider has at least one URL
+   * @private
+   * @param {Object} providerData - Provider data
+   * @throws {ValidationError} If no URLs are provided
+   */
+  _validateUrls(providerData) {
+    const streamsUrls = providerData.streams_urls || [];
+    const apiUrl = (providerData.api_url || '').trim();
+    
+    // Check if we have at least one URL in streams_urls or api_url
+    if (streamsUrls.length === 0 && apiUrl === '') {
+      throw new ValidationError('At least one URL must be provided (streams_urls or api_url)');
+    }
   }
 
   /**
@@ -292,6 +315,9 @@ class IPTVProviderManager extends BaseDomainManager {
       // Normalize URLs
       this._normalizeUrls(providerData);
 
+      // Validate URLs after normalization
+      this._validateUrls(providerData);
+
       // Set default values
       if (providerData.enabled === undefined) {
         providerData.enabled = true;
@@ -367,6 +393,16 @@ class IPTVProviderManager extends BaseDomainManager {
 
       // Normalize URLs
       this._normalizeUrls(providerData, existingProvider);
+
+      // Build updated provider to validate (merge with existing)
+      const updatedProviderForValidation = {
+        ...existingProvider,
+        ...providerData,
+        id: providerId
+      };
+
+      // Validate URLs after normalization
+      this._validateUrls(updatedProviderForValidation);
 
       // Update provider data (preserve id and other fields)
       const now = new Date();
