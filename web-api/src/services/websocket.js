@@ -37,14 +37,14 @@ class WebSocketService {
 
     // Default namespace handlers
     this._io.on('connection', (socket) => {
-      logger.info('Socket.IO client connected to default namespace');
+      logger.debug('Socket.IO client connected to default namespace');
       this._handleConnection(this._io, socket);
     });
 
     // API namespace handlers
     this._apiNamespace = this._io.of('/api');
     this._apiNamespace.on('connection', (socket) => {
-      logger.info('Socket.IO client connected to API namespace');
+      logger.debug('Socket.IO client connected to API namespace');
       this._handleConnection(this._apiNamespace, socket);
     });
 

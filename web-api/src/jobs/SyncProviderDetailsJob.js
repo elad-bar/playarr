@@ -75,7 +75,7 @@ export class SyncProviderDetailsJob extends BaseJob {
         return false;
       });
 
-      this.logger.info(`Starting provider details sync for ${formatNumber(providersToProcess.length)} provider(s) (${formatNumber(activeProviders.length)} total active)...`);
+      this.logger.debug(`Starting provider details sync for ${formatNumber(providersToProcess.length)} provider(s) (${formatNumber(activeProviders.length)} total active)...`);
 
       if (providersToProcess.length === 0) {
         this.logger.info('No providers to process. Skipping sync.');

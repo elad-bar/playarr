@@ -170,7 +170,7 @@ export class EngineScheduler {
       throw new Error(`Job "${name}" not found`);
     }
 
-    this.logger.info(`Starting job '${name}'${workerData?.providerId ? ` (providerId: ${workerData.providerId})` : ''}`);
+    this.logger.debug(`Starting job '${name}'${workerData?.providerId ? ` (providerId: ${workerData.providerId})` : ''}`);
 
     try {
       // Execute the job directly (handlers are created fresh in execute() method)
