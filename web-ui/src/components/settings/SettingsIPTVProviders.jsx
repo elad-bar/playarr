@@ -31,6 +31,7 @@ function SettingsIPTVProviders() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [wizardKey, setWizardKey] = useState(0); // Force complete remount on each open
 
   const loadProviders = useCallback(async () => {
     try {
@@ -53,19 +54,24 @@ function SettingsIPTVProviders() {
   const handleEdit = (provider) => {
     setSelectedProvider(provider);
     setIsNewProvider(false);
+    setWizardKey(prev => prev + 1); // Force remount
     setDialogOpen(true);
   };
 
   const handleAdd = () => {
     setSelectedProvider(null);
     setIsNewProvider(true);
+    setWizardKey(prev => prev + 1); // Force remount
     setDialogOpen(true);
   };
 
   const handleCloseDialog = () => {
     setDialogOpen(false);
-    setSelectedProvider(null);
-    setIsNewProvider(false);
+    // Don't reset provider/key immediately - let Dialog close animation complete
+    setTimeout(() => {
+      setSelectedProvider(null);
+      setIsNewProvider(false);
+    }, 100);
   };
 
   const handleDelete = async (providerId) => {
@@ -135,7 +141,7 @@ function SettingsIPTVProviders() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px', p: 3 }}>
         <CircularProgress />
       </Box>
     );
@@ -275,6 +281,17 @@ function SettingsIPTVProviders() {
         maxWidth="lg"
         fullWidth
         fullScreen
+        TransitionProps={{ timeout: 0 }}
+        sx={{
+          // Disable all transitions to prevent ResizeObserver loops
+          '& .MuiDialog-container': {
+            transition: 'none !important',
+          },
+          '& .MuiDialog-paper': {
+            transition: 'none !important',
+            animation: 'none !important',
+          },
+        }}
       >
         <DialogTitle sx={{ 
           display: 'flex', 
@@ -297,12 +314,15 @@ function SettingsIPTVProviders() {
           </Tooltip>
         </DialogTitle>
         <DialogContent sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <ProviderWizard
-            provider={selectedProvider}
-            onSave={handleSave}
-            onCancel={handleCloseDialog}
-            onSaveAndClose={handleSaveAndClose}
-          />
+          {dialogOpen && (
+            <ProviderWizard
+              key={`wizard-${wizardKey}-${selectedProvider?.id || 'new'}`}
+              provider={selectedProvider}
+              onSave={handleSave}
+              onCancel={handleCloseDialog}
+              onSaveAndClose={handleSaveAndClose}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </Box>

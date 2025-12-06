@@ -8,7 +8,7 @@ import {
     IconButton,
     Tooltip,
     Grid,
-    Divider
+    Divider,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import axiosInstance from '../../config/axios';

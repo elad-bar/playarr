@@ -60,17 +60,27 @@ export class ProviderRepository extends BaseRepository {
           enabled_categories: {
             movies: Array,
             tvshows: Array,
-            live: Array // NEW: Live channel categories
+            live: Array // NEW: Live channel categories (managed automatically)
+          },
+          sync_media_types: {  // NEW: Media type sync control
+            movies: Boolean,
+            tvshows: Boolean,
+            live: Boolean
           }
         },
         "transformation": async (doc) => {
           // Transform document from v1 to v2
-          // Add enabled_categories.live if it doesn't exist
+          // Add enabled_categories.live and sync_media_types
           return {
             ...doc,
             enabled_categories: {
               ...doc.enabled_categories,
-              live: doc.enabled_categories?.live || []
+              live: doc.enabled_categories?.live || [] // Empty array, populated during sync
+            },
+            sync_media_types: {
+              movies: true,  // Existing providers: enable all by default
+              tvshows: true,
+              live: true
             }
           };
         }

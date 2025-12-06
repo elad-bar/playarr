@@ -176,9 +176,10 @@ class ProvidersManager extends BaseManager {
    * @param {boolean} isEnabled - Whether provider is enabled
    * @param {Object} enabledCategories - Enabled categories object
    * @param {boolean} [deleteProviderTitles=true] - Whether to delete provider titles (default: true for backward compatibility)
+   * @param {Array<string>} [types] - Optional array of types to filter (e.g., ['movies', 'tvshows'])
    * @returns {Promise<{titlesUpdated: number, streamsRemoved: number, titleKeys: Array, providerTitlesDeleted: number, emptyTitlesDeleted: number}>}
    */
-  async _removeProviderFromTitles(providerId, isEnabled, enabledCategories, deleteProviderTitles = true) {
+  async _removeProviderFromTitles(providerId, isEnabled, enabledCategories, deleteProviderTitles = true, types = null) {
     try {
       if (!enabledCategories || typeof enabledCategories !== 'object') {
         throw new Error('enabledCategories must be provided and must be an object');
@@ -188,6 +189,11 @@ class ProvidersManager extends BaseManager {
         provider_id: providerId,
         tmdb_id: { $exists: true, $ne: null } // Only titles with TMDB match
       };
+
+      // Filter by type if specified
+      if (types && Array.isArray(types) && types.length > 0) {
+        query.type = { $in: types };
+      }
 
       // If provider is disabled/deleted, delete ALL titles
       // If provider is enabled, delete only titles from disabled categories
@@ -439,6 +445,28 @@ class ProvidersManager extends BaseManager {
     const willBeEnabled = providerData.enabled !== false;
     const enabledChanged = wasEnabled !== willBeEnabled;
 
+    // Get existing and new sync_media_types
+    // For existing providers without sync_media_types (v1), default to true (backward compatibility)
+    // For new providers, default to false
+    const existingSyncTypes = existingProvider.sync_media_types || { 
+      movies: true,  // Default true for v1 providers
+      tvshows: true,
+      live: true
+    };
+    // For updates, if not provided, keep existing values (don't default to false)
+    const newSyncTypes = providerData.sync_media_types !== undefined 
+      ? { ...existingSyncTypes, ...providerData.sync_media_types } // Merge with existing
+      : existingSyncTypes; // Keep existing if not provided
+    
+    // Detect changes
+    const moviesRemoved = existingSyncTypes.movies && !newSyncTypes.movies;
+    const tvshowsRemoved = existingSyncTypes.tvshows && !newSyncTypes.tvshows;
+    const liveRemoved = existingSyncTypes.live && !newSyncTypes.live;
+    
+    const moviesAdded = !existingSyncTypes.movies && newSyncTypes.movies;
+    const tvshowsAdded = !existingSyncTypes.tvshows && newSyncTypes.tvshows;
+    const liveAdded = !existingSyncTypes.live && newSyncTypes.live;
+
     // Delegate domain operation to IPTVProviderManager
     const updatedProvider = await this._iptvProviderManager.updateProvider(providerId, providerData);
 
@@ -460,6 +488,67 @@ class ProvidersManager extends BaseManager {
       // Provider being enabled - incremental sync will work automatically since titles are kept
       // Trigger sync job to fetch updates (async, non-blocking)
       this._triggerJobAsync('syncIPTVProviderTitles');
+    }
+
+    // Orchestration: Handle Movies/TV Shows removal
+    if (moviesRemoved || tvshowsRemoved) {
+      const typesToRemove = [];
+      if (moviesRemoved) typesToRemove.push('movies');
+      if (tvshowsRemoved) typesToRemove.push('tvshows');
+      
+      // Filter enabled_categories to only include enabled types
+      const enabledCategories = {
+        movies: newSyncTypes.movies ? (updatedProvider.enabled_categories?.movies || []) : [],
+        tvshows: newSyncTypes.tvshows ? (updatedProvider.enabled_categories?.tvshows || []) : [],
+        live: updatedProvider.enabled_categories?.live || []
+      };
+      
+      // Remove from titles but keep provider_titles
+      try {
+        const { titlesUpdated, streamsRemoved, titleKeys, providerTitlesDeleted, emptyTitlesDeleted } = 
+          await this._removeProviderFromTitles(
+            providerId,
+            willBeEnabled,
+            enabledCategories,
+            false, // Don't delete provider_titles
+            typesToRemove // Filter by type
+          );
+        
+        this.logger.info(
+          `Provider ${providerId} media types removed cleanup: ${typesToRemove.join(', ')} removed, ` +
+          `${titlesUpdated} titles updated, ${streamsRemoved} streams removed, ${emptyTitlesDeleted} empty titles deleted`
+        );
+      } catch (error) {
+        this.logger.error(`Error cleaning up removed media types for provider ${providerId}: ${error.message}`);
+      }
+    }
+
+    // Orchestration: Handle Live TV removal
+    if (liveRemoved) {
+      // Delete all channels and programs for this provider
+      // When disabling entire media type, pass isEnabled: false
+      try {
+        await this._removeProviderFromChannels(
+          providerId, 
+          false, // isEnabled: false means delete all
+          { movies: [], tvshows: [], live: [] } // No enabled categories
+        );
+        this.logger.info(`Provider ${providerId} Live TV sync disabled: all channels and programs deleted`);
+      } catch (error) {
+        this.logger.error(`Error cleaning up Live TV for provider ${providerId}: ${error.message}`);
+      }
+    }
+
+    // Orchestration: Handle Movies/TV Shows addition
+    if (moviesAdded || tvshowsAdded) {
+      // Trigger sync job to fetch data
+      this._triggerJobAsync('syncIPTVProviderTitles');
+    }
+
+    // Orchestration: Handle Live TV addition
+    if (liveAdded) {
+      // Trigger sync job to fetch channels
+      this._triggerJobAsync('syncLiveTV');
     }
 
     // Orchestration: Reload provider configs in provider instances
@@ -593,8 +682,9 @@ class ProvidersManager extends BaseManager {
   }
 
   /**
-   * Get all categories for a provider (movies + tvshows + live)
+   * Get all categories for a provider (movies + tvshows only, NO live)
    * Fetches from provider API and merges with enabled_categories from provider config
+   * NOTE: Live TV categories are NOT included - they are managed automatically
    * @param {string} providerId - Provider ID
    * @returns {Promise<Array<Object>>}
    */
@@ -603,36 +693,48 @@ class ProvidersManager extends BaseManager {
       // Validate provider exists using IPTVProviderManager
       const providerData = await this._iptvProviderManager.getProvider(providerId);
 
-      // Fetch categories from provider API (both movies and tvshows)
-      const [moviesCategories, tvshowsCategories] = await Promise.all([
-        this.fetchCategories(providerId, 'movies').catch(() => []),
-        this.fetchCategories(providerId, 'tvshows').catch(() => [])
-      ]);
+      // Get sync_media_types
+      // Default to true for v1 providers (backward compatibility during migration)
+      const syncTypes = providerData.sync_media_types || { 
+        movies: true,  // Default true for v1 providers
+        tvshows: true,
+        live: true
+      };
 
-      // Fetch live categories
-      let liveCategories = [];
-      try {
-        const provider = await this._getProvider(providerId);
-        if (providerData.type === 'xtream' && provider.fetchLiveCategories) {
-          liveCategories = await provider.fetchLiveCategories(providerId);
-        } else if (providerData.type === 'agtv') {
-          // For AGTV, categories are extracted from channels during sync
-          const channels = await this._channelManager.findByProvider(providerId);
-          liveCategories = this._extractCategoriesFromChannels(channels);
-        }
-      } catch (error) {
-        this.logger.warn(`Failed to fetch live categories for ${providerId}: ${error.message}`);
+      // Fetch categories only for enabled types (Movies and TV Shows only)
+      // NOTE: Live TV categories are NOT included - they are managed automatically
+      const fetchPromises = [];
+
+      if (syncTypes.movies) {
+        fetchPromises.push(
+          this.fetchCategories(providerId, 'movies').catch(() => [])
+        );
+      } else {
+        fetchPromises.push(Promise.resolve([]));
       }
 
-      // Get enabled categories from provider config
+      if (syncTypes.tvshows) {
+        fetchPromises.push(
+          this.fetchCategories(providerId, 'tvshows').catch(() => [])
+        );
+      } else {
+        fetchPromises.push(Promise.resolve([]));
+      }
+
+      const [moviesCategories, tvshowsCategories] = await Promise.all(fetchPromises);
+
+      // DO NOT fetch live categories - they are not shown in provider settings
+      // Live TV categories are extracted automatically from synced channels
+
+      // Get enabled categories from provider config (movies and tvshows only)
       const enabledCategories = providerData.enabled_categories || { movies: [], tvshows: [], live: [] };
       const enabledCategoryKeys = new Set([
         ...(enabledCategories.movies || []),
-        ...(enabledCategories.tvshows || []),
-        ...(enabledCategories.live || [])
+        ...(enabledCategories.tvshows || [])
+        // Note: live categories excluded - not shown in UI
       ]);
 
-      // Transform and combine categories
+      // Transform and combine categories (Movies and TV Shows only)
       const allCategories = [
         ...moviesCategories.map(cat => ({
           key: `movies-${cat.category_id}`,
@@ -647,20 +749,8 @@ class ProvidersManager extends BaseManager {
           category_id: cat.category_id,
           category_name: cat.category_name,
           enabled: enabledCategoryKeys.has(`tvshows-${cat.category_id}`)
-        })),
-        ...liveCategories.map(cat => {
-          const categoryKey = providerData.type === 'xtream' 
-            ? `live-${cat.category_id}`
-            : `live-${this._normalizeCategoryName(cat.category_name || cat.normalized_name)}`;
-          
-          return {
-            key: categoryKey,
-            type: 'live',
-            category_id: cat.category_id || null,
-            category_name: cat.category_name,
-            enabled: enabledCategoryKeys.has(categoryKey)
-          };
-        })
+        }))
+        // Live TV categories NOT included
       ];
 
       return allCategories;

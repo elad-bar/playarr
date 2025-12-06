@@ -26,11 +26,22 @@ export class SyncLiveTVJob {
     try {
       this.logger.info('Starting Live TV sync job...');
       
-      // Get active providers (type in ['agtv','xtream'], enabled: true, deleted: false)
-      const providers = await this._iptvProviderManager.findByQuery({
+      // Get active providers
+      const allProviders = await this._iptvProviderManager.findByQuery({
         type: { $in: ['agtv', 'xtream'] },
         enabled: { $ne: false },
         deleted: { $ne: true }
+      });
+      
+      // Filter to only providers with Live TV sync enabled
+      // For v1 providers without sync_media_types, default to true (backward compatibility)
+      const providers = allProviders.filter(provider => {
+        const syncTypes = provider.sync_media_types;
+        if (!syncTypes) {
+          // v1 provider - default to true for backward compatibility
+          return true;
+        }
+        return syncTypes.live === true;
       });
       
       if (providers.length === 0) {
@@ -41,7 +52,7 @@ export class SyncLiveTVJob {
         };
       }
       
-      // Sync Live TV for all providers
+      // Sync Live TV for enabled providers
       const result = await this._liveTVProcessingManager.syncProviders(providers);
       
       this.logger.info(`Live TV sync completed: ${result.providers_processed} provider(s) processed`);

@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Paper,
   Typography,
   Button,
+  IconButton,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -48,10 +47,29 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
   const [savedStepData, setSavedStepData] = useState({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // Update current provider when prop changes and initialize step data
+  // Reset state when provider changes (including when dialog closes and provider becomes null)
   useEffect(() => {
-    setCurrentProvider(provider);
-    setIsAddModeState(!provider);
+    // If provider is null/undefined, reset everything
+    if (!provider && currentProvider) {
+      setCurrentProvider(null);
+      setIsAddModeState(true);
+      setStepData({});
+      setCurrentStep(0);
+      setCompletedSteps(new Set());
+      setValidationErrors({});
+      setHasUnsavedChanges(false);
+      setSavedStepData({});
+      return;
+    }
+    
+    // If provider exists, initialize
+    if (provider) {
+      setCurrentProvider(provider);
+      setIsAddModeState(false);
+    } else {
+      setCurrentProvider(null);
+      setIsAddModeState(true);
+    }
     
     // Initialize step data from provider in edit mode
     if (provider && !isAddMode) {
@@ -66,6 +84,11 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
           apiUrlIndex: apiUrlIndex >= 0 ? apiUrlIndex : 0,
           username: provider.username || '',
           password: provider.password || '',
+          sync_media_types: provider.sync_media_types || {
+            movies: false,
+            tvshows: false,
+            live: false
+          },
         },
         1: { // Cleanup Rules
           cleanup: provider.cleanup || {},
@@ -98,6 +121,11 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
           apiUrlIndex: apiUrlIndex >= 0 ? apiUrlIndex : 0,
           username: provider.username || '',
           password: provider.password || '',
+          sync_media_types: provider.sync_media_types || {
+            movies: false,
+            tvshows: false,
+            live: false
+          },
         },
         1: {
           cleanup: provider.cleanup || {},
@@ -113,40 +141,59 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
   }, [provider]);
 
   // Define steps based on mode and provider type
-  const getSteps = useCallback(() => {
-    const providerType = stepData[0]?.type || currentProvider?.type?.toLowerCase() || 'xtream';
-    const isXtream = providerType === 'xtream';
+  // Use useMemo to stabilize the steps array and prevent ResizeObserver loops
+  // Only recalculate when dependencies actually change
+  const stepDataType = stepData[0]?.type;
+  const providerType = currentProvider?.type;
+  const providerSyncMediaTypes = currentProvider?.sync_media_types;
+  const stepDataSyncMediaTypes = stepData[0]?.sync_media_types;
+
+  const steps = useMemo(() => {
+    const resolvedProviderType = stepDataType || providerType?.toLowerCase() || 'xtream';
+    const isXtream = resolvedProviderType === 'xtream';
+
+    // Check if Categories step should be shown (only if movies or tvshows are enabled)
+    const syncMediaTypes = providerSyncMediaTypes || stepDataSyncMediaTypes;
+    const shouldShowCategoriesStep = syncMediaTypes 
+      ? (syncMediaTypes.movies || syncMediaTypes.tvshows)
+      : true; // Default to true for backward compatibility (existing providers)
 
     if (isAddModeState) {
       // Add mode steps
-      const steps = [
+      const stepArray = [
         { id: 'basic-details', label: 'Basic Details' },
         { id: 'provider-details', label: 'Provider Details' },
       ];
       if (isXtream) {
-        steps.push(
-          { id: 'cleanup-rules', label: 'Cleanup Rules' },
-          { id: 'categories', label: 'Categories' }
-        );
+        stepArray.push({ id: 'cleanup-rules', label: 'Cleanup Rules' });
+        // Only show Categories step if at least one media type (movies or tvshows) is enabled
+        if (shouldShowCategoriesStep) {
+          stepArray.push({ id: 'categories', label: 'Categories' });
+        }
       }
-      return steps;
+      return stepArray;
     } else {
       // Edit mode steps
-      const steps = [
+      const stepArray = [
         { id: 'provider-details', label: 'Provider Details' },
       ];
       if (isXtream) {
-        steps.push(
-          { id: 'cleanup-rules', label: 'Cleanup Rules' },
-          { id: 'categories', label: 'Categories' }
-        );
+        stepArray.push({ id: 'cleanup-rules', label: 'Cleanup Rules' });
+        // Only show Categories step if at least one media type (movies or tvshows) is enabled
+        if (shouldShowCategoriesStep) {
+          stepArray.push({ id: 'categories', label: 'Categories' });
+        }
       }
-      steps.push({ id: 'ignored-titles', label: 'Ignored Titles' });
-      return steps;
+      stepArray.push({ id: 'ignored-titles', label: 'Ignored Titles' });
+      return stepArray;
     }
-  }, [isAddModeState, stepData, currentProvider]);
-
-  const steps = getSteps();
+  }, [
+    isAddModeState, 
+    stepDataType, 
+    providerType,
+    providerSyncMediaTypes,
+    stepDataSyncMediaTypes
+  ]);
 
   // Check if step has unsaved changes
   const checkStepHasChanges = useCallback((stepIndex) => {
@@ -300,6 +347,11 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
         username: providerDetails.username,
         password: providerDetails.password,
         enabled: true,
+        sync_media_types: providerDetails.sync_media_types || {
+          movies: false,
+          tvshows: false,
+          live: false
+        },
         cleanup: stepData[2]?.cleanup || {},
         enabled_categories: stepData[3]?.enabled_categories || { movies: [], tvshows: [] },
       };
@@ -315,6 +367,11 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
         apiUrlIndex: providerDetails.apiUrlIndex || 0,
         username: providerDetails.username || currentProvider?.username,
         password: providerDetails.password || currentProvider?.password,
+        sync_media_types: providerDetails.sync_media_types || currentProvider?.sync_media_types || {
+          movies: false,
+          tvshows: false,
+          live: false
+        },
         cleanup: cleanupRules.cleanup || currentProvider?.cleanup || {},
         enabled_categories: categories.enabled_categories || currentProvider?.enabled_categories || { movies: [], tvshows: [] },
       };
@@ -439,16 +496,15 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
     }
   }, [currentStep, isAddModeState, validateStep, onSaveAndClose, buildProviderData, stepData]);
 
-  // Handle accordion expansion change
-  const handleAccordionChange = useCallback((stepIndex) => (event, isExpanded) => {
-    // If collapsing, do nothing (we don't allow manual collapse)
-    if (!isExpanded) {
-      // Prevent collapse by keeping current step expanded
-      return;
-    }
-    
+  // Handle step header click
+  const handleStepClick = useCallback((stepIndex) => {
     // If already expanded, do nothing
     if (stepIndex === currentStep) return;
+    
+    // In add mode, disable steps that haven't been reached yet
+    if (isAddModeState && stepIndex > currentStep && !completedSteps.has(stepIndex)) {
+      return;
+    }
     
     // In edit mode, allow clicking any step
     // But warn if current step has unsaved changes
@@ -457,14 +513,13 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
         'You have unsaved changes on this step. Are you sure you want to navigate away? Your changes will be lost.'
       );
       if (!confirmed) {
-        // Prevent expansion by not updating currentStep
         return;
       }
     }
     
     setCurrentStep(stepIndex);
     setHasUnsavedChanges(false);
-  }, [currentStep, isAddModeState, hasUnsavedChanges]);
+  }, [currentStep, isAddModeState, hasUnsavedChanges, completedSteps]);
 
   // Render step preview
   const renderStepPreview = (step, stepIndex) => {
@@ -640,55 +695,68 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
         const canClick = !isAddModeState && !hasUnsavedChanges;
 
         return (
-          <Accordion
+          <Paper
             key={step.id}
-            expanded={isExpanded}
-            onChange={handleAccordionChange(index)}
-            disabled={isDisabled && !canClick}
-            TransitionProps={{ timeout: 0 }}
+            elevation={isExpanded ? 2 : 1}
             sx={{
-              '&:before': {
-                display: 'none',
-              },
               mb: 1,
-              '&.Mui-disabled': {
-                opacity: 0.6,
-              },
-              '& .MuiCollapse-root': {
-                transition: 'none !important',
-              },
+              overflow: 'hidden',
+              opacity: isDisabled && !canClick ? 0.6 : 1,
             }}
           >
-            <AccordionSummary
-              expandIcon={<ExpandMoreIcon />}
+            {/* Step Header */}
+            <Box
+              onClick={() => !isDisabled || canClick ? handleStepClick(index) : null}
               sx={{
-                '& .MuiAccordionSummary-content': {
-                  alignItems: 'center',
-                },
                 cursor: isDisabled && !canClick ? 'not-allowed' : 'pointer',
+                backgroundColor: isExpanded ? 'action.selected' : 'transparent',
+                '&:hover': {
+                  backgroundColor: isDisabled && !canClick ? 'transparent' : 'action.hover',
+                },
               }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%', mr: 2 }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  p: 2,
+                  pb: !isExpanded ? 1.5 : 2,
+                }}
+              >
+                <IconButton
+                  size="small"
+                  sx={{
+                    transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.2s',
+                    mr: 1,
+                  }}
+                >
+                  <ExpandMoreIcon />
+                </IconButton>
                 <Typography variant="h6" sx={{ minWidth: 200, fontWeight: isExpanded ? 600 : 400 }}>
                   {index + 1}. {step.label}
                 </Typography>
-                {!isExpanded && (
-                  <Box sx={{ flexGrow: 1 }}>
-                    {renderStepPreview(step, index)}
-                  </Box>
-                )}
                 {isCompleted && (
-                  <CheckCircleIcon sx={{ color: 'success.main', ml: 'auto' }} />
+                  <CheckCircleIcon sx={{ color: 'success.main', ml: 'auto', mr: 2 }} />
                 )}
               </Box>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-                {renderStepContent(step, index)}
-                {renderNavigationButtons(index)}
+              {!isExpanded && (
+                <Box sx={{ px: 2, pb: 2, pl: 9 }}> {/* Align with content, accounting for icon + margin */}
+                  {renderStepPreview(step, index)}
+                </Box>
+              )}
+            </Box>
+            
+            {/* Step Content - conditionally rendered to avoid ResizeObserver */}
+            {isExpanded && (
+              <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+                  {renderStepContent(step, index)}
+                  {renderNavigationButtons(index)}
+                </Box>
               </Box>
-            </AccordionDetails>
-          </Accordion>
+            )}
+          </Paper>
         );
       })}
     </Box>

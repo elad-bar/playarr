@@ -72,10 +72,20 @@ function CategoriesStep({ provider, data, onChange, onSave }) {
   // Filter categories by media type and search query
   const filteredCategories = useMemo(() => {
     // First, filter out categories that don't have a valid type (movies or tvshows)
+    // Also filter out live categories - they should never appear
     let filtered = categories.filter(cat => {
       const type = cat.type;
-      return type === 'movies' || type === 'tvshows';
+      return (type === 'movies' || type === 'tvshows') && type !== 'live';
     });
+
+    // Filter by sync_media_types from provider
+    if (provider?.sync_media_types) {
+      filtered = filtered.filter(cat => {
+        if (cat.type === 'movies') return provider.sync_media_types.movies;
+        if (cat.type === 'tvshows') return provider.sync_media_types.tvshows;
+        return false; // Exclude live and any other types
+      });
+    }
 
     // Filter by media type
     if (mediaTypeFilter !== 'all') {
@@ -92,7 +102,7 @@ function CategoriesStep({ provider, data, onChange, onSave }) {
     }
 
     return filtered;
-  }, [categories, mediaTypeFilter, searchQuery]);
+  }, [categories, provider?.sync_media_types, mediaTypeFilter, searchQuery]);
 
   // Update parent when categories change
   const updateEnabledCategories = useCallback(() => {

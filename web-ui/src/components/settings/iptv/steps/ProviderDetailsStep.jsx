@@ -12,6 +12,8 @@ import {
   InputLabel,
   CircularProgress,
   Alert,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -54,6 +56,13 @@ function ProviderDetailsStep({
   const [newUrl, setNewUrl] = useState('');
   const [validationError, setValidationError] = useState(null);
   const [validationSuccess, setValidationSuccess] = useState(false);
+  const [syncMediaTypes, setSyncMediaTypes] = useState(
+    data?.sync_media_types || provider?.sync_media_types || {
+      movies: false,
+      tvshows: false,
+      live: false
+    }
+  );
   const providerType = provider?.type?.toLowerCase() || 'xtream';
 
   const isXtream = providerType === 'xtream';
@@ -65,8 +74,20 @@ function ProviderDetailsStep({
       apiUrlIndex,
       username,
       password,
+      sync_media_types: syncMediaTypes,
     });
-  }, [urls, apiUrlIndex, username, password, onChange]);
+  }, [urls, apiUrlIndex, username, password, syncMediaTypes, onChange]);
+
+  // Handle sync media type change
+  const handleSyncMediaTypeChange = (e) => {
+    const field = e.target.name; // e.g., "sync_media_types.movies"
+    const [, child] = field.split('.'); // Extract child (e.g., "movies")
+    
+    setSyncMediaTypes(prev => ({
+      ...prev,
+      [child]: e.target.checked
+    }));
+  };
 
   // Validate credentials
   const validateCredentials = async () => {
@@ -244,7 +265,7 @@ function ProviderDetailsStep({
                       >
                         <ListItemText
                           primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                               {isApiUrl && (
                                 <StarIcon sx={{ fontSize: 18, color: 'primary.main' }} />
                               )}
@@ -254,6 +275,7 @@ function ProviderDetailsStep({
                           primaryTypographyProps={{
                             variant: 'body2',
                             fontWeight: isApiUrl ? 'bold' : 'normal',
+                            component: 'span',
                           }}
                         />
                       </ListItem>
@@ -334,6 +356,42 @@ function ProviderDetailsStep({
             {errors.credentials}
           </Alert>
         )}
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 2 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Sync Media Types
+          </Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={syncMediaTypes?.movies ?? false}
+                onChange={handleSyncMediaTypeChange}
+                name="sync_media_types.movies"
+              />
+            }
+            label="Sync Movies"
+          />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={syncMediaTypes?.tvshows ?? false}
+                onChange={handleSyncMediaTypeChange}
+                name="sync_media_types.tvshows"
+              />
+            }
+            label="Sync TV Shows"
+          />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={syncMediaTypes?.live ?? false}
+                onChange={handleSyncMediaTypeChange}
+                name="sync_media_types.live"
+              />
+            }
+            label="Sync Live TV"
+          />
+        </Box>
       </Box>
     </Box>
   );

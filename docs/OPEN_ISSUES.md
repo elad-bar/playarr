@@ -76,6 +76,33 @@ This document tracks known issues that need to be addressed in the Playarr proje
 
 ---
 
+### 4. Similar Titles Not Being Added to Titles
+
+**Status:** Open  
+**Priority:** Medium  
+**Description:** Similar titles are not being populated in the titles collection. When titles are synced from providers, the `similar_titles` field is not being populated with related title keys, resulting in all titles having empty or missing similar titles data.
+
+**Impact:**
+- Users cannot discover related/similar content through the UI
+- The "Recommendations" section in title details shows no similar titles
+- Reduced content discovery and user engagement
+- Similar titles feature is non-functional
+
+**Related Components:**
+- `TMDBProcessingManager.js` (likely where similar titles should be fetched from TMDB API)
+- `BaseIPTVProcessingManager.js` (title processing pipeline)
+- `TitlesManager.js` (title data management)
+- `TitleRepository.js` (database operations)
+- `SyncIPTVProviderTitlesJob.js` (sync job that processes titles)
+
+**Investigation Notes:**
+- Similar titles data should be fetched from TMDB API during title processing
+- Need to verify if TMDB API calls for similar titles are being made
+- Check if similar titles are being stored in the database but not retrieved
+- Verify the data flow from provider sync → TMDB enrichment → database storage
+
+---
+
 ## Notes
 
 - Issues are listed in order of priority/severity

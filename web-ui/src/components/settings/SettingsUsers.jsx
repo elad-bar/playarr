@@ -15,7 +15,7 @@ import {
   DialogActions,
   TextField,
   Button,
-  Tooltip
+  Tooltip,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -142,7 +142,7 @@ const SettingsUsers = () => {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px', p: 3 }}>
         <CircularProgress />
       </Box>
     );

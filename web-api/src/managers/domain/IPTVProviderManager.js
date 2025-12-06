@@ -87,10 +87,12 @@ class IPTVProviderManager extends BaseDomainManager {
         
         if (existingIds.has(provider.id)) {
           // Update existing provider
+          // Exclude _id from replacement (MongoDB _id is immutable)
+          const { _id, ...replacementWithoutId } = providerWithTimestamps;
           operations.push({
             replaceOne: {
               filter: { id: provider.id },
-              replacement: providerWithTimestamps
+              replacement: replacementWithoutId
             }
           });
         } else {
@@ -167,6 +169,32 @@ class IPTVProviderManager extends BaseDomainManager {
    */
   _getIPTVProviderTypes() {
     return [DataProvider.AGTV, DataProvider.XTREAM];
+  }
+
+  /**
+   * Validate sync_media_types structure
+   * @private
+   * @param {Object} syncMediaTypes - sync_media_types object
+   * @throws {ValidationError} If validation fails
+   */
+  _validateSyncMediaTypes(syncMediaTypes) {
+    if (syncMediaTypes === undefined || syncMediaTypes === null) {
+      return; // Optional field, skip validation if not provided
+    }
+
+    if (typeof syncMediaTypes !== 'object') {
+      throw new ValidationError('sync_media_types must be an object');
+    }
+
+    const validKeys = ['movies', 'tvshows', 'live'];
+    for (const key of Object.keys(syncMediaTypes)) {
+      if (!validKeys.includes(key)) {
+        throw new ValidationError(`Invalid sync_media_types key: ${key}`);
+      }
+      if (typeof syncMediaTypes[key] !== 'boolean') {
+        throw new ValidationError(`sync_media_types.${key} must be a boolean`);
+      }
+    }
   }
 
   /**
@@ -350,6 +378,32 @@ class IPTVProviderManager extends BaseDomainManager {
       // Initialize provider_details as null - syncProviderDetails job will populate it
       providerData.provider_details = null;
 
+      // Validate sync_media_types if provided
+      this._validateSyncMediaTypes(providerData.sync_media_types);
+
+      // Set default sync_media_types for new providers (all disabled)
+      if (!providerData.sync_media_types) {
+        providerData.sync_media_types = {
+          movies: false,
+          tvshows: false,
+          live: false
+        };
+      }
+
+      // Initialize enabled_categories.live for v2 schema
+      if (!providerData.enabled_categories) {
+        providerData.enabled_categories = {
+          movies: [],
+          tvshows: [],
+          live: []
+        };
+      } else {
+        // Ensure live array exists
+        if (!providerData.enabled_categories.live) {
+          providerData.enabled_categories.live = [];
+        }
+      }
+
       // Add provider to array and save
       providers.push(providerData);
       await this._writeAllProviders(providers);
@@ -404,6 +458,9 @@ class IPTVProviderManager extends BaseDomainManager {
       // Validate URLs after normalization
       this._validateUrls(updatedProviderForValidation);
 
+      // Validate sync_media_types if provided
+      this._validateSyncMediaTypes(providerData.sync_media_types);
+
       // Update provider data (preserve id and other fields)
       const now = new Date();
       const updatedProvider = {
@@ -412,6 +469,14 @@ class IPTVProviderManager extends BaseDomainManager {
         id: providerId, // Ensure id doesn't change
         lastUpdated: now // Update timestamp
       };
+
+      // Handle sync_media_types partial update (merge with existing)
+      if (providerData.sync_media_types !== undefined) {
+        updatedProvider.sync_media_types = {
+          ...(existingProvider.sync_media_types || { movies: true, tvshows: true, live: true }),
+          ...providerData.sync_media_types
+        };
+      }
 
       // Set default api_rate if missing (backward compatibility)
       if (!updatedProvider.api_rate) {

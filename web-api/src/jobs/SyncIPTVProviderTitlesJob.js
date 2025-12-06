@@ -75,23 +75,52 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
             this.logger.debug(`[${providerId}] Processing provider (${handler.getProviderType()})`);
             this.logger.info(`Fetching metadata from provider ${providerId}...`);
             
-            // Fetch movies and TV shows in parallel
-            const [moviesCount, tvShowsCount] = await Promise.all([
-              handler.fetchMetadata('movies').catch(err => {
-                this.logger.error(`[${providerId}] Error fetching movies: ${err.message}`);
-                return 0;
-              }),
-              handler.fetchMetadata('tvshows').catch(err => {
-                this.logger.error(`[${providerId}] Error fetching TV shows: ${err.message}`);
-                return 0;
-              })
-            ]);
+            // Get sync_media_types from provider config
+            // Default to true for v1 providers (backward compatibility during migration)
+            const syncTypes = handler.providerData.sync_media_types || { 
+              movies: true,  // Default true for v1 providers
+              tvshows: true,
+              live: true
+            };
+            
+            // Build fetch promises based on enabled types
+            const fetchPromises = [];
+            const results = {};
+            
+            if (syncTypes.movies) {
+              fetchPromises.push(
+                handler.fetchMetadata('movies')
+                  .then(count => { results.movies = count; })
+                  .catch(err => {
+                    this.logger.error(`[${providerId}] Error fetching movies: ${err.message}`);
+                    results.movies = 0;
+                  })
+              );
+            } else {
+              results.movies = 0;
+            }
+            
+            if (syncTypes.tvshows) {
+              fetchPromises.push(
+                handler.fetchMetadata('tvshows')
+                  .then(count => { results.tvShows = count; })
+                  .catch(err => {
+                    this.logger.error(`[${providerId}] Error fetching TV shows: ${err.message}`);
+                    results.tvShows = 0;
+                  })
+              );
+            } else {
+              results.tvShows = 0;
+            }
+            
+            // Wait for all enabled fetches
+            await Promise.all(fetchPromises);
             
             return {
               providerId,
               providerName: providerId,
-              movies: moviesCount,
-              tvShows: tvShowsCount
+              movies: results.movies,
+              tvShows: results.tvShows
             };
           } catch (error) {
             this.logger.error(`[${providerId}] Error processing provider: ${error.message}`);
