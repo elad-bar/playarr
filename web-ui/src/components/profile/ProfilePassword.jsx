@@ -4,35 +4,22 @@ import {
   Paper,
   Typography,
   TextField,
-  CircularProgress,
-  IconButton,
   InputAdornment,
-  Tooltip
+  Tooltip,
+  IconButton,
 } from '@mui/material';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
-import SaveIcon from '@mui/icons-material/Save';
 
 const ProfilePassword = ({
   passwordForm,
   setPasswordForm,
   showPasswords,
   setShowPasswords,
-  onChangePassword,
-  changingPassword,
-  isDirty
 }) => {
   const togglePasswordVisibility = (field) => {
     setShowPasswords({ ...showPasswords, [field]: !showPasswords[field] });
   };
-
-  // Check if form is valid for enabling save button
-  const isValid = isDirty &&
-    passwordForm.current_password &&
-    passwordForm.new_password &&
-    passwordForm.confirm_password &&
-    passwordForm.new_password.length >= 8 &&
-    passwordForm.new_password === passwordForm.confirm_password;
 
   return (
     <Paper elevation={3} sx={{ p: 3, height: '100%' }}>
@@ -40,24 +27,6 @@ const ProfilePassword = ({
         <Typography variant="h6">
           Change Password
         </Typography>
-        <Tooltip title={changingPassword ? 'Changing password...' : isValid ? 'Save password' : 'Fill all fields to save'}>
-          <span>
-            <IconButton
-              color="primary"
-              onClick={onChangePassword}
-              disabled={!isValid || changingPassword}
-              sx={{
-                bgcolor: (theme) => isValid && !changingPassword ? theme.palette.primary.main : 'transparent',
-                color: (theme) => isValid && !changingPassword ? theme.palette.primary.contrastText : 'inherit',
-                '&:hover': {
-                  bgcolor: (theme) => isValid && !changingPassword ? theme.palette.primary.dark : 'transparent'
-                }
-              }}
-            >
-              {changingPassword ? <CircularProgress size={24} /> : <SaveIcon />}
-            </IconButton>
-          </span>
-        </Tooltip>
       </Box>
 
       <TextField
