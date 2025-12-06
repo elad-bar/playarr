@@ -14,6 +14,8 @@ import {
   Alert,
   Chip,
   useTheme,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -56,6 +58,13 @@ function ProviderDetailsStep({
   const [newUrl, setNewUrl] = useState('');
   const [validationError, setValidationError] = useState(null);
   const [validationSuccess, setValidationSuccess] = useState(false);
+  const [enabled, setEnabled] = useState(
+    data?.enabled !== undefined 
+      ? data.enabled 
+      : provider?.enabled !== undefined 
+        ? provider.enabled 
+        : true
+  );
   const [syncMediaTypes, setSyncMediaTypes] = useState(
     data?.sync_media_types || provider?.sync_media_types || {
       movies: false,
@@ -75,9 +84,10 @@ function ProviderDetailsStep({
       apiUrlIndex,
       username,
       password,
+      enabled,
       sync_media_types: syncMediaTypes,
     });
-  }, [urls, apiUrlIndex, username, password, syncMediaTypes, onChange]);
+  }, [urls, apiUrlIndex, username, password, enabled, syncMediaTypes, onChange]);
 
   // Handle sync media type change
   const handleSyncMediaTypeChange = (mediaType) => {
@@ -349,6 +359,17 @@ function ProviderDetailsStep({
           required
           error={!!errors?.password}
           helperText={errors?.password}
+        />
+
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              name="enabled"
+            />
+          }
+          label="Enabled"
         />
 
         {isValidating && (

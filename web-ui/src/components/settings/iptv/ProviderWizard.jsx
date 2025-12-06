@@ -86,6 +86,7 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
           apiUrlIndex: apiUrlIndex >= 0 ? apiUrlIndex : 0,
           username: provider.username || '',
           password: provider.password || '',
+          enabled: provider.enabled !== undefined ? provider.enabled : true,
           sync_media_types: provider.sync_media_types || {
             movies: false,
             tvshows: false,
@@ -357,7 +358,7 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
         apiUrlIndex: providerDetails.apiUrlIndex || 0,
         username: providerDetails.username,
         password: providerDetails.password,
-        enabled: true,
+        enabled: providerDetails.enabled !== undefined ? providerDetails.enabled : true,
         sync_media_types: providerDetails.sync_media_types || {
           movies: false,
           tvshows: false,
@@ -378,6 +379,7 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
         apiUrlIndex: providerDetails.apiUrlIndex || 0,
         username: providerDetails.username || currentProvider?.username,
         password: providerDetails.password || currentProvider?.password,
+        enabled: providerDetails.enabled !== undefined ? providerDetails.enabled : (currentProvider?.enabled !== undefined ? currentProvider.enabled : true),
         sync_media_types: providerDetails.sync_media_types || currentProvider?.sync_media_types || {
           movies: false,
           tvshows: false,
