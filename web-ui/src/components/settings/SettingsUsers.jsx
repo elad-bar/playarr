@@ -5,7 +5,6 @@ import {
   Card,
   CardContent,
   IconButton,
-  Chip,
   Typography,
   CircularProgress,
   Alert,
@@ -25,6 +24,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { usersService } from '../../services/users';
 import UserForm from './users/UserForm';
 import { useAuth } from '../../context/AuthContext';
+import { getUserRoleColor } from './users/utils';
 
 const SettingsUsers = () => {
   const { user: currentUser } = useAuth();
@@ -49,8 +49,14 @@ const SettingsUsers = () => {
       setLoading(true);
       setError(null);
       const data = await usersService.getAllUsers();
-      // Ensure data is an array
-      setUsers(Array.isArray(data) ? data : []);
+      // Ensure data is an array and sort alphabetically by username
+      const userArray = Array.isArray(data) ? data : [];
+      const sortedUsers = [...userArray].sort((a, b) => {
+        const usernameA = (a.username || '').toLowerCase();
+        const usernameB = (b.username || '').toLowerCase();
+        return usernameA.localeCompare(usernameB);
+      });
+      setUsers(sortedUsers);
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Failed to load users');
       setUsers([]); // Set empty array on error
@@ -163,59 +169,43 @@ const SettingsUsers = () => {
       )}
 
       <Box>
-        <Grid container spacing={3}>
-          {/* Add New User Card */}
-          <Grid item xs={12} sm={6} md={4} lg={3}>
-            <Card
-              sx={{
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                border: '2px dashed',
-                borderColor: 'divider',
-                '&:hover': {
-                  borderColor: 'primary.main',
-                  bgcolor: 'action.hover'
-                }
-              }}
-              onClick={handleCreateUser}
-            >
-              <CardContent sx={{ textAlign: 'center', py: 4 }}>
-                <AddIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                <Typography variant="h6" color="text.secondary">
-                  Add New User
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
+        {/* Add User Button */}
+        <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={handleCreateUser}
+            sx={{
+              backgroundColor: '#1976d2', // Primary blue
+              color: '#ffffff',
+              '&:hover': {
+                backgroundColor: '#1565c0', // Darker blue
+              },
+            }}
+          >
+            Add New User
+          </Button>
+        </Box>
 
           {/* User Cards */}
+        <Grid container spacing={3}>
           {users.map((user) => {
             const isCurrentUser = currentUser?.username === user.username;
 
             return (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={user.username}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <Grid item xs={12} sm={6} md={4} lg={2} xl={2} key={user.username}>
+                <Card sx={{ 
+                  height: '100%', 
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  borderBottom: `2px ${user.status === 'active' ? 'solid' : 'dashed'} ${getUserRoleColor(user.role)}`
+                }}>
                   <CardContent sx={{ flexGrow: 1 }}>
-                    {/* Title with Username and Chips */}
+                    {/* Title with Username */}
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
                       <Typography variant="h6" sx={{ fontFamily: 'monospace', flex: 1 }}>
                         {user.username}
                       </Typography>
-                      <Box sx={{ display: 'flex', gap: 0.5, ml: 1 }}>
-                        <Chip
-                          label={user.role}
-                          color={user.role === 'admin' ? 'primary' : 'default'}
-                          size="small"
-                        />
-                        <Chip
-                          label={user.status}
-                          color={user.status === 'active' ? 'success' : 'default'}
-                          size="small"
-                        />
-                      </Box>
                     </Box>
 
                     {/* Secondary: Name */}

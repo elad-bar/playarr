@@ -184,10 +184,10 @@ function SettingsIPTVProviders() {
           </Button>
         </Box>
 
-        {/* Provider Cards */}
+          {/* Provider Cards */}
         <Grid container spacing={3}>
           {providers.map((provider) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={provider.id}>
+            <Grid item xs={12} sm={6} md={4} lg={2} xl={2} key={provider.id}>
               <Card sx={{ 
                 height: '100%', 
                 display: 'flex', 
