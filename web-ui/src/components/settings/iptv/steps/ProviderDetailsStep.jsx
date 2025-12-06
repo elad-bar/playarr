@@ -12,14 +12,14 @@ import {
   InputLabel,
   CircularProgress,
   Alert,
-  FormControlLabel,
-  Checkbox,
+  Chip,
+  useTheme,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import StarIcon from '@mui/icons-material/Star';
 import StarBorderIcon from '@mui/icons-material/StarBorder';
-import { validateIPTVProviderCredentials } from '../utils';
+import { validateIPTVProviderCredentials, getMediaTypeColors, getMediaTypeLabel } from '../utils';
 
 /**
  * ProviderDetailsStep - Step 2 (add) / Step 1 (edit)
@@ -64,6 +64,7 @@ function ProviderDetailsStep({
     }
   );
   const providerType = provider?.type?.toLowerCase() || 'xtream';
+  const theme = useTheme();
 
   const isXtream = providerType === 'xtream';
 
@@ -79,14 +80,34 @@ function ProviderDetailsStep({
   }, [urls, apiUrlIndex, username, password, syncMediaTypes, onChange]);
 
   // Handle sync media type change
-  const handleSyncMediaTypeChange = (e) => {
-    const field = e.target.name; // e.g., "sync_media_types.movies"
-    const [, child] = field.split('.'); // Extract child (e.g., "movies")
-    
+  const handleSyncMediaTypeChange = (mediaType) => {
     setSyncMediaTypes(prev => ({
       ...prev,
-      [child]: e.target.checked
+      [mediaType]: !prev[mediaType]
     }));
+  };
+
+  // Render media type chip
+  const renderMediaTypeChip = (type, isSelected) => {
+    const colors = getMediaTypeColors(type, theme);
+    return (
+      <Chip
+        label={getMediaTypeLabel(type)}
+        onClick={() => handleSyncMediaTypeChange(type)}
+        variant={isSelected ? 'filled' : 'outlined'}
+        sx={{
+          backgroundColor: isSelected ? colors.main : 'transparent',
+          color: isSelected ? colors.contrastText : colors.main,
+          borderColor: colors.main,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          '&:hover': {
+            backgroundColor: isSelected ? colors.dark : colors.light,
+          },
+          cursor: 'pointer',
+        }}
+      />
+    );
   };
 
   // Validate credentials
@@ -357,40 +378,15 @@ function ProviderDetailsStep({
           </Alert>
         )}
 
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 2 }}>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>
-            Sync Media Types
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2 }}>
+          <Typography variant="subtitle2" sx={{ minWidth: 'fit-content' }}>
+            Support media types
           </Typography>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={syncMediaTypes?.movies ?? false}
-                onChange={handleSyncMediaTypeChange}
-                name="sync_media_types.movies"
-              />
-            }
-            label="Sync Movies"
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={syncMediaTypes?.tvshows ?? false}
-                onChange={handleSyncMediaTypeChange}
-                name="sync_media_types.tvshows"
-              />
-            }
-            label="Sync TV Shows"
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={syncMediaTypes?.live ?? false}
-                onChange={handleSyncMediaTypeChange}
-                name="sync_media_types.live"
-              />
-            }
-            label="Sync Live TV"
-          />
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {renderMediaTypeChip('movies', syncMediaTypes?.movies)}
+            {renderMediaTypeChip('tvshows', syncMediaTypes?.tvshows)}
+            {renderMediaTypeChip('live', syncMediaTypes?.live)}
+          </Box>
         </Box>
       </Box>
     </Box>

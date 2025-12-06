@@ -559,7 +559,7 @@ const handleSyncMediaTypeChange = (e) => {
 // Add to form JSX (after enabled checkbox)
 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 2 }}>
   <Typography variant="subtitle2" sx={{ mb: 1 }}>
-    Sync Media Types
+    Media Types
   </Typography>
   <FormControlLabel
     control={
@@ -569,7 +569,7 @@ const handleSyncMediaTypeChange = (e) => {
         name="sync_media_types.movies"
       />
     }
-    label="Sync Movies"
+    label="Movies"
   />
   <FormControlLabel
     control={
@@ -579,7 +579,7 @@ const handleSyncMediaTypeChange = (e) => {
         name="sync_media_types.tvshows"
       />
     }
-    label="Sync TV Shows"
+    label="TV Shows"
   />
   <FormControlLabel
     control={
@@ -589,7 +589,7 @@ const handleSyncMediaTypeChange = (e) => {
         name="sync_media_types.live"
       />
     }
-    label="Sync Live TV"
+    label="Live TV"
   />
 </Box>
 ```

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Card, CardContent, CardMedia, IconButton, CircularProgress, TextField, InputAdornment, Tooltip, ToggleButtonGroup, ToggleButton, useTheme, useMediaQuery, Button, Chip, Drawer, Divider, Badge } from '@mui/material';
 import { PlaylistAdd, PlaylistAddCheck, Search as SearchIcon, FilterList, CalendarMonth, Star as StarIcon, Movie as MovieIcon, LiveTv as LiveTvIcon, ErrorOutline, ChevronLeft, Close, Clear } from '@mui/icons-material';
 import { debounce } from 'lodash';
-import { fetchTitles, updateFilters, setSelectedTitle, addToWatchlist, removeFromWatchlist, incrementPage, clearFilters } from '../../store/slices/titlesSlice';
+import { fetchTitles, updateFilters, addToWatchlist, removeFromWatchlist, incrementPage, clearFilters } from '../../store/slices/titlesSlice';
 
 // Base64 encoded placeholder image (1x1 transparent pixel)
 const PLACEHOLDER_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -33,7 +33,7 @@ const ALPHABET_FILTERS = [
 const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
     const dispatch = useDispatch();
     const navigate = useNavigate();
-    const { titles, selectedTitle, loading, error, filters, pagination } = useSelector(state => state.titles);
+    const { titles, loading, error, filters, pagination } = useSelector(state => state.titles);
     const theme = useTheme();
     const [loadingItems, setLoadingItems] = useState(new Set());
 

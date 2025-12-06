@@ -2,14 +2,12 @@ import React, { useState, useEffect } from 'react';
 import {
   Box,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Typography,
   Alert,
+  Chip,
+  useTheme,
 } from '@mui/material';
-import { fetchIPTVProviders } from '../utils';
+import { fetchIPTVProviders, getProviderTypeColor } from '../utils';
 
 /**
  * BasicDetailsStep - Step 1 for add mode only
@@ -19,8 +17,9 @@ import { fetchIPTVProviders } from '../utils';
  * @param {Function} onValidate - Callback to trigger validation
  */
 function BasicDetailsStep({ data, onChange, errors, onValidate }) {
+  const theme = useTheme();
   const [providerId, setProviderId] = useState(data?.id || '');
-  const [providerType, setProviderType] = useState(data?.type || 'xtream');
+  const providerType = data?.type || 'xtream'; // Type is determined by button clicked, not editable
   const [existingProviders, setExistingProviders] = useState([]);
   const [idError, setIdError] = useState(null);
 
@@ -77,18 +76,7 @@ function BasicDetailsStep({ data, onChange, errors, onValidate }) {
     onChange({
       ...data,
       id: newId,
-    });
-  };
-
-  // Handle type change
-  const handleTypeChange = (event) => {
-    const newType = event.target.value;
-    setProviderType(newType);
-    
-    // Update parent
-    onChange({
-      ...data,
-      type: newType,
+      type: providerType, // Always include the type from data
     });
   };
 
@@ -101,13 +89,36 @@ function BasicDetailsStep({ data, onChange, errors, onValidate }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const getProviderTypeLabel = (type) => {
+    const typeMap = {
+      xtream: 'Xtream Code',
+      agtv: 'Apollo Group TV',
+    };
+    return typeMap[type] || type;
+  };
+
   return (
     <Box sx={{ maxWidth: 600 }}>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Enter a unique identifier and select the provider type.
+        Enter a unique identifier for this provider.
       </Typography>
 
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        <Box>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Provider Type
+          </Typography>
+          <Chip 
+            label={getProviderTypeLabel(providerType)} 
+            variant="outlined"
+            sx={{ 
+              textTransform: 'capitalize',
+              borderColor: getProviderTypeColor(providerType),
+              color: getProviderTypeColor(providerType),
+            }}
+          />
+        </Box>
+
         <TextField
           label="Provider ID"
           value={providerId}
@@ -118,23 +129,6 @@ function BasicDetailsStep({ data, onChange, errors, onValidate }) {
           fullWidth
           autoFocus
         />
-
-        <FormControl fullWidth required error={!!errors?.type}>
-          <InputLabel>Provider Type</InputLabel>
-          <Select
-            value={providerType}
-            onChange={handleTypeChange}
-            label="Provider Type"
-          >
-            <MenuItem value="xtream">Xtream</MenuItem>
-            <MenuItem value="agtv">AGTV</MenuItem>
-          </Select>
-          {errors?.type && (
-            <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-              {errors.type}
-            </Typography>
-          )}
-        </FormControl>
 
         {providerType === 'agtv' && (
           <Alert severity="info">

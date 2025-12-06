@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
-  Paper,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
   Typography,
   Button,
-  IconButton,
 } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
@@ -35,7 +35,8 @@ import { saveIPTVProvider } from './utils';
  */
 function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
 
-  const isAddMode = !provider;
+  // If provider has no id, it's add mode (even if it has a type for pre-selection)
+  const isAddMode = !provider || !provider.id;
   const [isAddModeState, setIsAddModeState] = useState(isAddMode);
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState(new Set());
@@ -62,17 +63,18 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
       return;
     }
     
-    // If provider exists, initialize
-    if (provider) {
+    // If provider exists and has an id, it's edit mode
+    if (provider && provider.id) {
       setCurrentProvider(provider);
       setIsAddModeState(false);
     } else {
-      setCurrentProvider(null);
+      // Add mode: provider might be null or have just a type for pre-selection
+      setCurrentProvider(provider || null);
       setIsAddModeState(true);
     }
     
     // Initialize step data from provider in edit mode
-    if (provider && !isAddMode) {
+    if (provider && provider.id && !isAddMode) {
       const urls = provider.streams_urls || [];
       const apiUrlIndex = provider.api_url && urls.length > 0
         ? urls.findIndex(url => url === provider.api_url)
@@ -99,7 +101,16 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
       });
     } else {
       // Reset step data in add mode
-      setStepData({});
+      // If provider has a type (from button click), initialize with that type
+      if (provider?.type) {
+        setStepData({
+          0: { // Basic Details
+            type: provider.type,
+          },
+        });
+      } else {
+        setStepData({});
+      }
     }
     
     // Reset to first step
@@ -109,7 +120,7 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
     setHasUnsavedChanges(false);
     
     // Initialize saved step data for dirty tracking
-    if (provider && !isAddMode) {
+    if (provider && provider.id && !isAddMode) {
       const urls = provider.streams_urls || [];
       const apiUrlIndex = provider.api_url && urls.length > 0
         ? urls.findIndex(url => url === provider.api_url)
@@ -695,44 +706,41 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
         const canClick = !isAddModeState && !hasUnsavedChanges;
 
         return (
-          <Paper
+          <Accordion
             key={step.id}
-            elevation={isExpanded ? 2 : 1}
+            expanded={isExpanded}
+            onChange={(event, expanded) => {
+              // Only allow expanding, not collapsing (maintains original behavior)
+              // When expanded=true, user wants to expand this step
+              // When expanded=false, user wants to collapse, but we prevent it
+              // by not updating state (Accordion stays expanded because isExpanded is controlled)
+              if (expanded && (!isDisabled || canClick)) {
+                handleStepClick(index);
+              }
+            }}
+            disabled={isDisabled && !canClick}
             sx={{
               mb: 1,
-              overflow: 'hidden',
               opacity: isDisabled && !canClick ? 0.6 : 1,
+              '&:before': {
+                display: 'none',
+              },
             }}
           >
-            {/* Step Header */}
-            <Box
-              onClick={() => !isDisabled || canClick ? handleStepClick(index) : null}
+            <AccordionSummary
               sx={{
-                cursor: isDisabled && !canClick ? 'not-allowed' : 'pointer',
-                backgroundColor: isExpanded ? 'action.selected' : 'transparent',
-                '&:hover': {
-                  backgroundColor: isDisabled && !canClick ? 'transparent' : 'action.hover',
+                '& .MuiAccordionSummary-content': {
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  width: '100%',
+                  margin: '12px 0 !important',
+                },
+                '& .MuiAccordionSummary-content.Mui-expanded': {
+                  margin: '12px 0 0 0 !important',
                 },
               }}
             >
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  p: 2,
-                  pb: !isExpanded ? 1.5 : 2,
-                }}
-              >
-                <IconButton
-                  size="small"
-                  sx={{
-                    transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-                    transition: 'transform 0.2s',
-                    mr: 1,
-                  }}
-                >
-                  <ExpandMoreIcon />
-                </IconButton>
+              <Box sx={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                 <Typography variant="h6" sx={{ minWidth: 200, fontWeight: isExpanded ? 600 : 400 }}>
                   {index + 1}. {step.label}
                 </Typography>
@@ -741,22 +749,22 @@ function ProviderWizard({ provider, onSave, onCancel, onSaveAndClose }) {
                 )}
               </Box>
               {!isExpanded && (
-                <Box sx={{ px: 2, pb: 2, pl: 9 }}> {/* Align with content, accounting for icon + margin */}
+                <Box sx={{ width: '100%', pl: 4, pt: 1, pb: 1 }}>
                   {renderStepPreview(step, index)}
                 </Box>
               )}
-            </Box>
+            </AccordionSummary>
             
-            {/* Step Content - conditionally rendered to avoid ResizeObserver */}
+            {/* Step Content when expanded */}
             {isExpanded && (
-              <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
+              <AccordionDetails>
                 <Box sx={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
                   {renderStepContent(step, index)}
                   {renderNavigationButtons(index)}
                 </Box>
-              </Box>
+              </AccordionDetails>
             )}
-          </Paper>
+          </Accordion>
         );
       })}
     </Box>

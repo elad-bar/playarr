@@ -14,7 +14,7 @@ import {
   useTheme,
 } from '@mui/material';
 import { Search as SearchIcon, Clear as ClearIcon } from '@mui/icons-material';
-import { fetchIPTVProviderCategories } from '../utils';
+import { fetchIPTVProviderCategories, getMediaTypeColors } from '../utils';
 
 /**
  * CategoriesStep - Step 4 (add) / Step 3 (edit), Xtream only
@@ -154,12 +154,7 @@ function CategoriesStep({ provider, data, onChange, onSave }) {
 
   // Get chip color based on category type
   const getChipColor = (categoryType) => {
-    if (categoryType === 'movies') {
-      return theme.palette.warning.main;
-    } else if (categoryType === 'tvshows') {
-      return theme.palette.info.main;
-    }
-    return theme.palette.grey[500];
+    return getMediaTypeColors(categoryType, theme).main;
   };
 
   // Convert hex color to rgba with opacity

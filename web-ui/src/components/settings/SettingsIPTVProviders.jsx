@@ -10,10 +10,12 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
+  Button,
 } from '@mui/material';
 import {
   fetchIPTVProviders,
   deleteIPTVProvider,
+  getProviderTypeColor,
 } from './iptv/utils';
 import ProviderWizard from './iptv/ProviderWizard';
 import AddIcon from '@mui/icons-material/Add';
@@ -38,7 +40,13 @@ function SettingsIPTVProviders() {
       setLoading(true);
       setError(null);
       const data = await fetchIPTVProviders();
-      setProviders(data);
+      // Sort providers alphabetically by id
+      const sortedData = [...data].sort((a, b) => {
+        const idA = (a.id || '').toLowerCase();
+        const idB = (b.id || '').toLowerCase();
+        return idA.localeCompare(idB);
+      });
+      setProviders(sortedData);
     } catch (error) {
       console.error('Error fetching providers:', error);
       setError('Failed to load providers. Please try again later.');
@@ -58,8 +66,8 @@ function SettingsIPTVProviders() {
     setDialogOpen(true);
   };
 
-  const handleAdd = () => {
-    setSelectedProvider(null);
+  const handleAdd = (providerType = null) => {
+    setSelectedProvider(providerType ? { type: providerType } : null);
     setIsNewProvider(true);
     setWizardKey(prev => prev + 1); // Force remount
     setDialogOpen(true);
@@ -94,20 +102,11 @@ function SettingsIPTVProviders() {
       setSuccess(isNewProvider ? 'Provider added successfully' : 'Provider updated successfully');
       setTimeout(() => setSuccess(null), 3000);
 
-      // Update local state
-      if (isNewProvider) {
-        setProviders(prevProviders => [...prevProviders, savedProvider]);
-      } else {
-        setProviders(prevProviders =>
-          prevProviders.map(p => p.id === savedProvider.id ? savedProvider : p)
-        );
-      }
+      // Reload providers to get fresh data (this will also sort them)
+      loadProviders();
 
       setSelectedProvider(savedProvider);
       setIsNewProvider(false);
-
-      // Reload providers to get fresh data
-      loadProviders();
     } catch (error) {
       console.error('Error saving provider:', error);
       setError('Failed to save provider');
@@ -119,16 +118,7 @@ function SettingsIPTVProviders() {
       setSuccess(isNewProvider ? 'Provider added successfully' : 'Provider updated successfully');
       setTimeout(() => setSuccess(null), 3000);
 
-      // Update local state
-      if (isNewProvider) {
-        setProviders(prevProviders => [...prevProviders, savedProvider]);
-      } else {
-        setProviders(prevProviders =>
-          prevProviders.map(p => p.id === savedProvider.id ? savedProvider : p)
-        );
-      }
-
-      // Reload providers to get fresh data
+      // Reload providers to get fresh data (this will also sort them)
       loadProviders();
 
       // Close dialog
@@ -162,71 +152,54 @@ function SettingsIPTVProviders() {
       )}
 
       <Box>
-        <Grid container spacing={3}>
-          {/* Add New Provider Card */}
-          <Grid item xs={12} sm={6} md={4} lg={3}>
-            <Card
-              sx={{
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                border: '2px dashed',
-                borderColor: 'divider',
-                '&:hover': {
-                  borderColor: 'primary.main',
-                  bgcolor: 'action.hover'
-                }
-              }}
-              onClick={handleAdd}
-            >
-              <CardContent sx={{ textAlign: 'center', py: 4 }}>
-                <AddIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                <Typography variant="h6" color="text.secondary">
-                  Add New Provider
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
+        {/* Add Provider Buttons */}
+        <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleAdd('xtream')}
+            sx={{
+              backgroundColor: getProviderTypeColor('xtream'),
+              color: '#ffffff',
+              '&:hover': {
+                backgroundColor: '#C0392B', // Darker red
+              },
+            }}
+          >
+            Add Xtream Code
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleAdd('agtv')}
+            sx={{
+              backgroundColor: getProviderTypeColor('agtv'),
+              color: '#ffffff',
+              '&:hover': {
+                backgroundColor: '#16A085', // Darker teal
+              },
+            }}
+          >
+            Add Apollo Group TV
+          </Button>
+        </Box>
 
-          {/* Provider Cards */}
+        {/* Provider Cards */}
+        <Grid container spacing={3}>
           {providers.map((provider) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={provider.id}>
-              <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <Card sx={{ 
+                height: '100%', 
+                display: 'flex', 
+                flexDirection: 'column',
+                borderBottom: `2px ${provider.enabled ? 'solid' : 'dashed'} ${getProviderTypeColor(provider.type)}`
+              }}>
                 <CardContent sx={{ flexGrow: 1 }}>
-                  {/* Title with Provider ID and Chips */}
+                  {/* Title with Provider ID */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
                     <Typography variant="h6" sx={{ fontFamily: 'monospace', flex: 1 }}>
                       {provider.id}
                     </Typography>
-                    <Box sx={{ display: 'flex', gap: 0.5, ml: 1 }}>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          px: 1,
-                          py: 0.5,
-                          borderRadius: 1,
-                          bgcolor: 'primary.light',
-                          color: 'primary.contrastText',
-                          textTransform: 'capitalize'
-                        }}
-                      >
-                        {provider.type || 'Unknown'}
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          px: 1,
-                          py: 0.5,
-                          borderRadius: 1,
-                          bgcolor: provider.enabled ? 'success.light' : 'error.light',
-                          color: provider.enabled ? 'success.contrastText' : 'error.contrastText'
-                        }}
-                      >
-                        {provider.enabled ? 'Enabled' : 'Disabled'}
-                      </Typography>
-                    </Box>
                   </Box>
 
                   {/* Provider Details */}
