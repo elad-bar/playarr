@@ -1,4 +1,4 @@
-# Sync Media Types Selection Feature [New]
+# Sync Media Types Selection Feature [Done]
 
 ## Overview
 
