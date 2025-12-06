@@ -78,28 +78,33 @@ This document tracks known issues that need to be addressed in the Playarr proje
 
 ### 4. Similar Titles Not Being Added to Titles
 
-**Status:** Open  
+**Status:** Resolved  
 **Priority:** Medium  
 **Description:** Similar titles are not being populated in the titles collection. When titles are synced from providers, the `similar_titles` field is not being populated with related title keys, resulting in all titles having empty or missing similar titles data.
 
+**Root Cause:** Two issues were identified:
+1. **Field name mismatch:** The code was storing similar titles as `similar` but reading them as `similar_titles`, causing a mismatch between storage and retrieval.
+2. **Processing logic limitation:** The enrichment process only processed newly created titles (where `createdAt === lastUpdated`), skipping existing titles that didn't have the `similar_titles` field set.
+
+**Solution:** 
+1. Fixed field name mismatch in `TMDBProcessingManager.js`:
+   - Changed all references from `similar` to `similar_titles` (lines 291, 329, 404, 415, 416)
+   - Updated JSDoc comments to reflect correct field name
+2. Updated processing logic to process all titles without `similar_titles` field:
+   - Simplified filter to `allMainTitles.filter(title => title.similar_titles === undefined)`
+   - Removed the `createdAt === lastUpdated` restriction that was limiting processing to only newly created titles
+   - This allows backfilling existing titles that don't have the field set
+
 **Impact:**
-- Users cannot discover related/similar content through the UI
-- The "Recommendations" section in title details shows no similar titles
-- Reduced content discovery and user engagement
-- Similar titles feature is non-functional
+- Similar titles are now properly stored and retrieved
+- Users can discover related/similar content through the UI
+- The "Recommendations" section in title details now displays similar titles
+- Existing titles without similar_titles are automatically backfilled during job execution
 
 **Related Components:**
-- `TMDBProcessingManager.js` (likely where similar titles should be fetched from TMDB API)
-- `BaseIPTVProcessingManager.js` (title processing pipeline)
-- `TitlesManager.js` (title data management)
-- `TitleRepository.js` (database operations)
-- `SyncIPTVProviderTitlesJob.js` (sync job that processes titles)
-
-**Investigation Notes:**
-- Similar titles data should be fetched from TMDB API during title processing
-- Need to verify if TMDB API calls for similar titles are being made
-- Check if similar titles are being stored in the database but not retrieved
-- Verify the data flow from provider sync → TMDB enrichment → database storage
+- `TMDBProcessingManager.js` (fixed - field name and processing logic)
+- `TitlesManager.js` (was correctly reading `similar_titles` field)
+- `ProviderTitlesMonitorJob.js` (orchestrates similar titles enrichment)
 
 ---
 
