@@ -315,7 +315,7 @@ class BaseFormattingManager extends BaseManager {
       // If top sources all failed, continue with remaining sources sequentially
       for (let i = topSourcesToRace.length; i < balancedSources.length; i++) {
         const source = balancedSources[i];
-        const sourceUrl = typeof source === 'string' ? source.url : source.url;
+        const sourceUrl = typeof source === 'string' ? source : source.url;
         const providerType = typeof source === 'object' ? source.providerType : null;
         
         this.logger.info(`Checking source ${formatNumber(i + 1)}/${formatNumber(balancedSources.length)}: ${sourceUrl}`);
@@ -433,8 +433,9 @@ class BaseFormattingManager extends BaseManager {
       if (selectedIndex > 0) {
         const [selected] = sourcesWithScores.splice(selectedIndex, 1);
         sourcesWithScores.unshift(selected);
-        this._lastSelectedProvider.set(titleKey, selectedProvider.provider_id);
       }
+      // Always update tracking map for round-robin, even if provider is already at index 0
+      this._lastSelectedProvider.set(titleKey, selectedProvider.provider_id);
     }
 
     return sourcesWithScores;
