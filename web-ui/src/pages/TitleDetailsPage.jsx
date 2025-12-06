@@ -8,7 +8,7 @@ import { setSelectedTitle, fetchTitleDetails, addToWatchlist, removeFromWatchlis
 /**
  * TitleDetailsPage component
  * Handles URL-based navigation for title details with history support
- * URL format: /media/vod/:type/:titleId?nav=type_titleId&nav=type_titleId
+ * URL format: /media/vod/:type/:titleId?nav=titleId&nav=titleId
  */
 const TitleDetailsPage = () => {
   const { type, titleId } = useParams();
@@ -41,10 +41,10 @@ const TitleDetailsPage = () => {
     if (navHistory.length > 0) {
       // Pop the last item from history
       const newHistory = [...navHistory];
-      const lastNav = newHistory.pop();
+      const navTitleId = newHistory.pop();
       
-      // Parse the last nav item (format: type_titleId)
-      const [navType, navTitleId] = lastNav.split('_');
+      // Use current type from URL params (similar titles are always same type)
+      const navType = type;
       
       // Build new URL with remaining history
       const newSearchParams = new URLSearchParams();
@@ -77,8 +77,8 @@ const TitleDetailsPage = () => {
       return;
     }
     
-    // Add current title to history (format: type_titleId for URL)
-    const currentNav = titleKey.replace('-', '_');
+    // Add current title ID to history (type is already in URL path)
+    const currentNav = titleId;
     const newHistory = [...navHistory, currentNav];
     
     // Build new URL
