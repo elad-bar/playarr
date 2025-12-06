@@ -288,7 +288,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
   /**
    * Enrich main titles with similar titles
    * Fetches similar titles from TMDB API, filters to only include titles available in main titles,
-   * and stores the filtered title_keys under the 'similar' property as an array
+   * and stores the filtered title_keys under the 'similar_titles' property as an array
    * @returns {Promise<void>}
    */
   async enrichSimilarTitles() {
@@ -316,26 +316,11 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       return;
     }
 
-    // Filter to only process newly created titles (createdAt == lastUpdated)
-    // Titles without similar data that aren't newly created were already processed
-    // and just didn't find matches, so we skip them to avoid unnecessary API calls
-    const titlesToProcess = allMainTitles.filter(title => {
-      // Skip titles without createdAt or lastUpdated (legacy data)
-      if (!title.createdAt || !title.lastUpdated) {
-        return false;
-      }
-      
-      // Skip titles that already have similar data (already processed)
-      if (title.similar !== undefined) {
-        return false;
-      }
-      
-      // Only process if title was just created (createdAt == lastUpdated)
-      return title.createdAt === title.lastUpdated;
-    });
-
+    // Filter to only process titles that don't have similar_titles set
+    const titlesToProcess = allMainTitles.filter(title => title.similar_titles === undefined);
+    
     if (titlesToProcess.length === 0) {
-      this.logger.info('No titles need similar titles enrichment (no newly created titles)');
+      this.logger.info('No titles need similar titles enrichment');
       return;
     }
 
@@ -346,7 +331,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
     // Create a Set of available title_keys for matching similar titles
     const availableTitleKeys = new Set(allMainTitles.map(t => t.title_key || generateTitleKey(t.type, t.title_id)));
     
-    this.logger.info(`Enriching similar titles for ${formatNumber(titlesToProcess.length)} newly created titles (${formatNumber(allMainTitles.length - titlesToProcess.length)} skipped)...`);
+    this.logger.info(`Enriching similar titles for ${formatNumber(titlesToProcess.length)} title(s) (${formatNumber(allMainTitles.length - titlesToProcess.length)} skipped)...`);
 
     const updatedTitles = [];
     let processedCount = 0;
@@ -401,7 +386,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
             // Create updated title with similar titles (store as title_keys)
             const updatedTitle = {
               ...existingMainTitleMap.get(titleKey) || mainTitle,
-              similar: similarTitleIds,
+              similar_titles: similarTitleIds,
               lastUpdated: new Date().toISOString() // Update lastUpdated to mark as processed
             };
 
@@ -412,8 +397,8 @@ export class TMDBProcessingManager extends BaseProcessingManager {
             this.logger.error(`Error enriching similar titles for ID ${mainTitle.title_id}: ${error.message}`);
             // Still add the title without similar titles to preserve it
             const existingTitle = existingMainTitleMap.get(titleKey) || mainTitle;
-            if (!existingTitle.similar) {
-              existingTitle.similar = [];
+            if (!existingTitle.similar_titles) {
+              existingTitle.similar_titles = [];
             }
             // Update lastUpdated even on error to prevent reprocessing
             existingTitle.lastUpdated = new Date().toISOString();
