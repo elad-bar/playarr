@@ -537,11 +537,13 @@ class StremioManager extends BaseFormattingManager {
       const titleKey = `${mediaType}-${titleId}`;
 
       // Get stream URL using parsed season/episode (inherited from BaseFormattingManager)
+      const username = user?.username || null;
       const streamUrl = await this.getBestSource(
         titleId,
         mediaType,
         parsedSeason,
-        parsedEpisode
+        parsedEpisode,
+        username
       );
 
       if (!streamUrl) {
