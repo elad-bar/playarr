@@ -5,8 +5,7 @@ import {
     Typography,
     CircularProgress,
     Alert,
-    IconButton,
-    Tooltip,
+    Button,
     Grid,
     Divider,
 } from '@mui/material';
@@ -299,22 +298,22 @@ const SettingsJobs = () => {
 
     return (
         <Box sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 2 }}>
-                <Tooltip title="Refresh">
-                    <span>
-                        <IconButton 
-                            onClick={handleRefresh} 
-                            color="primary"
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <CircularProgress size={20} />
-                            ) : (
-                                <RefreshIcon />
-                            )}
-                        </IconButton>
-                    </span>
-                </Tooltip>
+            <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
+                <Button
+                    variant="contained"
+                    startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <RefreshIcon />}
+                    onClick={handleRefresh}
+                    disabled={loading}
+                    sx={{
+                        backgroundColor: '#1976d2', // Primary blue
+                        color: '#ffffff',
+                        '&:hover': {
+                            backgroundColor: '#1565c0', // Darker blue
+                        },
+                    }}
+                >
+                    Refresh
+                </Button>
             </Box>
 
             {!engineReachable && (

@@ -5,7 +5,6 @@ import {
   Typography,
   Alert,
   Chip,
-  useTheme,
 } from '@mui/material';
 import { fetchIPTVProviders, getProviderTypeColor } from '../utils';
 
@@ -17,7 +16,6 @@ import { fetchIPTVProviders, getProviderTypeColor } from '../utils';
  * @param {Function} onValidate - Callback to trigger validation
  */
 function BasicDetailsStep({ data, onChange, errors, onValidate }) {
-  const theme = useTheme();
   const [providerId, setProviderId] = useState(data?.id || '');
   const providerType = data?.type || 'xtream'; // Type is determined by button clicked, not editable
   const [existingProviders, setExistingProviders] = useState([]);
