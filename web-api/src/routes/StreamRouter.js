@@ -24,7 +24,8 @@ class StreamRouter extends BaseRouter {
     this.router.get('/movies/:title_id', this.middleware.requireApiKey, async (req, res) => {
       try {
         const { title_id } = req.params;
-        const stream = await this._stremioManager.getBestSource(title_id, 'movies');
+        const username = req.user?.username || null;
+        const stream = await this._stremioManager.getBestSource(title_id, 'movies', null, null, username);
 
         if (!stream) {
           return this.returnErrorResponse(res, 503, 'No available providers');
@@ -48,11 +49,13 @@ class StreamRouter extends BaseRouter {
     this.router.get('/tvshows/:title_id/:season/:episode', this.middleware.requireApiKey, async (req, res) => {
       try {
         const { title_id, season, episode } = req.params;
+        const username = req.user?.username || null;
         const stream = await this._stremioManager.getBestSource(
           title_id,
           'tvshows',
           parseInt(season, 10),
-          parseInt(episode, 10)
+          parseInt(episode, 10),
+          username
         );
 
         if (!stream) {

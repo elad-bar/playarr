@@ -420,7 +420,7 @@ class XtreamRouter extends BaseRouter {
     this.logger.info(`Movie stream request: username=${username}, streamId=${streamId}`);
     this.logger.debug(`Parsed movie stream: streamId=${streamId}, titleId=${titleId}`);
 
-        const streamUrl = await this._xtreamManager.getBestSource(titleId, 'movies');
+        const streamUrl = await this._xtreamManager.getBestSource(titleId, 'movies', null, null, username);
     if (!streamUrl) {
       this.logger.warn(`No stream available: username=${username}, titleId=${titleId}`);
       return this.returnErrorResponse(res, 503, 'No available providers');
@@ -455,7 +455,8 @@ class XtreamRouter extends BaseRouter {
       title_id,
       'tvshows',
       season,
-      episode
+      episode,
+      username
     );
 
     if (!streamUrl) {

@@ -3,7 +3,6 @@ import {
   Box,
   Tabs,
   Tab,
-  Typography,
   CircularProgress,
 } from '@mui/material';
 import { authService } from '../../services/auth';
