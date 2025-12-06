@@ -5,9 +5,9 @@ import {
     Typography,
     CircularProgress,
     Alert,
-    IconButton,
-    Tooltip,
-    Grid
+    Button,
+    Grid,
+    Divider,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import axiosInstance from '../../config/axios';
@@ -137,6 +137,7 @@ const JobCard = ({ job }) => {
                 <Typography variant="h6" gutterBottom>
                     {job.name}
                 </Typography>
+                <Divider sx={{ mb: 2 }} />
                 <Typography variant="body2" color="text.secondary" paragraph>
                     {job.description}
                 </Typography>
@@ -297,25 +298,22 @@ const SettingsJobs = () => {
 
     return (
         <Box sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                    Engine Jobs
-                </Typography>
-                <Tooltip title="Refresh">
-                    <span>
-                        <IconButton 
-                            onClick={handleRefresh} 
-                            color="primary"
-                            disabled={loading}
-                        >
-                            {loading ? (
-                                <CircularProgress size={20} />
-                            ) : (
-                                <RefreshIcon />
-                            )}
-                        </IconButton>
-                    </span>
-                </Tooltip>
+            <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
+                <Button
+                    variant="contained"
+                    startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <RefreshIcon />}
+                    onClick={handleRefresh}
+                    disabled={loading}
+                    sx={{
+                        backgroundColor: '#1976d2', // Primary blue
+                        color: '#ffffff',
+                        '&:hover': {
+                            backgroundColor: '#1565c0', // Darker blue
+                        },
+                    }}
+                >
+                    Refresh
+                </Button>
             </Box>
 
             {!engineReachable && (

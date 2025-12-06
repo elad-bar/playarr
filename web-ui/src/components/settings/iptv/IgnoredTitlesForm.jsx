@@ -11,14 +11,16 @@ import {
   TableHead,
   TableRow,
   Chip,
+  useTheme,
 } from '@mui/material';
-import { fetchIPTVProviderIgnoredTitles } from './utils';
+import { fetchIPTVProviderIgnoredTitles, getMediaTypeColors, getMediaTypeLabel } from './utils';
 
 /**
  * Component to display ignored titles for an IPTV provider
  * Shows title name (with year), type, and the issue that caused it to be ignored
  */
 function IgnoredTitlesForm({ provider }) {
+  const theme = useTheme();
   const [ignoredTitles, setIgnoredTitles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -49,7 +51,7 @@ function IgnoredTitlesForm({ provider }) {
 
   // Parse title key to extract type and ID
   const parseTitleKey = (titleKey) => {
-    const match = titleKey.match(/^(movies|tvshows)-(.+)$/);
+    const match = titleKey.match(/^(movies|tvshows|live)-(.+)$/);
     if (match) {
       return {
         type: match[1],
@@ -135,9 +137,12 @@ function IgnoredTitlesForm({ provider }) {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={parsed.type === 'movies' ? 'Movie' : parsed.type === 'tvshows' ? 'TV Show' : 'Unknown'}
+                      label={getMediaTypeLabel(parsed.type)}
                       size="small"
-                      color={parsed.type === 'movies' ? 'primary' : parsed.type === 'tvshows' ? 'secondary' : 'default'}
+                      sx={{
+                        backgroundColor: getMediaTypeColors(parsed.type, theme).main,
+                        color: getMediaTypeColors(parsed.type, theme).contrastText,
+                      }}
                     />
                   </TableCell>
                   <TableCell>

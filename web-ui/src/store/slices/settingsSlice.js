@@ -44,7 +44,6 @@ export const fetchTMDBListItems = createAsyncThunk(
 );
 
 const initialState = {
-  activeTab: 0,
   tmdb: {
     apiKey: '',
     lists: [],
@@ -62,9 +61,6 @@ const settingsSlice = createSlice({
   name: 'settings',
   initialState,
   reducers: {
-    setActiveTab: (state, action) => {
-      state.activeTab = action.payload;
-    },
     setSelectedList: (state, action) => {
       state.tmdb.selectedList = action.payload;
     },
@@ -162,7 +158,6 @@ const settingsSlice = createSlice({
 });
 
 export const {
-  setActiveTab,
   setSelectedList,
   setSelectedItems,
   clearTMDBError,

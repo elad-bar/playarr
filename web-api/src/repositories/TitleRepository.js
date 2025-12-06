@@ -15,7 +15,9 @@ export class TitleRepository extends BaseRepository {
     super(
       mongoClient,
       'titles',
-      (doc) => doc.title_key
+      (doc) => doc.title_key,
+      'data',  // Collection type
+      'v1'     // Schema version
     );
   }
 
@@ -191,31 +193,44 @@ export class TitleRepository extends BaseRepository {
   }
 
   /**
-   * Remove provider from titles.streams
-   * This method is no longer used - provider removal is handled directly via MongoDB $pull operations
-   * Kept for backward compatibility but returns zero counts
-   * @param {string} providerId - Provider ID to remove
+   * Remove provider sources from all media items in specified titles
    * @param {Array<string>} titleKeys - Array of title_key values
-   * @returns {Promise<{titlesUpdated: number, streamsRemoved: number}>}
+   * @param {string} providerId - Provider ID to remove
+   * @returns {Promise<import('mongodb').UpdateResult>} Update result
    */
-  async removeProviderFromStreams(providerId, titleKeys) {
-    // This method is no longer used - provider removal is handled in ProvidersManager
-    // using MongoDB $pull operations on titles.media[].sources
-    return { titlesUpdated: 0, streamsRemoved: 0 };
+  async removeProviderSourcesFromTitles(titleKeys, providerId) {
+    return await this.updateMany(
+      { title_key: { $in: titleKeys } },
+      { $pull: { 'media.$[elem].sources': { provider_id: providerId } } },
+      { arrayFilters: [{ 'elem.sources': { $exists: true } }] }
+    );
   }
 
   /**
-   * Delete titles without streams
-   * This method is no longer used - title deletion is handled directly in ProvidersManager
-   * Kept for backward compatibility
-   * @param {Array<string>} titleKeys - Array of title_key values to check
-   * @param {Set<string>} titleKeysWithStreams - Set of title_keys that have streams (unused)
-   * @returns {Promise<number>} Number of deleted titles
+   * Remove empty media items (media items with no sources) from specified titles
+   * @param {Array<string>} titleKeys - Array of title_key values
+   * @returns {Promise<import('mongodb').UpdateResult>} Update result
    */
-  async deleteWithoutStreams(titleKeys, titleKeysWithStreams) {
-    // This method is no longer used - title deletion is handled in ProvidersManager
-    // by querying titles.media array directly
-    return 0;
+  async removeEmptyMediaItems(titleKeys) {
+    return await this.updateMany(
+      { title_key: { $in: titleKeys } },
+      { $pull: { media: { sources: { $size: 0 } } } }
+    );
+  }
+
+  /**
+   * Delete titles that have no media items left
+   * @param {Array<string>} titleKeys - Array of title_key values to check
+   * @returns {Promise<import('mongodb').DeleteResult>} Delete result
+   */
+  async deleteEmptyTitles(titleKeys) {
+    return await this.deleteMany({
+      title_key: { $in: titleKeys },
+      $or: [
+        { media: { $size: 0 } },
+        { media: { $exists: false } }
+      ]
+    });
   }
 }
 

@@ -1,4 +1,5 @@
 import { BaseProvider } from './BaseProvider.js';
+import { formatNumber } from '../utils/numberFormat.js';
 
 /**
  * Base class for all IPTV providers (Xtream, AGTV)
@@ -10,11 +11,12 @@ import { BaseProvider } from './BaseProvider.js';
  */
 export class BaseIPTVProvider extends BaseProvider {
   /**
+   * @param {string} loggerName - Logger name (required)
    * @param {Object<string, Object>} providerConfigs - Map of provider ID to provider configuration
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
    */
-  constructor(providerConfigs = {}, cacheDir = null) {
-    super(null, cacheDir);
+  constructor(loggerName, providerConfigs = {}, cacheDir = null) {
+    super(loggerName, cacheDir);
     
     // Store provider configs as Map<providerId, config>
     // Filter out deleted providers
@@ -46,7 +48,7 @@ export class BaseIPTVProvider extends BaseProvider {
       }
     }
     
-    this.logger.debug(`Loaded ${this._providerConfigs.size} provider config(s)`);
+    this.logger.debug(`Loaded ${formatNumber(this._providerConfigs.size)} provider config(s)`);
   }
 
   /**
@@ -76,7 +78,7 @@ export class BaseIPTVProvider extends BaseProvider {
       }
     }
     
-    this.logger.debug(`Reloaded provider configs: ${this._providerConfigs.size} provider(s)`);
+    this.logger.debug(`Reloaded provider configs: ${formatNumber(this._providerConfigs.size)} provider(s)`);
   }
 
   /**
@@ -91,6 +93,24 @@ export class BaseIPTVProvider extends BaseProvider {
     const rateConfig = provider.api_rate || { concurrent: 1, duration_seconds: 1 };
     
     return this._getOrCreateLimiter(providerId, rateConfig);
+  }
+
+  /**
+   * HTTP request with caching and rate limiting (IPTV-specific override)
+   * Automatically resolves per-provider limiter if not provided
+   * @protected
+   * @override
+   * @param {Object} options - Request options (same as BaseProvider._httpRequest)
+   * @returns {Promise<any>} Response data
+   */
+  async _httpRequest(options) {
+    // Extract limiter based on providerId if not provided
+    if (!options.limiter && options.providerId) {
+      options.limiter = this._getLimiter(options.providerId);
+    }
+    
+    // Call parent implementation with resolved limiter
+    return super._httpRequest(options);
   }
 
   /**
@@ -157,6 +177,28 @@ export class BaseIPTVProvider extends BaseProvider {
    */
   async fetchM3U8(providerId, type, page = null) {
     throw new Error('fetchM3U8() must be implemented by subclass');
+  }
+
+  /**
+   * Fetch live TV channels from provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<Array>} Array of channel objects with uniform structure:
+   *   - provider_id: string
+   *   - channel_id: string
+   *   - channel_key: string (format: "live-{providerId}-{channelId}")
+   *   - name: string
+   *   - url: string
+   *   - tvg_id: string | null
+   *   - tvg_name: string | null
+   *   - tvg_logo: string | null
+   *   - group_title: string | null
+   *   - duration: number
+   *   - createdAt: Date
+   *   - lastUpdated: Date
+   * @abstract
+   */
+  async fetchLiveChannels(providerId) {
+    throw new Error('fetchLiveChannels() must be implemented by subclass');
   }
 }
 

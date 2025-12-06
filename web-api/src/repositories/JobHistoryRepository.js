@@ -15,7 +15,9 @@ export class JobHistoryRepository extends BaseRepository {
     super(
       mongoClient,
       'job_history',
-      (doc) => `${doc.job_name}|${doc.provider_id || ''}`
+      (doc) => `${doc.job_name}|${doc.provider_id || ''}`,
+      'data',  // Collection type
+      'v1'     // Schema version
     );
   }
 

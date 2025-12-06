@@ -14,8 +14,6 @@ const ProfileM3UEndpoint = ({ apiKey, showApiKey, maskApiKey, onCopyUrl, hideTit
     onCopyUrl();
   };
 
-  const hasLiveTV = profile?.liveTV?.m3u_url;
-
   return (
     <Paper elevation={3} sx={{ p: 3, height: '100%' }}>
       {!hideTitle && (
@@ -98,80 +96,74 @@ const ProfileM3UEndpoint = ({ apiKey, showApiKey, maskApiKey, onCopyUrl, hideTit
         </Box>
       </Box>
 
-      {hasLiveTV && (
-        <Box sx={{ mt: 3, mb: 3 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1.5, color: 'text.primary' }}>
-            Live TV M3U Playlist
-          </Typography>
-          <Box sx={{ mb: 1.5 }}>
-            <Box
-              sx={{
-                p: 2,
-                bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.50',
-                borderRadius: 1,
-                border: '1px solid',
-                borderColor: 'divider',
-                fontFamily: 'monospace',
-                fontSize: '0.9rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                wordBreak: 'break-all',
-                color: 'text.primary'
-              }}
-            >
-              <Box component="span" sx={{ flex: 1, pr: 1 }}>
-                {window.location.origin}/api/livetv/m3u?api_key={showApiKey ? apiKey : maskApiKey(apiKey)}
-              </Box>
-              <Tooltip title="Copy URL">
-                <IconButton
-                  size="small"
-                  onClick={() => copyUrl(`${window.location.origin}/api/livetv/m3u?api_key=${apiKey}`)}
-                >
-                  <ContentCopyIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
+      <Box sx={{ mt: 3, mb: 3 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1.5, color: 'text.primary' }}>
+          Live TV M3U Playlist
+        </Typography>
+        <Box sx={{ mb: 1.5 }}>
+          <Box
+            sx={{
+              p: 2,
+              bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.50',
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'divider',
+              fontFamily: 'monospace',
+              fontSize: '0.9rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              wordBreak: 'break-all',
+              color: 'text.primary'
+            }}
+          >
+            <Box component="span" sx={{ flex: 1, pr: 1 }}>
+              {window.location.origin}/api/livetv/m3u?api_key={showApiKey ? apiKey : maskApiKey(apiKey)}
             </Box>
+            <Tooltip title="Copy URL">
+              <IconButton
+                size="small"
+                onClick={() => copyUrl(`${window.location.origin}/api/livetv/m3u?api_key=${apiKey}`)}
+              >
+                <ContentCopyIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Box>
-          {profile?.liveTV?.epg_url && (
-            <>
-              <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1.5, color: 'text.primary' }}>
-                Live TV EPG XML
-              </Typography>
-              <Box>
-                <Box
-                  sx={{
-                    p: 2,
-                    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.50',
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    fontFamily: 'monospace',
-                    fontSize: '0.9rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    wordBreak: 'break-all',
-                    color: 'text.primary'
-                  }}
-                >
-                  <Box component="span" sx={{ flex: 1, pr: 1 }}>
-                    {window.location.origin}/api/livetv/epg?api_key={showApiKey ? apiKey : maskApiKey(apiKey)}
-                  </Box>
-                  <Tooltip title="Copy URL">
-                    <IconButton
-                      size="small"
-                      onClick={() => copyUrl(`${window.location.origin}/api/livetv/epg?api_key=${apiKey}`)}
-                    >
-                      <ContentCopyIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-              </Box>
-            </>
-          )}
         </Box>
-      )}
+        <Typography variant="subtitle1" sx={{ fontWeight: 'bold', mb: 1.5, color: 'text.primary' }}>
+          Live TV EPG XML
+        </Typography>
+        <Box>
+          <Box
+            sx={{
+              p: 2,
+              bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.50',
+              borderRadius: 1,
+              border: '1px solid',
+              borderColor: 'divider',
+              fontFamily: 'monospace',
+              fontSize: '0.9rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              wordBreak: 'break-all',
+              color: 'text.primary'
+            }}
+          >
+            <Box component="span" sx={{ flex: 1, pr: 1 }}>
+              {window.location.origin}/api/livetv/epg?api_key={showApiKey ? apiKey : maskApiKey(apiKey)}
+            </Box>
+            <Tooltip title="Copy URL">
+              <IconButton
+                size="small"
+                onClick={() => copyUrl(`${window.location.origin}/api/livetv/epg?api_key=${apiKey}`)}
+              >
+                <ContentCopyIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Box>
+      </Box>
 
       <Box sx={{ mt: 3, p: 2, bgcolor: 'info.light', borderRadius: 1, border: '1px solid', borderColor: 'info.main' }}>
         <Typography variant="body1" sx={{ fontWeight: 'bold', mb: 0.5, color: 'text.primary' }}>
@@ -179,7 +171,6 @@ const ProfileM3UEndpoint = ({ apiKey, showApiKey, maskApiKey, onCopyUrl, hideTit
         </Typography>
         <Typography variant="body2" sx={{ color: 'text.primary' }}>
           Returns an M3U playlist file (text/plain format) containing all titles from your watchlist.
-          {hasLiveTV && ' Live TV channels are included if configured.'}
           You can use this URL directly in your media player.
         </Typography>
       </Box>

@@ -5,9 +5,15 @@ import {
   Typography,
   IconButton,
   Tooltip,
-  Divider
+  Divider,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  List,
+  ListItem
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 const ProfileXtreamCode = ({ apiKey, username, showApiKey, maskApiKey, onCopyUrl, hideTitle = false }) => {
   const baseUrl = window.location.origin;
@@ -17,6 +23,35 @@ const ProfileXtreamCode = ({ apiKey, username, showApiKey, maskApiKey, onCopyUrl
     navigator.clipboard.writeText(text);
     onCopyUrl();
   };
+
+  // Xtream Code API endpoints
+  const endpoints = [
+    {
+      name: 'Main API Endpoint',
+      url: `${xtreamUrl}/player_api.php?username=${username}&password=${apiKey}&action={action}`,
+      description: 'Base endpoint for all Xtream Code API actions'
+    },
+    {
+      name: 'Available Actions',
+      url: 'get_vod_categories, get_vod_streams, get_series_categories, get_series, get_vod_info, get_series_info, get_short_epg, get_simple_data_table, get_live_categories, get_live_streams',
+      description: 'Replace {action} in the main API endpoint with one of these actions'
+    },
+    {
+      name: 'Movie Stream',
+      url: `${xtreamUrl}/movie/${username}/${apiKey}/{streamId}.{ext}`,
+      description: 'Stream movies (replace {streamId} with movie ID and {ext} with container extension like mp4, mkv)'
+    },
+    {
+      name: 'Series Stream',
+      url: `${xtreamUrl}/series/${username}/${apiKey}/{streamId}.{ext}`,
+      description: 'Stream TV series episodes (replace {streamId} with episode ID and {ext} with container extension)'
+    },
+    {
+      name: 'Live TV Stream',
+      url: `${xtreamUrl}/live/${username}/${apiKey}/{streamId}.{ext}`,
+      description: 'Stream live TV channels (replace {streamId} with channel ID and {ext} with container extension)'
+    }
+  ];
 
   return (
     <Paper elevation={3} sx={{ p: 3, height: '100%' }}>
@@ -135,6 +170,74 @@ const ProfileXtreamCode = ({ apiKey, username, showApiKey, maskApiKey, onCopyUrl
           <strong>4.</strong> Supported actions: get_vod_categories, get_vod_streams, get_series_categories, get_series, get_vod_info, get_series_info
         </Typography>
       </Box>
+
+      {/* Debug Panel */}
+      <Accordion defaultExpanded={false} sx={{ mt: 3 }}>
+        <AccordionSummary
+          expandIcon={<ExpandMoreIcon />}
+          aria-controls="debug-panel-content"
+          id="debug-panel-header"
+        >
+          <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+            Debug
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography variant="body2" sx={{ mb: 2, color: 'text.secondary' }}>
+            List of endpoints being used for Xtream Code API:
+          </Typography>
+          <List>
+            {endpoints.map((endpoint, index) => (
+              <React.Fragment key={index}>
+                <ListItem
+                  sx={{
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    pb: 2
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 0.5 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 'bold', flex: 1 }}>
+                      {endpoint.name}
+                    </Typography>
+                    <Tooltip title="Copy URL">
+                      <IconButton
+                        size="small"
+                        onClick={() => copyUrl(endpoint.url)}
+                      >
+                        <ContentCopyIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      bgcolor: (theme) => theme.palette.mode === 'dark' ? 'grey.800' : 'grey.50',
+                      borderRadius: 1,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      fontFamily: 'monospace',
+                      fontSize: '0.85rem',
+                      width: '100%',
+                      wordBreak: 'break-all',
+                      color: 'text.primary',
+                      mb: 0.5
+                    }}
+                  >
+                    {endpoint.url}
+                  </Box>
+                  {endpoint.description && (
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontStyle: 'italic' }}>
+                      {endpoint.description}
+                    </Typography>
+                  )}
+                </ListItem>
+                {index < endpoints.length - 1 && <Divider />}
+              </React.Fragment>
+            ))}
+          </List>
+        </AccordionDetails>
+      </Accordion>
     </Paper>
   );
 };

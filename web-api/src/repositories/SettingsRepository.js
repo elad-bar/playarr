@@ -15,7 +15,9 @@ export class SettingsRepository extends BaseRepository {
     super(
       mongoClient,
       'settings',
-      (doc) => doc._id
+      (doc) => doc._id,
+      'configuration', // Collection type
+      'v1'             // Schema version
     );
   }
 

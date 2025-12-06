@@ -3,14 +3,18 @@ import { createLogger } from '../utils/logger.js';
 const logger = createLogger('SyncLiveTVJob');
 
 /**
- * Job for syncing Live TV channels and EPG from user-configured M3U and EPG URLs
+ * Job for syncing Live TV channels from active IPTV providers
  */
 export class SyncLiveTVJob {
   /**
-   * @param {import('../managers/liveTV.js').LiveTVManager} liveTVManager - Live TV manager instance
+   * @param {import('../managers/domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance
+   * @param {import('../managers/processing/LiveTVProcessingManager.js').LiveTVProcessingManager} liveTVProcessingManager - Live TV processing manager instance
+   * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager instance
    */
-  constructor(liveTVManager) {
-    this.liveTVManager = liveTVManager;
+  constructor(iptvProviderManager, liveTVProcessingManager, jobHistoryManager) {
+    this._iptvProviderManager = iptvProviderManager;
+    this._liveTVProcessingManager = liveTVProcessingManager;
+    this._jobHistoryManager = jobHistoryManager;
     this.logger = logger;
   }
 
@@ -21,8 +25,37 @@ export class SyncLiveTVJob {
   async execute() {
     try {
       this.logger.info('Starting Live TV sync job...');
-      const result = await this.liveTVManager.syncAllUsers();
-      this.logger.info(`Live TV sync completed: ${result.users_processed} user(s) processed`);
+      
+      // Get active providers
+      const allProviders = await this._iptvProviderManager.findByQuery({
+        type: { $in: ['agtv', 'xtream'] },
+        enabled: { $ne: false },
+        deleted: { $ne: true }
+      });
+      
+      // Filter to only providers with Live TV sync enabled
+      // For v1 providers without sync_media_types, default to true (backward compatibility)
+      const providers = allProviders.filter(provider => {
+        const syncTypes = provider.sync_media_types;
+        if (!syncTypes) {
+          // v1 provider - default to true for backward compatibility
+          return true;
+        }
+        return syncTypes.live === true;
+      });
+      
+      if (providers.length === 0) {
+        this.logger.info('No active providers found for Live TV sync');
+        return {
+          providers_processed: 0,
+          results: []
+        };
+      }
+      
+      // Sync Live TV for enabled providers
+      const result = await this._liveTVProcessingManager.syncProviders(providers);
+      
+      this.logger.info(`Live TV sync completed: ${result.providers_processed} provider(s) processed`);
       return result;
     } catch (error) {
       this.logger.error(`Live TV sync job failed: ${error.message}`);

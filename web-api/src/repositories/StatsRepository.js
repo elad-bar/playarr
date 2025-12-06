@@ -15,7 +15,9 @@ export class StatsRepository extends BaseRepository {
     super(
       mongoClient,
       'stats',
-      (doc) => doc._id
+      (doc) => doc._id,
+      'data',  // Collection type
+      'v1'     // Schema version
     );
   }
 

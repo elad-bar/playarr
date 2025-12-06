@@ -4,12 +4,10 @@ import {
   Paper,
   Typography,
   TextField,
-  Button,
   IconButton,
   InputAdornment,
   Tooltip
 } from '@mui/material';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
@@ -20,8 +18,6 @@ const ProfileApiKey = ({
   setShowApiKey,
   apiKeyCopied,
   onCopy,
-  onRegenerate,
-  regenerating,
   maskApiKey
 }) => {
   return (
@@ -30,15 +26,6 @@ const ProfileApiKey = ({
         <Typography variant="h6">
           API Key
         </Typography>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={onRegenerate}
-          disabled={regenerating}
-          color="warning"
-        >
-          {regenerating ? 'Regenerating...' : 'Regenerate'}
-        </Button>
       </Box>
 
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -48,7 +35,8 @@ const ProfileApiKey = ({
       <TextField
         fullWidth
         label="API Key"
-        value={showApiKey ? apiKey : maskApiKey(apiKey)}
+        type={showApiKey ? 'text' : 'password'}
+        value={apiKey}
         margin="normal"
         disabled
         InputProps={{

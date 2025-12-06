@@ -9,16 +9,14 @@ import { generateTitleKey } from '../utils/titleUtils.js';
 export class ProviderTitlesMonitorJob extends BaseJob {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
-   * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
-   * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository
-   * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository
-   * @param {import('../managers/providers.js').ProvidersManager} providersManager - Providers manager for direct API calls
-   * @param {import('../managers/tmdb.js').TMDBManager} tmdbManager - TMDB manager for direct API calls
-   * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
+   * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
+   * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
+   * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
+   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
+   * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
    */
-  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
-    super(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider);
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager) {
+    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager);
   }
 
   /**
@@ -26,8 +24,6 @@ export class ProviderTitlesMonitorJob extends BaseJob {
    * @returns {Promise<{movies: number, tvShows: number}>} Count of generated main titles by type (for reporting)
    */
   async execute() {
-    this._validateDependencies();
-
     try {
       // Get last execution time from job history BEFORE setting status
       const lastExecution = await this.getLastExecution({
@@ -41,7 +37,7 @@ export class ProviderTitlesMonitorJob extends BaseJob {
 
       // Create handler instances for all providers
       this.handlers = await this._createHandlers();
-      this.tmdbHandler = this._createTMDBHandler();
+      this.tmdbProcessingManager = this._createTMDBProcessingManager();
       
       if (this.handlers.size === 0) {
         this.logger.warn('No handlers created. No providers configured or all failed to initialize.');
@@ -76,10 +72,10 @@ export class ProviderTitlesMonitorJob extends BaseJob {
       }
       
       if (mainTitleKeys.size > 0) {
-        const mainTitles = await this.tmdbHandler.getMainTitlesByKeys(Array.from(mainTitleKeys));
-        this.tmdbHandler._mainTitlesCache = mainTitles;
+        const mainTitles = await this.tmdbProcessingManager.getMainTitlesByKeys(Array.from(mainTitleKeys));
+        this.tmdbProcessingManager._mainTitlesCache = mainTitles;
       } else {
-        this.tmdbHandler._mainTitlesCache = [];
+        this.tmdbProcessingManager._mainTitlesCache = [];
       }
 
       // Extract provider titles into dictionary for main title processing
@@ -88,9 +84,18 @@ export class ProviderTitlesMonitorJob extends BaseJob {
         providerTitlesByProvider.set(id, handler.getAllTitles());
       }
 
-      // Delegate main title processing to TMDBHandler
+      // Delegate main title processing to TMDBProcessingManager
       // It will only process titles that need regeneration based on provider title updates
-      const result = await this.tmdbHandler.processMainTitles(providerTitlesByProvider);
+      const result = await this.tmdbProcessingManager.processMainTitles(providerTitlesByProvider);
+
+      // Cleanup outdated main titles from disabled/deleted providers
+      const allProvidersResult = await this.providersManager.getProviders();
+      const disabledProviders = allProvidersResult.providers.filter(p => 
+        p.enabled === false || p.deleted === true
+      );
+      if (disabledProviders.length > 0) {
+        await this.tmdbProcessingManager.cleanupOutdatedMainTitles(disabledProviders);
+      }
 
       // Set status to completed on success with result
       await this.setJobStatus('completed', {
@@ -124,8 +129,8 @@ export class ProviderTitlesMonitorJob extends BaseJob {
             handler.unloadTitles();
           }
         }
-        if (this.tmdbHandler) {
-          this.tmdbHandler.unloadMainTitles();
+        if (this.tmdbProcessingManager) {
+          this.tmdbProcessingManager.unloadMainTitles();
         }
         this.logger.debug('Memory cleanup completed');
       } catch (error) {

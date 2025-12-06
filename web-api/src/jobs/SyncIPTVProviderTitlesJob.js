@@ -1,4 +1,5 @@
 import { BaseJob } from './BaseJob.js';
+import { formatNumber } from '../utils/numberFormat.js';
 
 /**
  * Job for processing provider titles (fetching metadata from IPTV providers)
@@ -9,16 +10,14 @@ import { BaseJob } from './BaseJob.js';
 export class SyncIPTVProviderTitlesJob extends BaseJob {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
-   * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
-   * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository
-   * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository
-   * @param {import('../managers/providers.js').ProvidersManager} providersManager - Providers manager for direct API calls
-   * @param {import('../managers/tmdb.js').TMDBManager} tmdbManager - TMDB manager for direct API calls
-   * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
+   * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
+   * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
+   * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
+   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
+   * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
    */
-  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
-    super(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider);
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager) {
+    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager);
   }
 
   /**
@@ -26,8 +25,6 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
    * @returns {Promise<Array<{providerId: string, providerName: string, movies?: number, tvShows?: number, error?: string}>>} Array of fetch results
    */
   async execute() {
-    this._validateDependencies();
-
     try {
       // Get last execution time from job history BEFORE setting status
       // This ensures we have the correct last_execution value from previous successful run
@@ -70,7 +67,7 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
 
       // Fetch metadata from enabled providers only
       // Note: fetchMetadata() will load all provider titles internally for comparison
-      this.logger.info(`Starting metadata fetch process for ${enabledHandlers.length} enabled provider(s) (${this.handlers.size} total)...`);
+      this.logger.info(`Starting metadata fetch process for ${formatNumber(enabledHandlers.length)} enabled provider(s) (${formatNumber(this.handlers.size)} total)...`);
       
       const results = await Promise.all(
         enabledHandlers.map(async ([providerId, handler]) => {
@@ -78,23 +75,52 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
             this.logger.debug(`[${providerId}] Processing provider (${handler.getProviderType()})`);
             this.logger.info(`Fetching metadata from provider ${providerId}...`);
             
-            // Fetch movies and TV shows in parallel
-            const [moviesCount, tvShowsCount] = await Promise.all([
-              handler.fetchMetadata('movies').catch(err => {
-                this.logger.error(`[${providerId}] Error fetching movies: ${err.message}`);
-                return 0;
-              }),
-              handler.fetchMetadata('tvshows').catch(err => {
-                this.logger.error(`[${providerId}] Error fetching TV shows: ${err.message}`);
-                return 0;
-              })
-            ]);
+            // Get sync_media_types from provider config
+            // Default to true for v1 providers (backward compatibility during migration)
+            const syncTypes = handler.providerData.sync_media_types || { 
+              movies: true,  // Default true for v1 providers
+              tvshows: true,
+              live: true
+            };
+            
+            // Build fetch promises based on enabled types
+            const fetchPromises = [];
+            const results = {};
+            
+            if (syncTypes.movies) {
+              fetchPromises.push(
+                handler.fetchMetadata('movies')
+                  .then(count => { results.movies = count; })
+                  .catch(err => {
+                    this.logger.error(`[${providerId}] Error fetching movies: ${err.message}`);
+                    results.movies = 0;
+                  })
+              );
+            } else {
+              results.movies = 0;
+            }
+            
+            if (syncTypes.tvshows) {
+              fetchPromises.push(
+                handler.fetchMetadata('tvshows')
+                  .then(count => { results.tvShows = count; })
+                  .catch(err => {
+                    this.logger.error(`[${providerId}] Error fetching TV shows: ${err.message}`);
+                    results.tvShows = 0;
+                  })
+              );
+            } else {
+              results.tvShows = 0;
+            }
+            
+            // Wait for all enabled fetches
+            await Promise.all(fetchPromises);
             
             return {
               providerId,
               providerName: providerId,
-              movies: moviesCount,
-              tvShows: tvShowsCount
+              movies: results.movies,
+              tvShows: results.tvShows
             };
           } catch (error) {
             this.logger.error(`[${providerId}] Error processing provider: ${error.message}`);

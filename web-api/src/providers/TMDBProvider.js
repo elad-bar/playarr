@@ -92,7 +92,7 @@ export class TMDBProvider extends BaseProvider {
     const headers = this._buildHeaders(apiKey);
 
     try {
-      const result = await this._fetchJsonWithCache({
+      const result = await this._httpGet({
         providerId: 'tmdb',
         type: 'auth', // Dummy type for verification endpoint
         endpoint: 'tmdb-verify',
@@ -149,7 +149,7 @@ export class TMDBProvider extends BaseProvider {
 
     const url = `${TMDB_API_URL}${typeConfig.searchEndpoint}?${params.toString()}`;
 
-    return await this._fetchJsonWithCache({
+    return await this._httpGet({
       providerId: 'tmdb',
       type,
       endpoint: 'tmdb-search',
@@ -176,7 +176,7 @@ export class TMDBProvider extends BaseProvider {
 
     const url = `${TMDB_API_URL}/find/${imdbId}?external_source=imdb_id`;
 
-    return await this._fetchJsonWithCache({
+    return await this._httpGet({
       providerId: 'tmdb',
       type,
       endpoint: 'tmdb-find',
@@ -204,7 +204,7 @@ export class TMDBProvider extends BaseProvider {
 
     const url = `${TMDB_API_URL}${typeConfig.detailsEndpoint}/${tmdbId}?append_to_response=external_ids`;
 
-    return await this._fetchJsonWithCache({
+    return await this._httpGet({
       providerId: 'tmdb',
       type,
       endpoint: 'tmdb-details',
@@ -227,7 +227,7 @@ export class TMDBProvider extends BaseProvider {
 
     const url = `${TMDB_API_URL}/tv/${tmdbId}/season/${seasonNumber}`;
 
-    return await this._fetchJsonWithCache({
+    return await this._httpGet({
       providerId: 'tmdb',
       type: 'tv',
       endpoint: 'tmdb-season',
@@ -256,7 +256,7 @@ export class TMDBProvider extends BaseProvider {
 
     const url = `${TMDB_API_URL}${typeConfig.similarEndpoint}/${tmdbId}/similar?page=${page}`;
 
-    return await this._fetchJsonWithCache({
+    return await this._httpGet({
       providerId: 'tmdb',
       type,
       endpoint: 'tmdb-similar',

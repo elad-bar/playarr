@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { Box, CircularProgress, CssBaseline, IconButton, Toolbar, Tooltip, Typography, AppBar, Menu, MenuItem } from '@mui/material';
-import { DarkMode as DarkModeIcon, LightMode as LightModeIcon, AccountCircle as AccountCircleIcon, VideoLibrary as VideoLibraryIcon, LiveTv as LiveTvIcon } from '@mui/icons-material';
+import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import { Box, CircularProgress, CssBaseline, IconButton, Toolbar, Tooltip, Typography, AppBar } from '@mui/material';
+import { DarkMode as DarkModeIcon, LightMode as LightModeIcon, Menu as MenuIcon } from '@mui/icons-material';
 import { ThemeProvider as MUIThemeProvider } from '@mui/material/styles';
 import { selectTheme } from './store/slices/themeSlice';
 import { toggleTheme } from './store/slices/themeSlice';
@@ -10,25 +10,33 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import SystemHealthMonitor from './components/SystemHealthMonitor';
 import PrivateRoute from './components/auth/PrivateRoute';
 import { socketService } from './services/socket';
+import Sidebar from './components/layout/Sidebar';
 import Home from './pages/Home';
-import Settings from './components/Settings';
 import Login from './pages/Login';
+import TitleDetailsPage from './pages/TitleDetailsPage';
 import Profile from './components/Profile';
+import Clients from './components/profile/Clients';
+import SettingsGeneral from './components/settings/SettingsGeneral';
+import SettingsIPTVProviders from './components/settings/SettingsIPTVProviders';
+import SettingsUsers from './components/settings/SettingsUsers';
+import SettingsJobs from './components/settings/SettingsJobs';
+import SettingsLogger from './components/settings/SettingsLogger';
 
 const AppContent = () => {
     const dispatch = useDispatch();
     const theme = useSelector(selectTheme);
     const mode = useSelector(state => state.theme.mode);
-    const [anchorEl, setAnchorEl] = useState(null);
-    const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-    const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
-    const [contentMode, setContentMode] = useState(() => {
-        const saved = localStorage.getItem('playarr_content_mode');
-        return saved || 'vod';
+    const [sidebarOpen, setSidebarOpen] = useState(() => {
+        const saved = localStorage.getItem('sidebarOpen');
+        return saved !== null ? JSON.parse(saved) : true;
     });
+
+    // Persist sidebar state to localStorage
+    useEffect(() => {
+        localStorage.setItem('sidebarOpen', JSON.stringify(sidebarOpen));
+    }, [sidebarOpen]);
     const location = useLocation();
-    const navigate = useNavigate();
-    const { isAuthenticated, loading, user, logout } = useAuth();
+    const { isAuthenticated, loading, user } = useAuth();
     const isLoginPage = location.pathname === '/login';
 
     // Don't render layout until auth check is complete, unless on login page
@@ -91,60 +99,13 @@ const AppContent = () => {
         }
     }, [isAuthenticated]);
 
-    // Validate contentMode when user changes - reset to 'vod' if user doesn't have live TV
-    useEffect(() => {
-        if (isAuthenticated && user) {
-            const savedMode = localStorage.getItem('playarr_content_mode');
-            // If user doesn't have live TV but contentMode is 'tv', reset to 'vod'
-            if (!user?.liveTV?.m3u_url && savedMode === 'tv') {
-                setContentMode('vod');
-                localStorage.setItem('playarr_content_mode', 'vod');
-            }
-        }
-    }, [isAuthenticated, user]);
 
     const handleThemeToggle = () => {
         dispatch(toggleTheme());
     };
 
-    const handleProfileMenuOpen = (event) => {
-        setAnchorEl(event.currentTarget);
-    };
-
-    const handleProfileMenuClose = () => {
-        setAnchorEl(null);
-    };
-
-    const handleProfileClick = () => {
-        setProfileDialogOpen(true);
-        handleProfileMenuClose();
-    };
-
-    const handleProfileDialogClose = () => {
-        setProfileDialogOpen(false);
-        // Delay navigation to allow dialog animation to complete
-        setTimeout(() => {
-            navigate('/');
-        }, 100);
-    };
-
-    const handleSettingsClick = () => {
-        setSettingsDialogOpen(true);
-        handleProfileMenuClose();
-    };
-
-    const handleSettingsDialogClose = () => {
-        setSettingsDialogOpen(false);
-        navigate('/');
-    };
-
-    const handleLogout = async () => {
-        // Reset contentMode to 'vod' and clear from localStorage
-        setContentMode('vod');
-        localStorage.removeItem('playarr_content_mode');
-        await logout();
-        navigate('/login');
-        handleProfileMenuClose();
+    const handleSidebarToggle = () => {
+        setSidebarOpen(!sidebarOpen);
     };
 
     // Show loading spinner while checking authentication (unless on login page)
@@ -187,8 +148,29 @@ const AppContent = () => {
                 {!isLoginPage && isAuthenticated && (
                     <>
                         <SystemHealthMonitor />
-                        <AppBar position="fixed">
+                        <AppBar 
+                            position="fixed"
+                            sx={{
+                                zIndex: (theme) => theme.zIndex.drawer + 1,
+                                ml: sidebarOpen ? '280px' : 0,
+                                width: sidebarOpen ? 'calc(100% - 280px)' : '100%',
+                                transition: (theme) =>
+                                    theme.transitions.create(['width', 'margin'], {
+                                        easing: theme.transitions.easing.sharp,
+                                        duration: theme.transitions.duration.enteringScreen,
+                                    }),
+                            }}
+                        >
                             <Toolbar>
+                                <IconButton
+                                    color="inherit"
+                                    aria-label="toggle sidebar"
+                                    onClick={handleSidebarToggle}
+                                    edge="start"
+                                    sx={{ mr: 2 }}
+                                >
+                                    <MenuIcon />
+                                </IconButton>
                                 <Typography
                                     variant="h6"
                                     component="div"
@@ -203,71 +185,9 @@ const AppContent = () => {
                                         {mode === 'light' ? <DarkModeIcon /> : <LightModeIcon />}
                                     </IconButton>
                                 </Tooltip>
-                                {user?.liveTV?.m3u_url && (
-                                    <>
-                                        <Tooltip title="Video on Demand">
-                                            <IconButton
-                                                color="inherit"
-                                                onClick={() => {
-                                                    setContentMode('vod');
-                                                    localStorage.setItem('playarr_content_mode', 'vod');
-                                                }}
-                                                disabled={contentMode === 'vod'}
-                                            >
-                                                <VideoLibraryIcon />
-                                            </IconButton>
-                                        </Tooltip>
-                                        <Tooltip title="Live TV">
-                                            <IconButton
-                                                color="inherit"
-                                                onClick={() => {
-                                                    setContentMode('tv');
-                                                    localStorage.setItem('playarr_content_mode', 'tv');
-                                                }}
-                                                disabled={contentMode === 'tv'}
-                                            >
-                                                <LiveTvIcon />
-                                            </IconButton>
-                                        </Tooltip>
-                                    </>
-                                )}
-                                <Tooltip title="Account menu">
-                                    <IconButton
-                                        color="inherit"
-                                        onClick={handleProfileMenuOpen}
-                                        edge="end"
-                                    >
-                                        <AccountCircleIcon />
-                                    </IconButton>
-                                </Tooltip>
-                                <Menu
-                                    anchorEl={anchorEl}
-                                    open={Boolean(anchorEl)}
-                                    onClose={handleProfileMenuClose}
-                                    anchorOrigin={{
-                                        vertical: 'bottom',
-                                        horizontal: 'right',
-                                    }}
-                                    transformOrigin={{
-                                        vertical: 'top',
-                                        horizontal: 'right',
-                                    }}
-                                >
-                                    {user && (
-                                        <MenuItem disabled>
-                                            <Typography variant="body2" color="text.secondary">
-                                                {user.first_name} {user.last_name} ({user.username})
-                                            </Typography>
-                                        </MenuItem>
-                                    )}
-                                    <MenuItem onClick={handleProfileClick}>Profile</MenuItem>
-                                    {user?.role === 'admin' && (
-                                        <MenuItem onClick={handleSettingsClick}>Settings</MenuItem>
-                                    )}
-                                    <MenuItem onClick={handleLogout}>Logout</MenuItem>
-                                </Menu>
                             </Toolbar>
                         </AppBar>
+                        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
                     </>
                 )}
                 <Box
@@ -275,7 +195,13 @@ const AppContent = () => {
                     sx={{
                         flexGrow: 1,
                         p: isLoginPage ? 0 : 3,
-                        width: '100%'
+                        width: '100%',
+                        ml: 0,
+                        transition: (theme) =>
+                            theme.transitions.create(['margin'], {
+                                easing: theme.transitions.easing.sharp,
+                                duration: theme.transitions.duration.enteringScreen,
+                            }),
                     }}
                 >
                     {!isLoginPage && isAuthenticated && <Toolbar />}
@@ -285,29 +211,105 @@ const AppContent = () => {
                             path="/"
                             element={
                                 <PrivateRoute>
-                                    <Home contentMode={contentMode} />
+                                    <Navigate to="/media/vod" replace />
                                 </PrivateRoute>
                             }
                         />
-                        {/* Keep /titles route for backwards compatibility */}
                         <Route
-                            path="/titles"
+                            path="/media/vod"
                             element={
                                 <PrivateRoute>
                                     <Home />
                                 </PrivateRoute>
                             }
                         />
+                        <Route
+                            path="/media/vod/:type/:titleId"
+                            element={
+                                <PrivateRoute>
+                                    <TitleDetailsPage />
+                                </PrivateRoute>
+                            }
+                        />
+                        <Route
+                            path="/media/channels"
+                            element={
+                                <PrivateRoute>
+                                    <Home />
+                                </PrivateRoute>
+                            }
+                        />
+                        <Route
+                            path="/profile"
+                            element={
+                                <PrivateRoute>
+                                    <Profile />
+                                </PrivateRoute>
+                            }
+                        />
+                        <Route
+                            path="/profile/clients"
+                            element={
+                                <PrivateRoute>
+                                    <Clients />
+                                </PrivateRoute>
+                            }
+                        />
+                        {user?.role === 'admin' && (
+                            <>
+                                <Route
+                                    path="/settings/general"
+                                    element={
+                                        <PrivateRoute>
+                                            <SettingsGeneral />
+                                        </PrivateRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/settings/iptv-providers"
+                                    element={
+                                        <PrivateRoute>
+                                            <SettingsIPTVProviders />
+                                        </PrivateRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/settings/users"
+                                    element={
+                                        <PrivateRoute>
+                                            <SettingsUsers />
+                                        </PrivateRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/settings/jobs"
+                                    element={
+                                        <PrivateRoute>
+                                            <SettingsJobs />
+                                        </PrivateRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/settings/logs"
+                                    element={
+                                        <PrivateRoute>
+                                            <SettingsLogger />
+                                        </PrivateRoute>
+                                    }
+                                />
+                            </>
+                        )}
+                        {/* Keep /titles route for backwards compatibility */}
+                        <Route
+                            path="/titles"
+                            element={
+                                <PrivateRoute>
+                                    <Navigate to="/media/vod" replace />
+                                </PrivateRoute>
+                            }
+                        />
                     </Routes>
                 </Box>
-                {isAuthenticated && (
-                    <>
-                        <Profile open={profileDialogOpen} onClose={handleProfileDialogClose} />
-                        {user?.role === 'admin' && (
-                            <Settings open={settingsDialogOpen} onClose={handleSettingsDialogClose} />
-                        )}
-                    </>
-                )}
             </Box>
         </MUIThemeProvider>
     );

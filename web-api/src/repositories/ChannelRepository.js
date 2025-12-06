@@ -5,7 +5,7 @@ const logger = createLogger('ChannelRepository');
 
 /**
  * Repository for channels collection
- * Stores Live TV channel information per user
+ * Stores Live TV channel information per provider
  */
 export class ChannelRepository extends BaseRepository {
   /**
@@ -15,7 +15,9 @@ export class ChannelRepository extends BaseRepository {
     super(
       mongoClient,
       'channels',
-      (doc) => `${doc.username}-${doc.channel_id}`
+      (doc) => `${doc.provider_id}-${doc.channel_id}`,
+      'data',  // Collection type
+      'v2'     // Schema version (was v1 with username field)
     );
   }
 
@@ -26,15 +28,20 @@ export class ChannelRepository extends BaseRepository {
   getIndexDefinitions() {
     return [
       {
-        key: { username: 1, channel_id: 1 },
+        key: { provider_id: 1, channel_id: 1 },
         options: { unique: true },
-        duplicateKey: { username: 1, channel_id: 1 },
+        duplicateKey: { provider_id: 1, channel_id: 1 },
         description: 'Primary lookup (unique compound key)'
       },
       {
-        key: { username: 1 },
+        key: { provider_id: 1 },
         options: {},
-        description: 'User channels lookup'
+        description: 'Provider channels lookup'
+      },
+      {
+        key: { channel_key: 1 },
+        options: {},
+        description: 'Channel key lookup (for watchlist queries)'
       }
     ];
   }
@@ -46,7 +53,7 @@ export class ChannelRepository extends BaseRepository {
    * @returns {Object} Query object
    */
   buildExistenceQuery(doc) {
-    return { username: doc.username, channel_id: doc.channel_id };
+    return { provider_id: doc.provider_id, channel_id: doc.channel_id };
   }
 
   /**
@@ -56,7 +63,41 @@ export class ChannelRepository extends BaseRepository {
    * @returns {string|null} Key or null if invalid
    */
   buildKeyForCheck(doc) {
-    return `${doc.username}-${doc.channel_id}`;
+    return `${doc.provider_id}-${doc.channel_id}`;
+  }
+
+  /**
+   * Get all channels for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<Array>} Array of channel documents
+   */
+  async findByProvider(providerId) {
+    return await this.findByQuery({ provider_id: providerId });
+  }
+
+  /**
+   * Delete all channels for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<number>} Number of deleted documents
+   */
+  async deleteByProvider(providerId) {
+    return await this.deleteMany({ provider_id: providerId });
+  }
+
+  /**
+   * Get distinct values for a field
+   * @param {string} field - Field name to get distinct values for
+   * @param {Object} [query={}] - Optional query filter
+   * @returns {Promise<Array>} Array of distinct values
+   */
+  async getDistinct(field, query = {}) {
+    try {
+      const collection = this.db.collection(this.collectionName);
+      return await collection.distinct(field, query);
+    } catch (error) {
+      logger.error(`Error getting distinct ${field} in ${this.collectionName}:`, error);
+      throw error;
+    }
   }
 }
 

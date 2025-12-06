@@ -10,24 +10,18 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  Tabs,
-  Tab,
+  Button,
 } from '@mui/material';
 import {
   fetchIPTVProviders,
-  saveIPTVProvider,
   deleteIPTVProvider,
-  fetchIPTVProviderCategories
+  getProviderTypeColor,
 } from './iptv/utils';
-import ProviderDetailsForm from './iptv/ProviderDetailsForm';
-import CleanupRulesForm from './iptv/CleanupRulesForm';
-import ExcludedCategoriesForm from './iptv/ExcludedCategoriesForm';
-import IgnoredTitlesForm from './iptv/IgnoredTitlesForm';
+import ProviderWizard from './iptv/ProviderWizard';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloseIcon from '@mui/icons-material/Close';
-import SaveIcon from '@mui/icons-material/Save';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 
@@ -39,16 +33,20 @@ function SettingsIPTVProviders() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('details');
-  const [categories, setCategories] = useState(null);
-  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [wizardKey, setWizardKey] = useState(0); // Force complete remount on each open
 
   const loadProviders = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       const data = await fetchIPTVProviders();
-      setProviders(data);
+      // Sort providers alphabetically by id
+      const sortedData = [...data].sort((a, b) => {
+        const idA = (a.id || '').toLowerCase();
+        const idB = (b.id || '').toLowerCase();
+        return idA.localeCompare(idB);
+      });
+      setProviders(sortedData);
     } catch (error) {
       console.error('Error fetching providers:', error);
       setError('Failed to load providers. Please try again later.');
@@ -57,58 +55,31 @@ function SettingsIPTVProviders() {
     }
   }, []);
 
-  const loadCategories = useCallback(async (providerId) => {
-    if (!providerId) return;
-
-    try {
-      setLoadingCategories(true);
-      const data = await fetchIPTVProviderCategories(providerId);
-      setCategories(data);
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-      setError('Failed to load categories');
-    } finally {
-      setLoadingCategories(false);
-    }
-  }, []);
-
   useEffect(() => {
     loadProviders();
   }, [loadProviders]);
 
-  useEffect(() => {
-    // Load categories when a non-new Xtream provider is selected
-    if (selectedProvider?.id && !isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-      loadCategories(selectedProvider.id);
-    } else {
-      setCategories(null);
-    }
-  }, [selectedProvider?.id, isNewProvider, selectedProvider?.type, loadCategories]);
-
   const handleEdit = (provider) => {
     setSelectedProvider(provider);
     setIsNewProvider(false);
-    setActiveTab('details');
+    setWizardKey(prev => prev + 1); // Force remount
     setDialogOpen(true);
   };
 
-  const handleAdd = () => {
-    setSelectedProvider({
-      type: 'xtream',
-      enabled: true,
-      cleanup: {}
-    });
+  const handleAdd = (providerType = null) => {
+    setSelectedProvider(providerType ? { type: providerType } : null);
     setIsNewProvider(true);
-    setActiveTab('details');
+    setWizardKey(prev => prev + 1); // Force remount
     setDialogOpen(true);
   };
 
   const handleCloseDialog = () => {
     setDialogOpen(false);
-    setSelectedProvider(null);
-    setIsNewProvider(false);
-    setActiveTab('details');
-    setCategories(null);
+    // Don't reset provider/key immediately - let Dialog close animation complete
+    setTimeout(() => {
+      setSelectedProvider(null);
+      setIsNewProvider(false);
+    }, 100);
   };
 
   const handleDelete = async (providerId) => {
@@ -126,218 +97,48 @@ function SettingsIPTVProviders() {
     }
   };
 
-  const handleSave = async (providerData) => {
+  const handleSave = async (savedProvider) => {
     try {
-      const savedProvider = await saveIPTVProvider(providerData, isNewProvider);
       setSuccess(isNewProvider ? 'Provider added successfully' : 'Provider updated successfully');
       setTimeout(() => setSuccess(null), 3000);
 
-      // Update local state instead of making another API call
-      if (isNewProvider) {
-        setProviders(prevProviders => [...prevProviders, savedProvider]);
-      } else {
-        setProviders(prevProviders =>
-          prevProviders.map(p => p.id === savedProvider.id ? savedProvider : p)
-        );
-      }
+      // Reload providers to get fresh data (this will also sort them)
+      loadProviders();
 
       setSelectedProvider(savedProvider);
       setIsNewProvider(false);
-      handleCloseDialog();
-
-      // Reload providers to get fresh data
-      loadProviders();
     } catch (error) {
       console.error('Error saving provider:', error);
       setError('Failed to save provider');
     }
   };
 
-  const handleSaveFromHeader = () => {
-    // Trigger save based on active tab
-    switch (activeTab) {
-      case 'details':
-        if (ProviderDetailsForm.saveHandler) {
-          ProviderDetailsForm.saveHandler();
-        }
-        break;
-      case 'cleanup':
-        if (CleanupRulesForm.saveHandler) {
-          CleanupRulesForm.saveHandler();
-        }
-        break;
-      case 'movies':
-      case 'tvshows':
-        // ExcludedCategoriesForm - changes are auto-saved, so just close
-        handleCloseDialog();
-        break;
-      case 'ignored':
-        // IgnoredTitlesForm is read-only, so just close
-        handleCloseDialog();
-        break;
-      default:
-        handleCloseDialog();
-    }
-  };
+  const handleSaveAndClose = async (savedProvider) => {
+    try {
+      setSuccess(isNewProvider ? 'Provider added successfully' : 'Provider updated successfully');
+      setTimeout(() => setSuccess(null), 3000);
 
-  // Removed handleDragEnd - priority support removed
+      // Reload providers to get fresh data (this will also sort them)
+      loadProviders();
 
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
-  };
-
-  const renderTabs = () => {
-    const tabs = [
-      <Tab
-        key="details"
-        value="details"
-        label="Details"
-        sx={{
-          '&.Mui-selected': {
-            color: 'primary.main',
-          }
-        }}
-      />
-    ];
-
-    if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-      tabs.push(
-        <Tab
-          key="cleanup"
-          value="cleanup"
-          label="Cleanup Rules"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />,
-        <Tab
-          key="movies"
-          value="movies"
-          label="Movies"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />,
-        <Tab
-          key="tvshows"
-          value="tvshows"
-          label="TV Shows"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />
-      );
-    }
-
-    // Ignored Titles tab available for all providers (not just Xtream)
-    if (!isNewProvider) {
-      tabs.push(
-        <Tab
-          key="ignored"
-          value="ignored"
-          label="Ignored Titles"
-          sx={{
-            '&.Mui-selected': {
-              color: 'primary.main',
-            }
-          }}
-        />
-      );
-    }
-
-    return tabs;
-  };
-
-  const renderTabContent = () => {
-    if (!selectedProvider) {
-      return (
-        <Box sx={{ p: 2 }}>
-          <Typography variant="h6" gutterBottom>
-            IPTV Provider Management
-          </Typography>
-          <Typography color="textSecondary">
-            Select a provider from the list or add a new one to manage IPTV configurations.
-          </Typography>
-        </Box>
-      );
-    }
-
-    switch (activeTab) {
-      case 'details':
-        return (
-          <ProviderDetailsForm
-            provider={selectedProvider}
-            onSave={handleSave}
-            onCancel={handleCloseDialog}
-          />
-        );
-      case 'cleanup':
-        if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-          return (
-            <CleanupRulesForm
-              provider={selectedProvider}
-              onSave={handleSave}
-              onCancel={handleCloseDialog}
-            />
-          );
-        }
-        return null;
-      case 'movies':
-        if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-          return (
-            <ExcludedCategoriesForm
-              provider={selectedProvider}
-              categoryType="movies"
-              categories={categories}
-              loading={loadingCategories}
-              onCategoryUpdate={loadCategories}
-            />
-          );
-        }
-        return null;
-      case 'tvshows':
-        if (!isNewProvider && selectedProvider?.type?.toLowerCase() === 'xtream') {
-          return (
-            <ExcludedCategoriesForm
-              provider={selectedProvider}
-              categoryType="tvshows"
-              categories={categories}
-              loading={loadingCategories}
-              onCategoryUpdate={loadCategories}
-            />
-          );
-        }
-        return null;
-      case 'ignored':
-        if (!isNewProvider) {
-          return (
-            <IgnoredTitlesForm
-              provider={selectedProvider}
-            />
-          );
-        }
-        return null;
-      default:
-        return null;
+      // Close dialog
+      handleCloseDialog();
+    } catch (error) {
+      console.error('Error saving provider:', error);
+      setError('Failed to save provider');
     }
   };
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px', p: 3 }}>
         <CircularProgress />
       </Box>
     );
   }
 
   return (
-    <Box>
+    <Box sx={{ p: 3 }}>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
           {error}
@@ -351,73 +152,54 @@ function SettingsIPTVProviders() {
       )}
 
       <Box>
-        <Typography variant="h6" sx={{ mb: 3 }}>IPTV Provider Management</Typography>
-
-        <Grid container spacing={3}>
-          {/* Add New Provider Card */}
-          <Grid item xs={12} sm={6} md={4} lg={3}>
-            <Card
-              sx={{
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                border: '2px dashed',
-                borderColor: 'divider',
-                '&:hover': {
-                  borderColor: 'primary.main',
-                  bgcolor: 'action.hover'
-                }
-              }}
-              onClick={handleAdd}
-            >
-              <CardContent sx={{ textAlign: 'center', py: 4 }}>
-                <AddIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-                <Typography variant="h6" color="text.secondary">
-                  Add New Provider
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
+        {/* Add Provider Buttons */}
+        <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleAdd('xtream')}
+            sx={{
+              backgroundColor: getProviderTypeColor('xtream'),
+              color: '#ffffff',
+              '&:hover': {
+                backgroundColor: '#C0392B', // Darker red
+              },
+            }}
+          >
+            Add Xtream Code
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleAdd('agtv')}
+            sx={{
+              backgroundColor: getProviderTypeColor('agtv'),
+              color: '#ffffff',
+              '&:hover': {
+                backgroundColor: '#16A085', // Darker teal
+              },
+            }}
+          >
+            Add Apollo Group TV
+          </Button>
+        </Box>
 
           {/* Provider Cards */}
+        <Grid container spacing={3}>
           {providers.map((provider) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={provider.id}>
-              <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Grid item xs={12} sm={6} md={4} lg={2} xl={2} key={provider.id}>
+              <Card sx={{ 
+                height: '100%', 
+                display: 'flex', 
+                flexDirection: 'column',
+                borderBottom: `2px ${provider.enabled ? 'solid' : 'dashed'} ${getProviderTypeColor(provider.type)}`
+              }}>
                 <CardContent sx={{ flexGrow: 1 }}>
-                  {/* Title with Provider ID and Chips */}
+                  {/* Title with Provider ID */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
                     <Typography variant="h6" sx={{ fontFamily: 'monospace', flex: 1 }}>
                       {provider.id}
                     </Typography>
-                    <Box sx={{ display: 'flex', gap: 0.5, ml: 1 }}>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          px: 1,
-                          py: 0.5,
-                          borderRadius: 1,
-                          bgcolor: 'primary.light',
-                          color: 'primary.contrastText',
-                          textTransform: 'capitalize'
-                        }}
-                      >
-                        {provider.type || 'Unknown'}
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          px: 1,
-                          py: 0.5,
-                          borderRadius: 1,
-                          bgcolor: provider.enabled ? 'success.light' : 'error.light',
-                          color: provider.enabled ? 'success.contrastText' : 'error.contrastText'
-                        }}
-                      >
-                        {provider.enabled ? 'Enabled' : 'Disabled'}
-                      </Typography>
-                    </Box>
                   </Box>
 
                   {/* Provider Details */}
@@ -472,50 +254,48 @@ function SettingsIPTVProviders() {
         maxWidth="lg"
         fullWidth
         fullScreen
+        TransitionProps={{ timeout: 0 }}
+        sx={{
+          // Disable all transitions to prevent ResizeObserver loops
+          '& .MuiDialog-container': {
+            transition: 'none !important',
+          },
+          '& .MuiDialog-paper': {
+            transition: 'none !important',
+            animation: 'none !important',
+          },
+        }}
       >
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6" component="span">
+        <DialogTitle sx={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          pb: 2,
+          borderBottom: 1,
+          borderColor: 'divider',
+        }}>
+          <Typography variant="h5" component="span" fontWeight={600}>
             {isNewProvider ? 'Add New Provider' : `Edit Provider: ${selectedProvider?.id}`}
           </Typography>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            {(activeTab === 'details' || activeTab === 'cleanup') && (
-              <Tooltip title="Save Changes">
-                <IconButton
-                  onClick={handleSaveFromHeader}
-                  color="primary"
-                  size="small"
-                >
-                  <SaveIcon />
-                </IconButton>
-              </Tooltip>
-            )}
-            <Tooltip title="Close">
-              <IconButton
-                onClick={handleCloseDialog}
-                size="small"
-              >
-                <CloseIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          {/* Tabs Header */}
-          <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-            <Tabs
-              value={activeTab}
-              onChange={handleTabChange}
-              variant="scrollable"
-              scrollButtons="auto"
+          <Tooltip title="Close">
+            <IconButton
+              onClick={handleCloseDialog}
+              size="small"
             >
-              {renderTabs()}
-            </Tabs>
-          </Box>
-
-          {/* Tab Content */}
-          <Box sx={{ mt: 2 }}>
-            {renderTabContent()}
-          </Box>
+              <CloseIcon />
+            </IconButton>
+          </Tooltip>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {dialogOpen && (
+            <ProviderWizard
+              key={`wizard-${wizardKey}-${selectedProvider?.id || 'new'}`}
+              provider={selectedProvider}
+              onSave={handleSave}
+              onCancel={handleCloseDialog}
+              onSaveAndClose={handleSaveAndClose}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </Box>

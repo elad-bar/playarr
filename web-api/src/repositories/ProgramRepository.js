@@ -5,7 +5,7 @@ const logger = createLogger('ProgramRepository');
 
 /**
  * Repository for programs collection
- * Stores EPG program information per user and channel
+ * Stores EPG program information per provider and channel
  */
 export class ProgramRepository extends BaseRepository {
   /**
@@ -15,7 +15,9 @@ export class ProgramRepository extends BaseRepository {
     super(
       mongoClient,
       'programs',
-      (doc) => `${doc.username}-${doc.channel_id}-${doc.start?.getTime?.() || doc.start}-${doc.stop?.getTime?.() || doc.stop}`
+      (doc) => `${doc.provider_id}-${doc.channel_id}-${doc.start?.getTime?.() || doc.start}-${doc.stop?.getTime?.() || doc.stop}`,
+      'data',  // Collection type
+      'v2'     // Schema version (was v1 with username field)
     );
   }
 
@@ -26,20 +28,15 @@ export class ProgramRepository extends BaseRepository {
   getIndexDefinitions() {
     return [
       {
-        key: { username: 1, channel_id: 1, start: 1, stop: 1 },
+        key: { provider_id: 1, channel_id: 1, start: 1, stop: 1 },
         options: { unique: true },
-        duplicateKey: { username: 1, channel_id: 1, start: 1, stop: 1 },
+        duplicateKey: { provider_id: 1, channel_id: 1, start: 1, stop: 1 },
         description: 'Primary lookup (unique compound key)'
       },
       {
-        key: { username: 1, channel_id: 1 },
+        key: { provider_id: 1, channel_id: 1 },
         options: {},
-        description: 'User channel programs lookup'
-      },
-      {
-        key: { username: 1, channel_id: 1, start: 1 },
-        options: {},
-        description: 'Time range queries with sort by start time'
+        description: 'Provider channel programs lookup'
       }
     ];
   }
@@ -52,7 +49,7 @@ export class ProgramRepository extends BaseRepository {
    */
   buildExistenceQuery(doc) {
     return { 
-      username: doc.username, 
+      provider_id: doc.provider_id, 
       channel_id: doc.channel_id,
       start: doc.start,
       stop: doc.stop
@@ -68,7 +65,25 @@ export class ProgramRepository extends BaseRepository {
   buildKeyForCheck(doc) {
     const startTime = doc.start?.getTime?.() || doc.start;
     const stopTime = doc.stop?.getTime?.() || doc.stop;
-    return `${doc.username}-${doc.channel_id}-${startTime}-${stopTime}`;
+    return `${doc.provider_id}-${doc.channel_id}-${startTime}-${stopTime}`;
+  }
+
+  /**
+   * Get all programs for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<Array>} Array of program documents
+   */
+  async findByProvider(providerId) {
+    return await this.findByQuery({ provider_id: providerId });
+  }
+
+  /**
+   * Delete all programs for a provider
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<number>} Number of deleted documents
+   */
+  async deleteByProvider(providerId) {
+    return await this.deleteMany({ provider_id: providerId });
   }
 }
 

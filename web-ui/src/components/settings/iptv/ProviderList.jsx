@@ -11,6 +11,7 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon } from '@mui/icons-material';
+import { getProviderTypeColor } from './utils';
 
 /**
  * Provider grid component with up to 4 cards per row
@@ -108,6 +109,7 @@ function ProviderList({
                 border: selectedProvider?.id === provider.id ? '2px solid' : '1px solid',
                 borderColor: selectedProvider?.id === provider.id ? 'primary.main' : 'divider',
                 backgroundColor: selectedProvider?.id === provider.id ? 'action.selected' : 'background.paper',
+                borderBottom: `2px ${provider.enabled ? 'solid' : 'dashed'} ${getProviderTypeColor(provider.type)}`,
                 '&:hover': {
                   backgroundColor: 'action.hover',
                   borderColor: 'primary.main',
@@ -138,27 +140,6 @@ function ProviderList({
                   >
                     <DeleteIcon fontSize="small" />
                   </IconButton>
-                </Box>
-                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1 }}>
-                  <Typography variant="caption" sx={{ 
-                    px: 1, 
-                    py: 0.5, 
-                    borderRadius: 1, 
-                    bgcolor: 'primary.light', 
-                    color: 'primary.contrastText',
-                    textTransform: 'capitalize'
-                  }}>
-                    {provider.type || 'Unknown'}
-                  </Typography>
-                  <Typography variant="caption" sx={{ 
-                    px: 1, 
-                    py: 0.5, 
-                    borderRadius: 1, 
-                    bgcolor: provider.enabled ? 'success.light' : 'error.light',
-                    color: provider.enabled ? 'success.contrastText' : 'error.contrastText'
-                  }}>
-                    {provider.enabled ? 'Enabled' : 'Disabled'}
-                  </Typography>
                 </Box>
               </CardContent>
             </Card>

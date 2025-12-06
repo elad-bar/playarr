@@ -27,7 +27,7 @@ Playarr is a comprehensive IPTV Playlist Manager that aggregates content from mu
 - Respects provider priority and enabled status
 - Native EngineScheduler orchestrates recurring jobs defined in `web-api/src/jobs.json`:
   - IPTV provider sync runs on startup (after a short delay) and then every 6 hours
-  - Live TV synchronization runs on startup and then every 12 hours
+  - Live TV synchronization runs on startup and then every 12 hours (automatically syncs channels from active providers)
   - Post-execution chains (like `providerTitlesMonitor`) trigger automatically after dependent jobs
 
 ## Multi-Provider Support
@@ -130,7 +130,7 @@ All client access methods automatically filter content based on user watchlists.
 - **Automated Job Scheduling**: Handled by the in-process `EngineScheduler`, which reads intervals and delays from `web-api/src/jobs.json`
 - **Provider Title Fetching** (`syncIPTVProviderTitles`): Starts shortly after boot, repeats every 6 hours, and triggers `providerTitlesMonitor` when complete
 - **Provider Titles Monitor** (`providerTitlesMonitor`): Runs as a post-execution chain to process main titles whenever the sync completes
-- **Live TV Synchronization** (`syncLiveTV`): Runs on startup and every 12 hours to refresh channels and guides
+- **Live TV Synchronization** (`syncLiveTV`): Runs on startup and every 12 hours to automatically sync channels and EPG data from active IPTV providers
 
 ### Update Detection
 

@@ -1,16 +1,17 @@
 import { createLogger } from '../utils/logger.js';
-import { AGTVHandler } from '../handlers/AGTVHandler.js';
-import { XtreamHandler } from '../handlers/XtreamHandler.js';
-import { TMDBHandler } from '../handlers/TMDBHandler.js';
+import { formatNumber } from '../utils/numberFormat.js';
+import { AGTVProcessingManager } from '../managers/processing/AGTVProcessingManager.js';
+import { XtreamProcessingManager } from '../managers/processing/XtreamProcessingManager.js';
+import { TMDBProcessingManager } from '../managers/processing/TMDBProcessingManager.js';
 
 /**
- * Handler registry mapping provider types to handler classes
+ * Processing manager registry mapping provider types to processing manager classes
  * @private
  */
-const HANDLER_REGISTRY = {
-  'agtv': AGTVHandler,
-  'xtream': XtreamHandler,
-  'tmdb': TMDBHandler
+const PROCESSING_MANAGER_REGISTRY = {
+  'agtv': AGTVProcessingManager,
+  'xtream': XtreamProcessingManager,
+  'tmdb': TMDBProcessingManager
 };
 
 /**
@@ -22,32 +23,28 @@ const HANDLER_REGISTRY = {
 export class BaseJob {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
-   * @param {import('../repositories/ProviderRepository.js').ProviderRepository} providerRepo - Provider repository
-   * @param {import('../repositories/ProviderTitleRepository.js').ProviderTitleRepository} providerTitleRepo - Provider title repository
-   * @param {import('../repositories/TitleRepository.js').TitleRepository} titleRepo - Title repository
-   * @param {import('../repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository
-   * @param {import('../managers/providers.js').ProvidersManager} providersManager - Providers manager for direct API calls
-   * @param {import('../managers/tmdb.js').TMDBManager} tmdbManager - TMDB manager (for API key management, kept for routes)
-   * @param {import('../providers/TMDBProvider.js').TMDBProvider} tmdbProvider - TMDB provider for direct API calls
+   * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
+   * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
+   * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager (for API calls and API key management)
+   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager (for saving titles)
+   * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager (for saving provider titles)
    */
-  constructor(jobName, providerRepo, providerTitleRepo, titleRepo, jobHistoryRepo, providersManager, tmdbManager, tmdbProvider) {
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager) {
     if (this.constructor === BaseJob) {
       throw new Error('BaseJob is an abstract class and cannot be instantiated directly');
     }
 
     this.jobName = jobName;
-    this.providerRepo = providerRepo;
-    this.providerTitleRepo = providerTitleRepo;
-    this.titleRepo = titleRepo;
-    this.jobHistoryRepo = jobHistoryRepo;
+    this.jobHistoryManager = jobHistoryManager;
     this.providersManager = providersManager;
     this.tmdbManager = tmdbManager;
-    this.tmdbProvider = tmdbProvider;
+    this.titlesManager = titlesManager;
+    this.providerTitlesManager = providerTitlesManager;
     this.logger = createLogger(jobName);
     
-    // Handlers will be created dynamically in execute() method
-    this.handlers = null; // Map<string, BaseIPTVHandler> - created per job execution
-    this.tmdbHandler = null; // TMDBHandler - created per job execution
+    // Processing managers will be created dynamically in execute() method
+    this.handlers = null; // Map<string, BaseIPTVProcessingManager> - created per job execution
+    this.tmdbProcessingManager = null; // TMDBProcessingManager - created per job execution
   }
 
   /**
@@ -61,92 +58,62 @@ export class BaseJob {
   }
 
   /**
-   * Validate that required dependencies are available
-   * @protected
-   * @throws {Error} If required dependencies are missing
-   */
-  _validateDependencies() {
-    if (!this.providerRepo) {
-      throw new Error('ProviderRepository is required');
-    }
-    if (!this.providerTitleRepo) {
-      throw new Error('ProviderTitleRepository is required');
-    }
-    if (!this.titleRepo) {
-      throw new Error('TitleRepository is required');
-    }
-    if (!this.jobHistoryRepo) {
-      throw new Error('JobHistoryRepository is required');
-    }
-    if (!this.providersManager) {
-      throw new Error('Providers manager is required');
-    }
-    if (!this.tmdbManager) {
-      throw new Error('TMDB manager is required');
-    }
-    if (!this.tmdbProvider) {
-      throw new Error('TMDB provider is required');
-    }
-  }
-
-  /**
    * Create handler instances for all configured providers
    * Uses registry pattern to create handlers based on provider type
    * @protected
-   * @returns {Promise<Map<string, import('../handlers/BaseIPTVHandler.js').BaseIPTVHandler>>} Map of providerId -> handler instance
+   * @returns {Promise<Map<string, import('../managers/processing/BaseIPTVProcessingManager.js').BaseIPTVProcessingManager>>} Map of providerId -> processing manager instance
    */
   async _createHandlers() {
     const handlers = new Map();
     
     try {
-      // Create TMDB handler first (needed by IPTV handlers)
-      this.tmdbHandler = this._createTMDBHandler();
+      // Create TMDB processing manager first (needed by IPTV processing managers)
+      this.tmdbProcessingManager = this._createTMDBProcessingManager();
       
-      // Load all provider configurations using ProvidersManager (uses cache)
-      const providersResult = await this.providersManager.getProviders();
-      const providers = (providersResult.response?.providers || [])
-        .filter(p => !p.deleted)
-        .sort((a, b) => (a.priority || 999) - (b.priority || 999));
+      // Load enabled provider configurations using ProvidersManager (uses cache)
+      const providers = await this.providersManager.getEnabledProviders({ excludeDeleted: true });
+      
+      // Sort by priority (lower number = higher priority)
+      providers.sort((a, b) => (a.priority || 999) - (b.priority || 999));
       
       if (providers.length === 0) {
         this.logger.warn('No providers found in database');
         return handlers;
       }
       
-      this.logger.info(`Creating handlers for ${providers.length} provider(s)...`);
+      this.logger.info(`Creating processing managers for ${formatNumber(providers.length)} provider(s)...`);
       
-      // Create handler for each provider
+      // Create processing manager for each provider
       for (const providerData of providers) {
         const providerId = providerData.id;
         const providerType = providerData.type;
         
-        // Get handler class from registry
-        const HandlerClass = HANDLER_REGISTRY[providerType];
+        // Get processing manager class from registry
+        const ProcessingManagerClass = PROCESSING_MANAGER_REGISTRY[providerType];
         
-        if (!HandlerClass) {
-          this.logger.warn(`No handler registered for provider type "${providerType}" (provider: ${providerId})`);
+        if (!ProcessingManagerClass) {
+          this.logger.warn(`No processing manager registered for provider type "${providerType}" (provider: ${providerId})`);
           continue;
         }
         
         try {
-          // Create handler instance with dependency injection
-          const handler = new HandlerClass(
+          // Create processing manager instance with dependency injection
+          const processingManager = new ProcessingManagerClass(
             providerData,
-            this.providerTitleRepo,
-            this.providerRepo,
+            this.providerTitlesManager,
             this.providersManager,
             this.tmdbManager,
-            this.tmdbHandler
+            this.tmdbProcessingManager
           );
           
-          handlers.set(providerId, handler);
-          this.logger.debug(`Created ${providerType} handler for provider ${providerId}`);
+          handlers.set(providerId, processingManager);
+          this.logger.debug(`Created ${providerType} processing manager for provider ${providerId}`);
         } catch (error) {
-          this.logger.error(`Error creating handler for provider ${providerId}: ${error.message}`);
+          this.logger.error(`Error creating processing manager for provider ${providerId}: ${error.message}`);
         }
       }
       
-      this.logger.info(`Created ${handlers.size} handler(s)`);
+      this.logger.info(`Created ${formatNumber(handlers.size)} processing manager(s)`);
       return handlers;
     } catch (error) {
       this.logger.error(`Error creating handlers: ${error.message}`);
@@ -155,11 +122,11 @@ export class BaseJob {
   }
 
   /**
-   * Create TMDB handler instance
+   * Create TMDB processing manager instance
    * @protected
-   * @returns {import('../handlers/TMDBHandler.js').TMDBHandler} TMDB handler instance
+   * @returns {import('../managers/processing/TMDBProcessingManager.js').TMDBProcessingManager} TMDB processing manager instance
    */
-  _createTMDBHandler() {
+  _createTMDBProcessingManager() {
     const providerData = {
       id: 'tmdb',
       type: 'tmdb',
@@ -169,7 +136,7 @@ export class BaseJob {
       }
     };
     
-    return new TMDBHandler(providerData, this.titleRepo, this.tmdbProvider, this.providerTitleRepo);
+    return new TMDBProcessingManager(providerData, this.titlesManager, this.tmdbManager, this.providerTitlesManager);
   }
 
   /**
@@ -179,9 +146,9 @@ export class BaseJob {
    */
   async getProviderConfig(providerId) {
     try {
-      const providerResult = await this.providersManager.getProvider(providerId);
-      if (providerResult.statusCode === 200 && !providerResult.response.deleted) {
-        return providerResult.response;
+      const provider = await this.providersManager.getProvider(providerId);
+      if (provider && !provider.deleted) {
+        return provider;
       }
       return null;
     } catch (error) {
@@ -199,26 +166,7 @@ export class BaseJob {
    * @returns {Promise<Date|null>} Last execution date or fallback date or null
    */
   async getLastExecution(options = {}) {
-    const { fallbackDate = null, logMessage, noExecutionMessage } = options;
-    
-    try {
-      const jobHistory = await this.jobHistoryRepo.findOneByQuery({ job_name: this.jobName });
-      if (jobHistory && jobHistory.last_execution) {
-        const lastExecution = new Date(jobHistory.last_execution);
-        if (logMessage) {
-          this.logger.info(logMessage.replace('{date}', lastExecution.toISOString()));
-        }
-        return lastExecution;
-      } else {
-        if (noExecutionMessage) {
-          this.logger.info(noExecutionMessage);
-        }
-        return fallbackDate;
-      }
-    } catch (error) {
-      this.logger.error(`Error getting last execution: ${error.message}`);
-      return fallbackDate;
-    }
+    return await this.jobHistoryManager.getLastExecution(this.jobName, options);
   }
 
   /**
@@ -230,7 +178,7 @@ export class BaseJob {
    * @returns {Promise<void>}
    */
   async setJobStatus(status, result = null, providerId = null) {
-    await this.jobHistoryRepo.updateStatus(this.jobName, status, providerId, result);
+    await this.jobHistoryManager.updateStatus(this.jobName, status, providerId, result);
   }
 }
 

@@ -75,12 +75,19 @@ function ProviderDetailsForm({ provider, onSave, onCancel }) {
       const urls = provider.streams_urls || [];
       
       // Find which URL matches the api_url to set as API URL
+      // If api_url is missing or doesn't match any URL, default to first URL (index 0)
       let apiUrlIndex = 0;
       if (provider.api_url && urls.length > 0) {
         const apiUrlIndexFound = urls.findIndex(url => url === provider.api_url);
         if (apiUrlIndexFound >= 0) {
           apiUrlIndex = apiUrlIndexFound;
+        } else {
+          // api_url doesn't match any URL, default to first
+          apiUrlIndex = 0;
         }
+      } else if (urls.length > 0) {
+        // No api_url provided, default to first URL
+        apiUrlIndex = 0;
       }
 
       setFormData({
@@ -126,9 +133,13 @@ function ProviderDetailsForm({ provider, onSave, onCancel }) {
 
   const handleAddUrl = () => {
     if (newUrl.trim()) {
+      const newUrls = [...formData.urls, newUrl.trim()];
+      // If this is the first URL, automatically set it as API URL
+      const newApiUrlIndex = formData.urls.length === 0 ? 0 : formData.apiUrlIndex;
       setFormData({
         ...formData,
-        urls: [...formData.urls, newUrl.trim()]
+        urls: newUrls,
+        apiUrlIndex: newApiUrlIndex
       });
       setNewUrl('');
     }

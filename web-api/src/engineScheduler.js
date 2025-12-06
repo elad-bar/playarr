@@ -1,8 +1,9 @@
 import { createLogger } from './utils/logger.js';
+import { formatNumber } from './utils/numberFormat.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { JobsManager } from './managers/JobsManager.js';
+import { JobsManager } from './managers/orchestration/JobsManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,11 +16,11 @@ const jobsConfig = JSON.parse(readFileSync(join(__dirname, 'jobs.json'), 'utf-8'
 export class EngineScheduler {
   /**
    * @param {Map<string, import('./jobs/BaseJob.js').BaseJob>} jobInstances - Map of jobName -> job instance
-   * @param {import('./repositories/JobHistoryRepository.js').JobHistoryRepository} jobHistoryRepo - Job history repository (for resetInProgress)
+   * @param {import('./managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager (for resetInProgress)
    */
-  constructor(jobInstances, jobHistoryRepo) {
+  constructor(jobInstances, jobHistoryManager) {
     this._jobInstances = jobInstances; // Map<jobName, BaseJob>
-    this._jobHistoryRepo = jobHistoryRepo;
+    this._jobHistoryManager = jobHistoryManager;
     this._jobsManager = null;
     this._intervalIds = new Map(); // Map of jobName -> intervalId
     this._runningJobs = new Map();
@@ -36,7 +37,7 @@ export class EngineScheduler {
 
     // Reset all in-progress jobs in case server was interrupted
     try {
-      const resetCount = await this._jobHistoryRepo.resetInProgress();
+      const resetCount = await this._jobHistoryManager.resetInProgress();
       if (resetCount > 0) {
         this.logger.info(`Reset ${resetCount} in-progress job(s) from previous session`);
       }
@@ -46,7 +47,8 @@ export class EngineScheduler {
     }
 
     const scheduledJobs = jobsConfig.jobs.filter(job => job.interval);
-    this._jobsManager = new JobsManager(jobsConfig, this._jobHistoryRepo);
+    // JobsManager will be initialized later with scheduler reference in index.js
+    this._jobsManager = new JobsManager(jobsConfig, this._jobHistoryManager, null);
 
     // Store scheduled jobs configuration for later starting
     this._scheduledJobs = scheduledJobs.map(job => ({
@@ -58,7 +60,7 @@ export class EngineScheduler {
     }));
 
     if (scheduledJobs.length > 0) {
-      this.logger.info(`Scheduler initialized with ${scheduledJobs.length} job(s) (not started yet)`);
+      this.logger.info(`Scheduler initialized with ${formatNumber(scheduledJobs.length)} job(s) (not started yet)`);
     }
 
     this.logger.info('EngineScheduler initialized');
@@ -107,7 +109,7 @@ export class EngineScheduler {
       })();
     });
 
-    this.logger.info(`Scheduler started with ${this._scheduledJobs.length} job(s) at their configured intervals`);
+    this.logger.info(`Scheduler started with ${formatNumber(this._scheduledJobs.length)} job(s) at their configured intervals`);
   }
 
   /**
@@ -168,7 +170,7 @@ export class EngineScheduler {
       throw new Error(`Job "${name}" not found`);
     }
 
-    this.logger.info(`Starting job '${name}'${workerData?.providerId ? ` (providerId: ${workerData.providerId})` : ''}`);
+    this.logger.debug(`Starting job '${name}'${workerData?.providerId ? ` (providerId: ${workerData.providerId})` : ''}`);
 
     try {
       // Execute the job directly (handlers are created fresh in execute() method)

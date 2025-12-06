@@ -5,6 +5,19 @@ import { store } from './store';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 
+// Suppress ResizeObserver errors - these are harmless warnings from Material-UI components
+// that occur when components resize during render (common with Accordion, Tabs, etc.)
+const originalError = console.error;
+console.error = (...args) => {
+  if (
+    typeof args[0] === 'string' &&
+    args[0].includes('ResizeObserver loop completed with undelivered notifications')
+  ) {
+    return; // Suppress this specific error
+  }
+  originalError.apply(console, args);
+};
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>

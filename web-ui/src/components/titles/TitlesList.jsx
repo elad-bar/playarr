@@ -1,10 +1,10 @@
 import React, { useEffect, useCallback, useRef, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Card, CardContent, CardMedia, IconButton, CircularProgress, TextField, InputAdornment, Tooltip, ToggleButtonGroup, ToggleButton, useTheme, useMediaQuery, Button, Chip, Drawer, Divider, Badge } from '@mui/material';
 import { PlaylistAdd, PlaylistAddCheck, Search as SearchIcon, FilterList, CalendarMonth, Star as StarIcon, Movie as MovieIcon, LiveTv as LiveTvIcon, ErrorOutline, ChevronLeft, Close, Clear } from '@mui/icons-material';
 import { debounce } from 'lodash';
-import { fetchTitles, updateFilters, setSelectedTitle, addToWatchlist, removeFromWatchlist, incrementPage, clearFilters } from '../../store/slices/titlesSlice';
-import TitleDetailsDialog from './TitleDetailsDialog';
+import { fetchTitles, updateFilters, addToWatchlist, removeFromWatchlist, incrementPage, clearFilters } from '../../store/slices/titlesSlice';
 
 // Base64 encoded placeholder image (1x1 transparent pixel)
 const PLACEHOLDER_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
@@ -32,10 +32,10 @@ const ALPHABET_FILTERS = [
 
 const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
     const dispatch = useDispatch();
-    const { titles, selectedTitle, loading, error, filters, pagination } = useSelector(state => state.titles);
+    const navigate = useNavigate();
+    const { titles, loading, error, filters, pagination } = useSelector(state => state.titles);
     const theme = useTheme();
     const [loadingItems, setLoadingItems] = useState(new Set());
-    const [titleHistory, setTitleHistory] = useState([]);
 
     // Define breakpoints for different screen sizes
     const isXSmall = useMediaQuery(theme.breakpoints.down('sm'));
@@ -144,28 +144,10 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
     };
 
     const handleTitleClick = (title) => {
-        setTitleHistory([]);  // Reset history when opening from list
-        dispatch(setSelectedTitle(title));
-    };
-
-    const handleDialogClose = () => {
-        if (titleHistory.length > 0) {
-            // Pop the last title from history and show it
-            const newHistory = [...titleHistory];
-            const lastTitle = newHistory.pop();
-            setTitleHistory(newHistory);
-            dispatch(setSelectedTitle(lastTitle));
-        } else {
-            dispatch(setSelectedTitle(null));
-        }
-    };
-
-    const handleSimilarTitleClick = (newTitle) => {
-        // Add current title to history before showing the new one
-        if (selectedTitle) {
-            setTitleHistory([...titleHistory, selectedTitle]);
-        }
-        dispatch(setSelectedTitle({ key: newTitle.key }));
+        // Navigate to URL-based title details page
+        // Parse title key (format: type-titleId)
+        const [type, titleId] = title.key.split('-');
+        navigate(`/media/vod/${type}/${titleId}`);
     };
 
     const toggleWatchlist = useCallback(async (titleKey, currentState) => {
@@ -235,7 +217,7 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
     const isMobile = isXSmall || isSmall;
 
     return (
-        <Box sx={{ display: 'flex', position: 'relative' }}>
+        <Box sx={{ display: 'flex', position: 'relative', width: '100%' }}>
             {/* Filter Sidebar Drawer */}
             <Drawer
                 variant={isMobile ? 'temporary' : 'persistent'}
@@ -255,7 +237,7 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                         width: isMobile ? '100vw' : drawerWidth,
                         height: isMobile ? '100vh' : 'auto',
                         boxSizing: 'border-box',
-                        position: 'relative',
+                        position: isMobile ? 'fixed' : 'relative',
                         borderRight: isMobile ? 'none' : '1px solid',
                         borderColor: 'divider',
                         transition: theme.transitions.create(['width', 'height'], {
@@ -420,8 +402,10 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                 component="main"
                 sx={{
                     flexGrow: 1,
-                    ml: sidebarOpen && !isMobile ? 2 : 0,
-                    transition: theme.transitions.create('margin', {
+                    minWidth: 0, // Prevent overflow
+                    width: sidebarOpen && !isMobile ? `calc(100% - ${drawerWidth}px)` : '100%',
+                    p: 3,
+                    transition: theme.transitions.create('width', {
                         easing: theme.transitions.easing.sharp,
                         duration: theme.transitions.duration.enteringScreen,
                     }),
@@ -644,15 +628,6 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                     </Box>
                 )}
 
-                {selectedTitle && (
-                    <TitleDetailsDialog
-                        open={Boolean(selectedTitle)}
-                        title={selectedTitle}
-                        onClose={handleDialogClose}
-                        onWatchlistToggle={() => toggleWatchlist(selectedTitle.key, selectedTitle.watchlist)}
-                        onSimilarTitleClick={handleSimilarTitleClick}
-                    />
-                )}
             </Box>
         </Box>
     );

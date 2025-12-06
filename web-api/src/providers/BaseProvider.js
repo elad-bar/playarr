@@ -1,4 +1,5 @@
 import { createLogger } from '../utils/logger.js';
+import { formatNumber } from '../utils/numberFormat.js';
 import Bottleneck from 'bottleneck';
 import fs from 'fs-extra';
 import path from 'path';
@@ -10,11 +11,11 @@ import path from 'path';
  */
 export class BaseProvider {
   /**
-   * @param {string} [loggerName] - Optional logger name (defaults to class name)
+   * @param {string} loggerName - Logger name (required)
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
    */
-  constructor(loggerName = null, cacheDir = null) {
-    this.logger = createLogger(loggerName || this.constructor.name);
+  constructor(loggerName, cacheDir = null) {
+    this.logger = createLogger(loggerName);
     
     // Rate limiters per providerId: Map<providerId, Bottleneck>
     // Used by IPTV providers that need per-provider limiters
@@ -31,6 +32,18 @@ export class BaseProvider {
     
     // Track initialized directories to avoid redundant I/O
     this._initializedDirs = new Set();
+    
+    /**
+     * Response type resolver map
+     * Maps responseType string to function that extracts data from fetch Response
+     * @private
+     * @type {Object<string, Function>}
+     */
+    this._responseResolverMap = {
+      json: (response) => response.json(),
+      text: (response) => response.text(),
+      arraybuffer: (response) => response.arrayBuffer()
+    };
   }
 
   /**
@@ -58,7 +71,7 @@ export class BaseProvider {
     const limiter = this._createLimiter(normalizedConfig);
     
     this._limiters.set(providerId, limiter);
-    this.logger.debug(`Created rate limiter for provider ${providerId}: ${normalizedConfig.concurrent} requests per ${normalizedConfig.duration_seconds} second(s)`);
+    this.logger.debug(`Created rate limiter for provider ${providerId}: ${formatNumber(normalizedConfig.concurrent)} requests per ${formatNumber(normalizedConfig.duration_seconds)} second(s)`);
     
     return limiter;
   }
@@ -83,7 +96,7 @@ export class BaseProvider {
       minTime: 0
     });
 
-    this.logger.debug(`Created rate limiter: ${concurrent} requests per ${durationSeconds} second(s)`);
+    this.logger.debug(`Created rate limiter: ${formatNumber(concurrent)} requests per ${formatNumber(durationSeconds)} second(s)`);
     
     return limiter;
   }
@@ -281,7 +294,7 @@ export class BaseProvider {
       }
       
       // Read based on file extension
-      if (filePath.endsWith('.m3u8')) {
+      if (filePath.endsWith('.m3u8') || filePath.endsWith('.xml')) {
         return fs.readFileSync(filePath, 'utf8');
       } else {
         return fs.readJsonSync(filePath);
@@ -389,24 +402,31 @@ export class BaseProvider {
   }
 
   /**
-   * Fetch JSON data with caching and rate limiting (using fetch)
+   * HTTP request with caching and rate limiting
+   * Core implementation - method-agnostic, accepts prepared fetch options
    * @protected
-   * @param {Object} options - Fetch options
-   * @param {string} options.providerId - Provider ID (or 'tmdb' for TMDB)
+   * @param {Object} options - Request options
+   * @param {string} options.providerId - Provider ID
    * @param {string} options.type - Media type
-   * @param {string} options.endpoint - Cache endpoint name (e.g., 'tmdb-search', 'categories')
+   * @param {string} options.endpoint - Cache endpoint name
    * @param {Object} [options.cacheParams={}] - Parameters for cache key uniqueness
    * @param {string} options.url - Full URL to fetch
-   * @param {Object} [options.headers={}] - Request headers
+   * @param {Object} options.fetchOptions - Prepared fetch options (method, headers, body, signal)
    * @param {Bottleneck} [options.limiter] - Rate limiter (uses this.limiter if not provided)
+   * @param {string} [options.responseType='json'] - Response type: 'json', 'text', or 'arraybuffer'
    * @param {Function} [options.transform] - Optional transform function for response data (receives data, responseStatus)
-   * @param {boolean} [options.skipCache=false] - Skip caching (don't check or write cache)
-   * @param {number} [options.timeout] - Request timeout in milliseconds (creates AbortController)
+   * @param {boolean} [options.skipCache=false] - Skip reading from cache
+   * @param {number} [options.timeout] - Request timeout in milliseconds
    * @param {AbortSignal} [options.signal] - AbortSignal for request cancellation
-   * @param {boolean} [options.allowNonOk=false] - Allow non-OK responses (don't throw, return data anyway)
-   * @returns {Promise<Object>} JSON response data
+   * @param {boolean} [options.allowNonOk=false] - Allow non-OK responses
+   * @returns {Promise<any>} Response data (parsed based on responseType)
    */
-  async _fetchJsonWithCache({ providerId, type, endpoint, cacheParams = {}, url, headers = {}, limiter = null, transform = null, skipCache = false, timeout = null, signal = null, allowNonOk = false }) {
+  async _httpRequest({ 
+    providerId, type, endpoint, cacheParams = {}, url, fetchOptions,
+    limiter = null, responseType = 'json', transform = null, 
+    skipCache = false, timeout = null, signal = null, allowNonOk = false 
+  }) {
+    // Simple fallback to single limiter (for TMDB and other non-IPTV providers)
     const limiterToUse = limiter || this.limiter;
     if (!limiterToUse) {
       throw new Error('Rate limiter is required');
@@ -424,9 +444,9 @@ export class BaseProvider {
     // Set up timeout if provided
     let controller = null;
     let timeoutId = null;
-    let abortSignal = signal;
+    let abortSignal = signal || fetchOptions.signal;
     
-    if (timeout && !signal) {
+    if (timeout && !abortSignal) {
       controller = new AbortController();
       abortSignal = controller.signal;
       timeoutId = setTimeout(() => {
@@ -435,35 +455,53 @@ export class BaseProvider {
       }, timeout);
     }
 
+    // Merge abort signal into fetch options
+    const finalFetchOptions = {
+      ...fetchOptions,
+      signal: abortSignal
+    };
+
     try {
       // Make API call with rate limiting
       let responseStatus = null;
-      const data = await limiterToUse.schedule(async () => {
-        
-        const response = await fetch(url, { headers, signal: abortSignal });
+      const totalStartTime = Date.now();
+      let requestDuration = 0;
+      const cacheKey = cacheParams.titleId ? `/${cacheParams.titleId}` : '';
+      
+      const rawData = await limiterToUse.schedule(async () => {
+        const requestStartTime = Date.now();
+        const response = await fetch(url, finalFetchOptions);
+        requestDuration = Date.now() - requestStartTime;
         responseStatus = response.status;
         
         if (!response.ok && !allowNonOk) {
-          const errorData = await response.json().catch(() => ({ status_message: `HTTP ${response.status}` }));
-        
+          const errorData = await response.json().catch(() => ({ 
+            status_message: `HTTP ${response.status}` 
+          }));
           throw new Error(errorData.status_message || `API error: ${response.status}`);
         }
         
-        return await response.json();
+        // Use resolver map
+        const resolver = this._responseResolverMap[responseType] || this._responseResolverMap.json;
+        return await resolver(response);
       });
+
+      const totalDuration = Date.now() - totalStartTime;
+      const waitTime = totalDuration - requestDuration;
+      this.logger.debug(
+        `API ${finalFetchOptions.method} request: ${endpoint} ${providerId}/${type}${cacheKey} - ` +
+        `${formatNumber(totalDuration)}ms (request: ${formatNumber(requestDuration)}ms, wait: ${formatNumber(waitTime)}ms)`
+      );
 
       // Clear timeout if it was set
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
 
-      // Transform data if transform function provided (pass responseStatus as second arg)
-      const finalData = transform ? transform(data, responseStatus) : data;
+      // Transform data if transform function provided
+      const finalData = transform ? await transform(rawData, responseStatus) : rawData;
 
-      // Cache the result (unless skipping cache)
-      if (!skipCache) {
-        this._setCache(providerId, type, endpoint, finalData, cacheParams);
-      }
+      this._setCache(providerId, type, endpoint, finalData, cacheParams);
 
       return finalData;
     } catch (error) {
@@ -476,7 +514,7 @@ export class BaseProvider {
       if (error.name === 'AbortError') {
         throw new Error('Request timeout');
       } else {
-        this.logger.error(`Error fetching ${url}: ${error.message}`);
+        this.logger.error(`Error ${finalFetchOptions.method} ${url}: ${error.message}`);
       }
       
       throw error;
@@ -484,207 +522,75 @@ export class BaseProvider {
   }
 
   /**
-   * Fetch JSON data with caching and rate limiting (using axios)
+   * HTTP GET request (convenience wrapper)
    * @protected
-   * @param {Object} options - Fetch options
+   * @param {Object} options - Same options as _httpRequest, except fetchOptions are prepared here
    * @param {string} options.providerId - Provider ID
    * @param {string} options.type - Media type
-   * @param {string} options.endpoint - Cache endpoint name (e.g., 'categories', 'metadata')
-   * @param {Object} [options.cacheParams={}] - Parameters for cache key uniqueness
-   * @param {string} options.url - Full URL to fetch
-   * @param {Object} [options.headers={}] - Request headers
-   * @param {Bottleneck} options.limiter - Rate limiter (required for axios-based calls)
-   * @param {Function} [options.transform] - Optional transform function for response data
-   * @param {boolean} [options.skipCache=false] - Skip reading from cache (always fetch fresh, but still write to cache for debugging)
-   * @param {number} [options.timeout=30000] - Request timeout in milliseconds
-   * @returns {Promise<Object>} JSON response data
-   */
-  async _fetchJsonWithCacheAxios({ providerId, type, endpoint, cacheParams = {}, url, headers = {}, limiter, transform = null, skipCache = false, timeout = 30000 }) {
-    if (!limiter) {
-      throw new Error('Rate limiter is required');
-    }
-
-    // Check cache first (unless skipping cache read)
-    if (!skipCache) {
-      const cached = this._getCache(providerId, type, endpoint, cacheParams);
-      if (cached !== null) {
-        this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
-        return cached;
-      }
-    }
-
-    // Make API call with rate limiting
-    const axios = (await import('axios')).default;
-    const totalStartTime = Date.now();
-    const cacheKey = cacheParams.titleId ? `/${cacheParams.titleId}` : '';
-    this.logger.debug(`API request starting: ${endpoint} ${providerId}/${type}${cacheKey}${skipCache ? ' (skipping cache read)' : ''}`);
-    
-    let requestDuration = 0;
-    const data = await limiter.schedule(async () => {
-      const requestStartTime = Date.now();
-      const response = await axios.get(url, { headers, timeout });
-      requestDuration = Date.now() - requestStartTime;
-      this.logger.debug(`API request completed: ${endpoint} ${providerId}/${type}${cacheKey} - ${requestDuration}ms (HTTP ${response.status})`);
-      return response.data;
-    });
-    
-    const totalDuration = Date.now() - totalStartTime;
-    const waitTime = totalDuration - requestDuration;
-    this.logger.debug(`API call total time (including rate limiter wait): ${endpoint} ${providerId}/${type}${cacheKey} - ${totalDuration}ms (request: ${requestDuration}ms, wait: ${waitTime}ms)`);
-
-    // Transform data if transform function provided
-    const finalData = transform ? transform(data) : data;
-
-    // Cache the result
-    this._setCache(providerId, type, endpoint, finalData, cacheParams);
-
-    return finalData;
-  }
-
-  /**
-   * Fetch JSON data with POST method, caching and rate limiting (using axios)
-   * @protected
-   * @param {Object} options - Fetch options
-   * @param {string} options.providerId - Provider ID
-   * @param {string} options.type - Media type
-   * @param {string} options.endpoint - Cache endpoint name (e.g., 'authenticate')
-   * @param {Object} [options.cacheParams={}] - Parameters for cache key uniqueness
-   * @param {string} options.url - Full URL to fetch
-   * @param {Object} options.data - Request body data
-   * @param {Object} [options.headers={}] - Request headers
-   * @param {Bottleneck} options.limiter - Rate limiter (required for axios-based calls)
-   * @param {Function} [options.transform] - Optional transform function for response data
-   * @param {boolean} [options.skipCache=false] - Skip reading from cache (always fetch fresh, but still write to cache for debugging)
-   * @param {number} [options.timeout=30000] - Request timeout in milliseconds
-   * @returns {Promise<Object>} JSON response data
-   */
-  async _fetchJsonPostWithCacheAxios({ providerId, type, endpoint, cacheParams = {}, url, data, headers = {}, limiter, transform = null, skipCache = false, timeout = 30000 }) {
-    if (!limiter) {
-      throw new Error('Rate limiter is required');
-    }
-
-    // Check cache first (unless skipping cache read)
-    if (!skipCache) {
-      const cached = this._getCache(providerId, type, endpoint, cacheParams);
-      if (cached !== null) {
-        this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
-        return cached;
-      }
-    }
-
-    // Make API call with rate limiting
-    const axios = (await import('axios')).default;
-    const totalStartTime = Date.now();
-    const cacheKey = cacheParams.titleId ? `/${cacheParams.titleId}` : '';
-    this.logger.debug(`API POST request starting: ${endpoint} ${providerId}/${type}${cacheKey}${skipCache ? ' (skipping cache read)' : ''}`);
-    
-    let requestDuration = 0;
-    const responseData = await limiter.schedule(async () => {
-      const requestStartTime = Date.now();
-      const response = await axios.post(url, data, { 
-        headers: { 'Content-Type': 'application/json', ...headers }, 
-        timeout 
-      });
-      requestDuration = Date.now() - requestStartTime;
-      this.logger.debug(`API POST request completed: ${endpoint} ${providerId}/${type}${cacheKey} - ${requestDuration}ms (HTTP ${response.status})`);
-      return response.data;
-    });
-    
-    const totalDuration = Date.now() - totalStartTime;
-    const waitTime = totalDuration - requestDuration;
-    this.logger.debug(`API POST call total time (including rate limiter wait): ${endpoint} ${providerId}/${type}${cacheKey} - ${totalDuration}ms (request: ${requestDuration}ms, wait: ${waitTime}ms)`);
-
-    // Transform data if transform function provided
-    const finalData = transform ? transform(responseData) : responseData;
-
-    // Cache the result
-    this._setCache(providerId, type, endpoint, finalData, cacheParams);
-
-    return finalData;
-  }
-
-  /**
-   * Fetch text/M3U8 data with caching and rate limiting (using fetch)
-   * @protected
-   * @param {Object} options - Fetch options
-   * @param {string} options.providerId - Provider ID
-   * @param {string} options.type - Media type
-   * @param {string} options.endpoint - Cache endpoint name (e.g., 'm3u8')
+   * @param {string} options.endpoint - Cache endpoint name
    * @param {Object} [options.cacheParams={}] - Parameters for cache key uniqueness
    * @param {string} options.url - Full URL to fetch
    * @param {Object} [options.headers={}] - Request headers
    * @param {Bottleneck} [options.limiter] - Rate limiter (uses this.limiter if not provided)
-   * @returns {Promise<string>} Text response data
+   * @param {string} [options.responseType='json'] - Response type: 'json', 'text', or 'arraybuffer'
+   * @param {Function} [options.transform] - Optional transform function for response data
+   * @param {boolean} [options.skipCache=false] - Skip reading from cache
+   * @param {number} [options.timeout] - Request timeout in milliseconds
+   * @param {AbortSignal} [options.signal] - AbortSignal for request cancellation
+   * @param {boolean} [options.allowNonOk=false] - Allow non-OK responses
+   * @returns {Promise<any>} Response data
    */
-  async _fetchTextWithCache({ providerId, type, endpoint, cacheParams = {}, url, headers = {}, limiter = null }) {
-    const limiterToUse = limiter || this.limiter;
-    if (!limiterToUse) {
-      throw new Error('Rate limiter is required');
-    }
-
-    // Check cache first
-    const cached = this._getCache(providerId, type, endpoint, cacheParams);
-    if (cached !== null) {
-      this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
-      return cached;
-    }
-
-    // Make API call with rate limiting
-    const data = await limiterToUse.schedule(async () => {
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status} ${response.statusText}`);
-      }
-      return await response.text();
+  async _httpGet({ headers = {}, ...restOptions }) {
+    const fetchOptions = {
+      method: 'GET',
+      headers
+    };
+    
+    return this._httpRequest({ 
+      ...restOptions, 
+      fetchOptions 
     });
-
-    // Cache the result
-    this._setCache(providerId, type, endpoint, data, cacheParams);
-
-    return data;
   }
 
   /**
-   * Fetch text/M3U8 data with caching and rate limiting (using axios)
+   * HTTP POST request (convenience wrapper)
    * @protected
-   * @param {Object} options - Fetch options
+   * @param {Object} options - Same options as _httpRequest, except fetchOptions are prepared here
    * @param {string} options.providerId - Provider ID
    * @param {string} options.type - Media type
-   * @param {string} options.endpoint - Cache endpoint name (e.g., 'm3u8')
+   * @param {string} options.endpoint - Cache endpoint name
    * @param {Object} [options.cacheParams={}] - Parameters for cache key uniqueness
    * @param {string} options.url - Full URL to fetch
+   * @param {Object} options.data - Request body data (will be JSON stringified)
    * @param {Object} [options.headers={}] - Request headers
-   * @param {Bottleneck} options.limiter - Rate limiter (required for axios-based calls)
-   * @param {number} [options.timeout=30000] - Request timeout in milliseconds
-   * @returns {Promise<string>} Text response data
+   * @param {Bottleneck} [options.limiter] - Rate limiter (uses this.limiter if not provided)
+   * @param {string} [options.responseType='json'] - Response type: 'json', 'text', or 'arraybuffer'
+   * @param {Function} [options.transform] - Optional transform function for response data
+   * @param {boolean} [options.skipCache=false] - Skip reading from cache
+   * @param {number} [options.timeout] - Request timeout in milliseconds
+   * @param {AbortSignal} [options.signal] - AbortSignal for request cancellation
+   * @param {boolean} [options.allowNonOk=false] - Allow non-OK responses
+   * @returns {Promise<any>} Response data
    */
-  async _fetchTextWithCacheAxios({ providerId, type, endpoint, cacheParams = {}, url, headers = {}, limiter, timeout = 30000 }) {
-    if (!limiter) {
-      throw new Error('Rate limiter is required');
+  async _httpPost({ data, headers = {}, ...restOptions }) {
+    const fetchOptions = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers
+      }
+    };
+    
+    // Add body if data is provided
+    if (data) {
+      fetchOptions.body = JSON.stringify(data);
     }
-
-    // Check cache first
-    const cached = this._getCache(providerId, type, endpoint, cacheParams);
-    if (cached !== null) {
-      this.logger.debug(`Cache hit for ${endpoint}: ${providerId}/${type}`);
-      return cached;
-    }
-
-    // Make API call with rate limiting
-    const axios = (await import('axios')).default;
-    const data = await limiter.schedule(async () => {
-      const response = await axios.get(url, {
-        headers,
-        responseType: 'text',
-        timeout
-      });
-      return response.data;
+    
+    return this._httpRequest({ 
+      ...restOptions, 
+      fetchOptions 
     });
-
-    // Cache the result
-    this._setCache(providerId, type, endpoint, data, cacheParams);
-
-    return data;
   }
+
 }
 

@@ -14,6 +14,72 @@ export const slugify = (text) => {
     .replace(/-+$/, '');      // Trim - from end of text
 };
 
+/**
+ * Get display label for a media type
+ * @param {string} mediaType - Media type ('movies', 'tvshows', 'live')
+ * @returns {string} Display label
+ */
+export const getMediaTypeLabel = (mediaType) => {
+  const labelMap = {
+    movies: 'Movie',
+    tvshows: 'TV Show',
+    live: 'Live TV',
+  };
+
+  return labelMap[mediaType] || 'Unknown';
+};
+
+/**
+ * Get color configuration for a media type
+ * @param {string} mediaType - Media type ('movies', 'tvshows', 'live')
+ * @param {Object} theme - MUI theme object
+ * @returns {Object} Color configuration with main, contrastText, dark, and light colors
+ */
+export const getMediaTypeColors = (mediaType, theme) => {
+  const colorMap = {
+    movies: {
+      main: theme.palette.warning.main,
+      contrastText: theme.palette.warning.contrastText,
+      dark: theme.palette.warning.dark,
+      light: theme.palette.warning.light,
+    },
+    tvshows: {
+      main: theme.palette.info.main,
+      contrastText: theme.palette.info.contrastText,
+      dark: theme.palette.info.dark,
+      light: theme.palette.info.light,
+    },
+    live: {
+      main: '#9c27b0',
+      contrastText: '#ffffff',
+      dark: '#7b1fa2',
+      light: 'rgba(156, 39, 176, 0.1)',
+    },
+  };
+
+  return colorMap[mediaType] || {
+    main: theme.palette.grey[500],
+    contrastText: theme.palette.common.white,
+    dark: theme.palette.grey[700],
+    light: theme.palette.grey[300],
+  };
+};
+
+/**
+ * Get color for a provider type
+ * @param {string} providerType - Provider type ('agtv', 'xtream')
+ * @returns {string} Color hex code
+ */
+export const getProviderTypeColor = (providerType) => {
+  const colorMap = {
+    agtv: '#1ABC9C',  // Teal
+    xtream: '#E74C3C', // Red
+  };
+
+  const normalizedType = providerType?.toLowerCase();
+  return colorMap[normalizedType] || '#757575'; // Default grey
+};
+
 // API functions
 export const fetchIPTVProviders = async () => {
   try {
@@ -44,6 +110,25 @@ export const deleteIPTVProvider = async (providerId) => {
 export const fetchIPTVProviderCategories = async (providerId) => {
   const response = await axiosInstance.get(API_ENDPOINTS.providerCategories(providerId));
   return response.data;
+};
+
+export const validateIPTVProviderCredentials = async (api_url, username, password, type) => {
+  try {
+    const response = await axiosInstance.post(API_ENDPOINTS.providerValidate, {
+      api_url,
+      username,
+      password,
+      type
+    });
+    return response.data;
+  } catch (error) {
+    // Handle network errors or unexpected errors
+    return {
+      success: false,
+      valid: false,
+      error: error.response?.data?.error || error.message || 'Failed to validate credentials'
+    };
+  }
 };
 
 export const checkIPTVProviderStatus = async (providerId) => {

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { 
-    Box, 
     TextField, 
     CircularProgress, 
     InputAdornment, 
@@ -11,7 +10,10 @@ import {
     Card,
     CardContent,
     CardHeader,
-    Grid
+    Grid,
+    Box,
+    Button,
+    Alert,
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -21,13 +23,16 @@ import { API_ENDPOINTS } from '../../config/api';
 
 const SettingsGeneral = () => {
     const [tmdbApiKey, setTmdbApiKey] = useState('');
+    const [originalTmdbApiKey, setOriginalTmdbApiKey] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [showApiKey, setShowApiKey] = useState(false);
+    const [success, setSuccess] = useState(null);
+    const [error, setError] = useState(null);
     
     // Add state for log unmanaged endpoints
     const [logUnmanagedEndpoints, setLogUnmanagedEndpoints] = useState(false);
-    const [isSavingLogSetting, setIsSavingLogSetting] = useState(false);
+    const [originalLogUnmanagedEndpoints, setOriginalLogUnmanagedEndpoints] = useState(false);
 
     // Fetch all settings on mount
     useEffect(() => {
@@ -35,13 +40,17 @@ const SettingsGeneral = () => {
             try {
                 // Fetch TMDB API key
                 const tmdbResponse = await axiosInstance.get(API_ENDPOINTS.settings.tmdbToken);
-                setTmdbApiKey(tmdbResponse.data.value || '');
+                const tmdbValue = tmdbResponse.data.value || '';
+                setTmdbApiKey(tmdbValue);
+                setOriginalTmdbApiKey(tmdbValue);
                 
                 // Fetch log unmanaged endpoints setting
                 const logResponse = await axiosInstance.get(API_ENDPOINTS.settings.logUnmanagedEndpoints);
-                setLogUnmanagedEndpoints(logResponse.data.value === true);
+                const logValue = logResponse.data.value === true;
+                setLogUnmanagedEndpoints(logValue);
+                setOriginalLogUnmanagedEndpoints(logValue);
             } catch (error) {
-                // handle error if needed
+                setError('Failed to load settings');
             } finally {
                 setIsLoading(false);
             }
@@ -49,27 +58,55 @@ const SettingsGeneral = () => {
         fetchSettings();
     }, []);
 
-    const handleSaveTmdbApiKey = async () => {
+    // Check if any values are dirty (changed)
+    // Use useEffect to ensure isDirty is calculated after state updates
+    const [isDirty, setIsDirty] = useState(false);
+    
+    useEffect(() => {
+        const dirty = tmdbApiKey !== originalTmdbApiKey || 
+                     logUnmanagedEndpoints !== originalLogUnmanagedEndpoints;
+        setIsDirty(dirty);
+    }, [tmdbApiKey, originalTmdbApiKey, logUnmanagedEndpoints, originalLogUnmanagedEndpoints]);
+
+    const handleSaveAll = async () => {
+        if (!isDirty) return;
+
         setIsSaving(true);
+        setError(null);
+        setSuccess(null);
+
         try {
-            await axiosInstance.post(API_ENDPOINTS.settings.tmdbToken, { value: tmdbApiKey });
+            const savePromises = [];
+
+            // Save TMDB API key if changed
+            if (tmdbApiKey !== originalTmdbApiKey) {
+                savePromises.push(
+                    axiosInstance.post(API_ENDPOINTS.settings.tmdbToken, { value: tmdbApiKey })
+                );
+            }
+
+            // Save log setting if changed
+            if (logUnmanagedEndpoints !== originalLogUnmanagedEndpoints) {
+                savePromises.push(
+                    axiosInstance.post(API_ENDPOINTS.settings.logUnmanagedEndpoints, { 
+                        value: logUnmanagedEndpoints 
+                    })
+                );
+            }
+
+            // Save all changed values
+            await Promise.all(savePromises);
+
+            // Update original values to reflect saved state
+            setOriginalTmdbApiKey(tmdbApiKey);
+            setOriginalLogUnmanagedEndpoints(logUnmanagedEndpoints);
+
+            setSuccess('Settings saved successfully');
+            setTimeout(() => setSuccess(null), 3000);
         } catch (error) {
-            // handle error if needed
+            setError(error.response?.data?.error || error.message || 'Failed to save settings');
         } finally {
             setIsSaving(false);
-        }
-    };
-
-    const handleSaveLogSetting = async () => {
-        setIsSavingLogSetting(true);
-        try {
-            await axiosInstance.post(API_ENDPOINTS.settings.logUnmanagedEndpoints, { 
-                value: logUnmanagedEndpoints 
-            });
-        } catch (error) {
-            // handle error if needed
-        } finally {
-            setIsSavingLogSetting(false);
         }
     };
 
@@ -79,6 +116,43 @@ const SettingsGeneral = () => {
 
     return (
         <Box sx={{ p: 3 }}>
+            {/* Save Button - Always Visible */}
+            <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
+                <Button
+                    variant="contained"
+                    startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+                    onClick={handleSaveAll}
+                    disabled={!isDirty || isSaving}
+                    sx={{
+                        minWidth: '120px',
+                        backgroundColor: isDirty && !isSaving ? '#1976d2' : '#bdbdbd',
+                        color: isDirty && !isSaving ? '#ffffff' : '#424242',
+                        '&:hover': {
+                            backgroundColor: isDirty && !isSaving ? '#1565c0' : '#bdbdbd',
+                        },
+                        '&:disabled': {
+                            backgroundColor: '#bdbdbd',
+                            color: '#424242',
+                            opacity: 1,
+                        },
+                    }}
+                >
+                    Save
+                </Button>
+            </Box>
+
+            {error && (
+                <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
+                    {error}
+                </Alert>
+            )}
+
+            {success && (
+                <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess(null)}>
+                    {success}
+                </Alert>
+            )}
+
             <Grid container spacing={3}>
                 {/* TMDB Provider Card */}
                 <Grid item xs={12} sm={6} md={4} lg={3}>
@@ -86,18 +160,6 @@ const SettingsGeneral = () => {
                         <CardHeader 
                             title="TMDB Provider"
                             subheader="Configure TMDB API settings"
-                            action={
-                                <Tooltip title="Save settings">
-                                    <IconButton
-                                        onClick={handleSaveTmdbApiKey}
-                                        disabled={isSaving}
-                                        color="primary"
-                                        aria-label="save tmdb settings"
-                                    >
-                                        {isSaving ? <CircularProgress size={24} /> : <SaveIcon />}
-                                    </IconButton>
-                                </Tooltip>
-                            }
                         />
                         <CardContent>
                             <TextField
@@ -106,6 +168,7 @@ const SettingsGeneral = () => {
                                 onChange={(e) => setTmdbApiKey(e.target.value)}
                                 fullWidth
                                 type={showApiKey ? 'text' : 'password'}
+                                disabled={isSaving}
                                 InputProps={{
                                     endAdornment: (
                                         <InputAdornment position="end">
@@ -132,18 +195,6 @@ const SettingsGeneral = () => {
                         <CardHeader 
                             title="Debug"
                             subheader="Debug and logging settings"
-                            action={
-                                <Tooltip title="Save settings">
-                                    <IconButton
-                                        onClick={handleSaveLogSetting}
-                                        disabled={isSavingLogSetting}
-                                        color="primary"
-                                        aria-label="save debug settings"
-                                    >
-                                        {isSavingLogSetting ? <CircularProgress size={24} /> : <SaveIcon />}
-                                    </IconButton>
-                                </Tooltip>
-                            }
                         />
                         <CardContent>
                             <FormControlLabel
@@ -151,7 +202,7 @@ const SettingsGeneral = () => {
                                     <Checkbox
                                         checked={logUnmanagedEndpoints}
                                         onChange={(e) => setLogUnmanagedEndpoints(e.target.checked)}
-                                        disabled={isSavingLogSetting}
+                                        disabled={isSaving}
                                     />
                                 }
                                 label="Log unmanaged endpoints"
