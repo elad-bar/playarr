@@ -1,19 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import {
   Box,
-  Grid,
-  Card,
-  CardContent,
-  CardActionArea,
+  Tabs,
+  Tab,
   Typography,
-  IconButton,
-  Drawer,
-  useTheme,
-  useMediaQuery,
   CircularProgress,
 } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
-import InfoIcon from '@mui/icons-material/Info';
 import { authService } from '../../services/auth';
 import ProfileM3UEndpoint from './ProfileM3UEndpoint';
 import ProfileIPTVSyncer from './ProfileIPTVSyncer';
@@ -30,13 +22,9 @@ function Clients() {
     username: '',
     api_key: '',
   });
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [selectedClient, setSelectedClient] = useState(null);
+  const [selectedTab, setSelectedTab] = useState(0);
   const [showApiKey] = useState(false);
   const [, setApiKeyCopied] = useState(false);
-
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   // Load profile on mount
   useEffect(() => {
@@ -61,14 +49,8 @@ function Clients() {
     return key.substring(0, 4) + '•'.repeat(4) + key.substring(key.length - 4);
   };
 
-  const handleOpenClientDetails = (clientId) => {
-    setSelectedClient(clientId);
-    setDrawerOpen(true);
-  };
-
-  const handleCloseClientDetails = () => {
-    setDrawerOpen(false);
-    setSelectedClient(null);
+  const handleTabChange = (event, newValue) => {
+    setSelectedTab(newValue);
   };
 
   // Client configurations
@@ -85,12 +67,12 @@ function Clients() {
     },
     {
       id: 'xtream-code',
-      title: 'Xtream Code API',
+      title: 'Xtream Code',
       description: 'Access your movies and TV shows using Xtream Code API compatible clients.'
     },
     {
       id: 'stremio',
-      title: 'Stremio Addon',
+      title: 'Stremio',
       description: 'Add Playarr as a Stremio addon to access all movies and TV shows directly in Stremio.'
     }
   ];
@@ -104,130 +86,69 @@ function Clients() {
   }
 
   return (
-    <>
-      <Box sx={{ p: 3 }}>
-          <Grid container spacing={3}>
-            {clients.map((client) => (
-              <Grid item xs={12} sm={6} md={3} key={client.id}>
-                <Card
-                  sx={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    transition: 'transform 0.2s, box-shadow 0.2s',
-                    '&:hover': {
-                      transform: 'translateY(-4px)',
-                      boxShadow: 6
-                    }
-                  }}
-                >
-                  <CardActionArea
-                    onClick={() => handleOpenClientDetails(client.id)}
-                    sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}
-                  >
-                    <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                        <Typography variant="h6" sx={{ fontWeight: 'bold', flex: 1 }}>
-                          {client.title}
-                        </Typography>
-                        <IconButton
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenClientDetails(client.id);
-                          }}
-                          color="primary"
-                          aria-label="View details"
-                          size="small"
-                          sx={{ ml: 1 }}
-                        >
-                          <InfoIcon />
-                        </IconButton>
-                      </Box>
-                      <Typography variant="body2" color="text.secondary">
-                        {client.description}
-                      </Typography>
-                    </CardContent>
-                  </CardActionArea>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
+    <Box sx={{ width: '100%' }}>
+      <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Tabs
+          value={selectedTab}
+          onChange={handleTabChange}
+          aria-label="client configuration tabs"
+          variant="scrollable"
+          scrollButtons="auto"
+        >
+          {clients.map((client, index) => (
+            <Tab key={client.id} label={client.title} id={`tab-${index}`} aria-controls={`tabpanel-${index}`} />
+          ))}
+        </Tabs>
       </Box>
 
-      {/* Client Details Drawer */}
-      <Drawer
-        anchor="right"
-        open={drawerOpen}
-        onClose={handleCloseClientDetails}
-        variant="temporary"
-        ModalProps={{
-          style: { zIndex: 1400 }
-        }}
-        PaperProps={{
-          sx: {
-            width: isMobile ? '100%' : 600,
-            maxWidth: '100%',
-            zIndex: 1400
-          }
-        }}
-      >
-        <Box sx={{ p: 3, height: '100%', overflow: 'auto' }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-              {clients.find(c => c.id === selectedClient)?.title || 'Client Details'}
-            </Typography>
-            <IconButton onClick={handleCloseClientDetails} aria-label="Close">
-              <CloseIcon />
-            </IconButton>
-          </Box>
+      {/* Tab Content */}
+      <Box sx={{ p: 3 }}>
+        {selectedTab === 0 && (
+          <ProfileM3UEndpoint
+            apiKey={profile.api_key}
+            showApiKey={showApiKey}
+            maskApiKey={maskApiKey}
+            hideTitle={true}
+            profile={profile}
+            onCopyUrl={() => {
+              setApiKeyCopied(true);
+              setTimeout(() => setApiKeyCopied(false), 2000);
+            }}
+          />
+        )}
 
-          {selectedClient === 'm3u' && (
-            <ProfileM3UEndpoint
-              apiKey={profile.api_key}
-              showApiKey={showApiKey}
-              maskApiKey={maskApiKey}
-              hideTitle={true}
-              profile={profile}
-              onCopyUrl={() => {
-                setApiKeyCopied(true);
-                setTimeout(() => setApiKeyCopied(false), 2000);
-              }}
-            />
-          )}
+        {selectedTab === 1 && (
+          <ProfileIPTVSyncer apiKey={profile.api_key} hideTitle={true} />
+        )}
 
-          {selectedClient === 'iptv-syncer' && (
-            <ProfileIPTVSyncer apiKey={profile.api_key} hideTitle={true} />
-          )}
+        {selectedTab === 2 && (
+          <ProfileXtreamCode
+            apiKey={profile.api_key}
+            username={profile.username}
+            showApiKey={showApiKey}
+            maskApiKey={maskApiKey}
+            hideTitle={true}
+            onCopyUrl={() => {
+              setApiKeyCopied(true);
+              setTimeout(() => setApiKeyCopied(false), 2000);
+            }}
+          />
+        )}
 
-          {selectedClient === 'xtream-code' && (
-            <ProfileXtreamCode
-              apiKey={profile.api_key}
-              username={profile.username}
-              showApiKey={showApiKey}
-              maskApiKey={maskApiKey}
-              hideTitle={true}
-              onCopyUrl={() => {
-                setApiKeyCopied(true);
-                setTimeout(() => setApiKeyCopied(false), 2000);
-              }}
-            />
-          )}
-
-          {selectedClient === 'stremio' && (
-            <ProfileStremio
-              apiKey={profile.api_key}
-              showApiKey={showApiKey}
-              maskApiKey={maskApiKey}
-              hideTitle={true}
-              onCopyUrl={() => {
-                setApiKeyCopied(true);
-                setTimeout(() => setApiKeyCopied(false), 2000);
-              }}
-            />
-          )}
-        </Box>
-      </Drawer>
-    </>
+        {selectedTab === 3 && (
+          <ProfileStremio
+            apiKey={profile.api_key}
+            showApiKey={showApiKey}
+            maskApiKey={maskApiKey}
+            hideTitle={true}
+            onCopyUrl={() => {
+              setApiKeyCopied(true);
+              setTimeout(() => setApiKeyCopied(false), 2000);
+            }}
+          />
+        )}
+      </Box>
+    </Box>
   );
 }
 
