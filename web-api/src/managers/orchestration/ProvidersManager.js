@@ -185,9 +185,9 @@ class ProvidersManager extends BaseManager {
         throw new Error('enabledCategories must be provided and must be an object');
       }
 
+      // Build query once (without TMDB filter) - this will be used for both finding and deleting
       let query = {
-        provider_id: providerId,
-        tmdb_id: { $exists: true, $ne: null } // Only titles with TMDB match
+        provider_id: providerId
       };
 
       // Filter by type if specified
@@ -233,41 +233,42 @@ class ProvidersManager extends BaseManager {
           query.$or = orConditions;
         }
       }
-      // If provider is disabled, query remains: { provider_id: providerId, tmdb_id: { $exists: true, $ne: null } }
-      // This means "all titles" (for disabled/deleted provider)
+      // If provider is disabled, query remains: { provider_id: providerId } (all titles)
 
-      // Step 1: Find provider titles using ProviderTitleRepository
+      // Step 1: Find ALL provider titles matching the query (including those without TMDB matches)
       const providerTitles = await this._providerTitleRepo.findByQuery(query);
 
       if (providerTitles.length === 0) {
         return { titlesUpdated: 0, streamsRemoved: 0, titleKeys: [], providerTitlesDeleted: 0, emptyTitlesDeleted: 0 };
       }
 
-      // Step 2: Build title_keys from provider titles
+      // Step 2: Build title_keys from provider titles that have TMDB matches (for main titles cleanup)
       const titleKeys = [...new Set(
         providerTitles
           .filter(t => t.tmdb_id && t.type)
           .map(t => `${t.type}-${t.tmdb_id}`)
       )];
 
-      if (titleKeys.length === 0) {
-        return { titlesUpdated: 0, streamsRemoved: 0, titleKeys: [], providerTitlesDeleted: 0, emptyTitlesDeleted: 0 };
-      }
-
-      // Step 3: Delete provider titles from provider_titles collection (only if deleteProviderTitles is true)
+      // Step 3: Delete ALL provider titles matching the query (only if deleteProviderTitles is true)
       let deletedProviderTitles = { deletedCount: 0 };
       if (deleteProviderTitles) {
         deletedProviderTitles = await this._providerTitleRepo.deleteManyByQuery(query);
       }
 
       // Step 4: Remove provider sources from titles.media[].sources using repository method
-      const pullResult = await this._titleRepo.removeProviderSourcesFromTitles(titleKeys, providerId);
+      // Only process if we have title_keys (titles with TMDB matches)
+      let pullResult = { modifiedCount: 0 };
+      let deleteResult = { deletedCount: 0 };
+      
+      if (titleKeys.length > 0) {
+        pullResult = await this._titleRepo.removeProviderSourcesFromTitles(titleKeys, providerId);
 
-      // Step 5: Remove empty media items (media items with no sources) using repository method
-      await this._titleRepo.removeEmptyMediaItems(titleKeys);
+        // Step 5: Remove empty media items (media items with no sources) using repository method
+        await this._titleRepo.removeEmptyMediaItems(titleKeys);
 
-      // Step 6: Delete titles that have no media items left using repository method
-      const deleteResult = await this._titleRepo.deleteEmptyTitles(titleKeys);
+        // Step 6: Delete titles that have no media items left using repository method
+        deleteResult = await this._titleRepo.deleteEmptyTitles(titleKeys);
+      }
 
       return {
         titlesUpdated: pullResult.modifiedCount || 0,
@@ -503,14 +504,14 @@ class ProvidersManager extends BaseManager {
         live: updatedProvider.enabled_categories?.live || []
       };
       
-      // Remove from titles but keep provider_titles
+      // Remove from titles and delete provider_titles
       try {
         const { titlesUpdated, streamsRemoved, titleKeys, providerTitlesDeleted, emptyTitlesDeleted } = 
           await this._removeProviderFromTitles(
             providerId,
             willBeEnabled,
             enabledCategories,
-            false, // Don't delete provider_titles
+            true, // Delete provider_titles when media types are removed
             typesToRemove // Filter by type
           );
         
