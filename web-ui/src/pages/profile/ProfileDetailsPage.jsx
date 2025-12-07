@@ -8,13 +8,13 @@ import {
 } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { authService } from '../services/auth';
-import { useAuth } from '../context/AuthContext';
-import ProfileUserDetails from './profile/ProfileUserDetails';
-import ProfilePassword from './profile/ProfilePassword';
-import ProfileApiKey from './profile/ProfileApiKey';
+import { authService } from '../../services/auth';
+import { useAuth } from '../../context/AuthContext';
+import ProfileUserDetails from '../../components/profile/ProfileUserDetails';
+import ProfilePassword from '../../components/profile/ProfilePassword';
+import ProfileApiKey from '../../components/profile/ProfileApiKey';
 
-const Profile = () => {
+const ProfileDetailsPage = () => {
   const { refreshAuth } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -304,4 +304,4 @@ const Profile = () => {
   );
 };
 
-export default Profile;
+export default ProfileDetailsPage;

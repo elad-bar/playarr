@@ -22,9 +22,9 @@ import LockResetIcon from '@mui/icons-material/LockReset';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { usersService } from '../../services/users';
-import UserForm from './users/UserForm';
+import UserForm from '../../components/settings/users/UserForm';
 import { useAuth } from '../../context/AuthContext';
-import { getUserRoleColor } from './users/utils';
+import { getUserRoleColor } from '../../components/settings/users/utils';
 
 const SettingsUsers = () => {
   const { user: currentUser } = useAuth();

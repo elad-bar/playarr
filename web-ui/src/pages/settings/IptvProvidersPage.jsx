@@ -16,8 +16,8 @@ import {
   fetchIPTVProviders,
   deleteIPTVProvider,
   getProviderTypeColor,
-} from './iptv/utils';
-import ProviderWizard from './iptv/ProviderWizard';
+} from '../../components/settings/iptv/utils';
+import ProviderWizard from '../../components/settings/iptv/ProviderWizard';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';

@@ -124,8 +124,8 @@ function Sidebar({ open, onClose }) {
               icon: <AssessmentIcon />,
               expandable: true,
               items: [
-                { path: '/settings/jobs', label: 'Jobs', icon: <WorkIcon /> },
-                { path: '/settings/logs', label: 'Log', icon: <DescriptionIcon /> },
+                { path: '/monitoring/jobs', label: 'Jobs', icon: <WorkIcon /> },
+                { path: '/monitoring/logs', label: 'Log', icon: <DescriptionIcon /> },
               ],
             },
         ]

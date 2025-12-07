@@ -6,16 +6,16 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { authService } from '../../services/auth';
-import ProfileM3UEndpoint from './ProfileM3UEndpoint';
-import ProfileIPTVSyncer from './ProfileIPTVSyncer';
-import ProfileXtreamCode from './ProfileXtreamCode';
-import ProfileStremio from './ProfileStremio';
+import ProfileM3UEndpoint from '../../components/profile/ProfileM3UEndpoint';
+import ProfileIPTVSyncer from '../../components/profile/ProfileIPTVSyncer';
+import ProfileXtreamCode from '../../components/profile/ProfileXtreamCode';
+import ProfileStremio from '../../components/profile/ProfileStremio';
 
 /**
  * Clients page component
  * Displays client configuration options (M3U, Strmarr, Xtream Code, Stremio)
  */
-function Clients() {
+function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState({
     username: '',
@@ -151,4 +151,4 @@ function Clients() {
   );
 }
 
-export default Clients;
+export default ClientsPage;

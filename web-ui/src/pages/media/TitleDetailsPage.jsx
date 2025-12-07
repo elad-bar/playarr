@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Box, CircularProgress } from '@mui/material';
-import TitleDetailsDialog from '../components/titles/TitleDetailsDialog';
+import TitleDetailsDialog from '../../components/titles/TitleDetailsDialog';
 import { useDispatch, useSelector } from 'react-redux';
-import { setSelectedTitle, fetchTitleDetails, addToWatchlist, removeFromWatchlist } from '../store/slices/titlesSlice';
+import { setSelectedTitle, fetchTitleDetails, addToWatchlist, removeFromWatchlist } from '../../store/slices/titlesSlice';
 
 /**
  * TitleDetailsPage component

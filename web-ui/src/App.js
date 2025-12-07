@@ -11,18 +11,18 @@ import SystemHealthMonitor from './components/SystemHealthMonitor';
 import PrivateRoute from './components/auth/PrivateRoute';
 import { socketService } from './services/socket';
 import Sidebar from './components/layout/Sidebar';
-import Home from './pages/Home';
-import Login from './pages/Login';
-import TitleDetailsPage from './pages/TitleDetailsPage';
-import Profile from './components/Profile';
-import Clients from './components/profile/Clients';
-import SettingsGeneral from './components/settings/SettingsGeneral';
-import SettingsIPTVProviders from './components/settings/SettingsIPTVProviders';
-import SettingsUsers from './components/settings/SettingsUsers';
-import SettingsJobs from './components/settings/SettingsJobs';
-import SettingsLogger from './components/settings/SettingsLogger';
-import SettingsStatistics from './components/settings/SettingsStatistics';
-import SettingsMetrics from './components/settings/SettingsMetrics';
+import LoginPage from './pages/LoginPage';
+import TitleDetailsPage from './pages/media/TitleDetailsPage';
+import VodPage from './pages/media/VodPage';
+import ChannelsPage from './pages/media/ChannelsPage';
+import ProfileDetailsPage from './pages/profile/ProfileDetailsPage';
+import ClientsPage from './pages/profile/ClientsPage';
+import GeneralSettingsPage from './pages/settings/GeneralSettingsPage';
+import IptvProvidersPage from './pages/settings/IptvProvidersPage';
+import UsersSettingsPage from './pages/settings/UsersSettingsPage';
+import MetricsSettingsPage from './pages/settings/MetricsSettingsPage';
+import JobsPage from './pages/monitoring/JobsPage';
+import LogsPage from './pages/monitoring/LogsPage';
 import HomePage from './pages/HomePage';
 
 const AppContent = () => {
@@ -138,7 +138,7 @@ const AppContent = () => {
             <MUIThemeProvider theme={theme}>
                 <CssBaseline />
                 <Routes>
-                    <Route path="/login" element={<Login />} />
+                    <Route path="/login" element={<LoginPage />} />
                     <Route path="*" element={<Navigate to="/login" replace />} />
                 </Routes>
             </MUIThemeProvider>
@@ -214,7 +214,7 @@ const AppContent = () => {
                 >
                     {!isLoginPage && isAuthenticated && <Toolbar />}
                     <Routes>
-                        <Route path="/login" element={<Login />} />
+                        <Route path="/login" element={<LoginPage />} />
                         <Route
                             path="/"
                             element={
@@ -235,7 +235,7 @@ const AppContent = () => {
                             path="/media/vod"
                             element={
                                 <PrivateRoute>
-                                    <Home />
+                                    <VodPage />
                                 </PrivateRoute>
                             }
                         />
@@ -251,7 +251,7 @@ const AppContent = () => {
                             path="/media/channels"
                             element={
                                 <PrivateRoute>
-                                    <Home />
+                                    <ChannelsPage />
                                 </PrivateRoute>
                             }
                         />
@@ -259,7 +259,7 @@ const AppContent = () => {
                             path="/profile"
                             element={
                                 <PrivateRoute>
-                                    <Profile />
+                                    <ProfileDetailsPage />
                                 </PrivateRoute>
                             }
                         />
@@ -267,7 +267,7 @@ const AppContent = () => {
                             path="/profile/clients"
                             element={
                                 <PrivateRoute>
-                                    <Clients />
+                                    <ClientsPage />
                                 </PrivateRoute>
                             }
                         />
@@ -285,7 +285,7 @@ const AppContent = () => {
                                     path="/settings/general"
                                     element={
                                         <PrivateRoute>
-                                            <SettingsGeneral />
+                                            <GeneralSettingsPage />
                                         </PrivateRoute>
                                     }
                                 />
@@ -293,7 +293,7 @@ const AppContent = () => {
                                     path="/settings/iptv-providers"
                                     element={
                                         <PrivateRoute>
-                                            <SettingsIPTVProviders />
+                                            <IptvProvidersPage />
                                         </PrivateRoute>
                                     }
                                 />
@@ -301,42 +301,34 @@ const AppContent = () => {
                                     path="/settings/users"
                                     element={
                                         <PrivateRoute>
-                                            <SettingsUsers />
+                                            <UsersSettingsPage />
                                         </PrivateRoute>
                                     }
                                 />
                                 <Route
-                                    path="/settings/jobs"
+                                    path="/settings/metrics"
                                     element={
                                         <PrivateRoute>
-                                            <SettingsJobs />
+                                            <MetricsSettingsPage />
                                         </PrivateRoute>
                                     }
                                 />
                                 <Route
-                                    path="/settings/logs"
+                                    path="/monitoring/jobs"
                                     element={
                                         <PrivateRoute>
-                                            <SettingsLogger />
+                                            <JobsPage />
                                         </PrivateRoute>
                                     }
                                 />
                                 <Route
-                                    path="/settings/statistics"
+                                    path="/monitoring/logs"
                                     element={
                                         <PrivateRoute>
-                                            <SettingsStatistics />
+                                            <LogsPage />
                                         </PrivateRoute>
                                     }
                                 />
-                        <Route
-                            path="/settings/metrics"
-                            element={
-                                <PrivateRoute>
-                                    <SettingsMetrics />
-                                </PrivateRoute>
-                            }
-                        />
                             </>
                         )}
                         {/* Keep /titles route for backwards compatibility */}
