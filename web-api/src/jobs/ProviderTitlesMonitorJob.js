@@ -14,9 +14,10 @@ export class ProviderTitlesMonitorJob extends BaseJob {
    * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
    * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
    * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service for recording counters
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager) {
-    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager);
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService) {
+    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService);
   }
 
   /**

@@ -133,7 +133,7 @@ const SettingsStatistics = () => {
 
     if (error) {
         return (
-            <Box sx={{ p: 3 }}>
+            <Box sx={{ p: { xs: 2, sm: 3 } }}>
                 <Typography color="error">Error loading stats: {error}</Typography>
             </Box>
         );
@@ -147,8 +147,24 @@ const SettingsStatistics = () => {
         return filteredStats.length > 0;
     });
 
+    if (filteredProviders.length === 0) {
+        return (
+            <Box sx={{ p: { xs: 2, sm: 3 } }}>
+                <Typography variant="h6" gutterBottom>
+                    Statistics
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                    No statistics available yet. They will appear once data is collected.
+                </Typography>
+            </Box>
+        );
+    }
+
     return (
-        <Box sx={{ p: { xs: 0, sm: 3 } }}>
+        <Box sx={{ p: { xs: 2, sm: 3 } }}>
+            <Typography variant="h6" gutterBottom>
+                Statistics
+            </Typography>
             {filteredProviders.map((provider, index) => (
                 <StatsCard
                     key={index}

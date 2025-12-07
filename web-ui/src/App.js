@@ -23,6 +23,7 @@ import SettingsJobs from './components/settings/SettingsJobs';
 import SettingsLogger from './components/settings/SettingsLogger';
 import SettingsStatistics from './components/settings/SettingsStatistics';
 import SettingsMetrics from './components/settings/SettingsMetrics';
+import Statistics from './pages/Statistics';
 
 const AppContent = () => {
     const dispatch = useDispatch();
@@ -262,6 +263,14 @@ const AppContent = () => {
                                 </PrivateRoute>
                             }
                         />
+                        <Route
+                            path="/statistics"
+                            element={
+                                <PrivateRoute>
+                                    <Statistics />
+                                </PrivateRoute>
+                            }
+                        />
                         {user?.role === 'admin' && (
                             <>
                                 <Route
@@ -304,14 +313,14 @@ const AppContent = () => {
                                         </PrivateRoute>
                                     }
                                 />
-                        <Route
-                            path="/settings/statistics"
-                            element={
-                                <PrivateRoute>
-                                    <SettingsStatistics />
-                                </PrivateRoute>
-                            }
-                        />
+                                <Route
+                                    path="/settings/statistics"
+                                    element={
+                                        <PrivateRoute>
+                                            <SettingsStatistics />
+                                        </PrivateRoute>
+                                    }
+                                />
                         <Route
                             path="/settings/metrics"
                             element={
