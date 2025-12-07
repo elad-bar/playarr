@@ -33,6 +33,7 @@ import { UserRepository } from './repositories/UserRepository.js';
 import { StatsRepository } from './repositories/StatsRepository.js';
 import { ChannelRepository } from './repositories/ChannelRepository.js';
 import { ProgramRepository } from './repositories/ProgramRepository.js';
+import { ProviderCategoryRepository } from './repositories/ProviderCategoryRepository.js';
 import { EngineScheduler } from './engineScheduler.js';
 import { readFileSync } from 'fs';
 const jobsConfig = JSON.parse(readFileSync(path.join(__dirname, 'jobs.json'), 'utf-8'));
@@ -42,6 +43,8 @@ import { SyncIPTVProviderTitlesJob } from './jobs/SyncIPTVProviderTitlesJob.js';
 import { ProviderTitlesMonitorJob } from './jobs/ProviderTitlesMonitorJob.js';
 import { SyncLiveTVJob } from './jobs/SyncLiveTVJob.js';
 import { SyncProviderDetailsJob } from './jobs/SyncProviderDetailsJob.js';
+import { CleanupUnwantedProviderTitlesJob } from './jobs/CleanupUnwantedProviderTitlesJob.js';
+import { SyncProviderCategoriesJob } from './jobs/SyncProviderCategoriesJob.js';
 
 // Import manager classes
 import { UserManager } from './managers/domain/UserManager.js';
@@ -49,6 +52,7 @@ import { TitlesManager } from './managers/domain/TitlesManager.js';
 import { SettingsManager } from './managers/domain/SettingsManager.js';
 import { StatsManager } from './managers/domain/StatsManager.js';
 import { ProviderTitlesManager } from './managers/domain/ProviderTitlesManager.js';
+import { ProviderCategoryManager } from './managers/domain/ProviderCategoryManager.js';
 import { IPTVProviderManager } from './managers/domain/IPTVProviderManager.js';
 import { JobHistoryManager } from './managers/domain/JobHistoryManager.js';
 import { ProvidersManager } from './managers/orchestration/ProvidersManager.js';
@@ -149,6 +153,7 @@ async function initialize() {
     const statsRepo = new StatsRepository(mongoClient);
     const channelRepo = new ChannelRepository(mongoClient);
     const programRepo = new ProgramRepository(mongoClient);
+    const providerCategoryRepo = new ProviderCategoryRepository(mongoClient);
     logger.info('All repositories created');
 
     // Create domain managers that depend on repositories
@@ -177,6 +182,7 @@ async function initialize() {
         settingsRepo.initializeIndexes(),
         channelRepo.initializeIndexes(),
         programRepo.initializeIndexes(),
+        providerCategoryRepo.initializeIndexes(),
         // statsRepo doesn't need indexes (single document collection)
       ]);
       logger.info('All database indexes initialized');
@@ -254,16 +260,29 @@ async function initialize() {
     const titlesManager = new TitlesManager(titleRepo);
     const providerTitlesManager = new ProviderTitlesManager(providerTitleRepo);
     const iptvProviderManager = new IPTVProviderManager(providerRepo);
+    const providerCategoryManager = new ProviderCategoryManager(providerCategoryRepo);
     
     // Declare jobsManager early for closure
     let jobsManager;
     
     // Create generic triggerJob function (closure will capture jobsManager when assigned)
-    const triggerJob = async (jobName) => {
+    // Fire-and-forget: executes asynchronously in background without blocking
+    const triggerJob = (jobName) => {
       if (!jobsManager) {
-        throw new Error('JobsManager not initialized');
+        logger.error('JobsManager not initialized, cannot trigger job:', jobName);
+        return;
       }
-      await jobsManager.triggerJob(jobName);
+
+      // Fire job asynchronously without blocking
+      setImmediate(async () => {
+        try {
+          await jobsManager.triggerJob(jobName);
+          logger.info(`Triggered ${jobName} job`);
+        } catch (error) {
+          logger.error(`Failed to trigger ${jobName} job: ${error.message}`);
+          // Don't throw - allow caller to continue even if job trigger fails
+        }
+      });
     };
     
     // Create Live TV managers (before ProvidersManager so they can be passed as dependencies)
@@ -288,7 +307,8 @@ async function initialize() {
       triggerJob,
       channelManager,
       programManager,
-      userManager
+      userManager,
+      providerCategoryManager
     );
     const liveTVFormattingManager = new LiveTVFormattingManager(titlesManager, iptvProviderManager, channelManager, programManager, userManager, metricsService);
     
@@ -329,6 +349,32 @@ async function initialize() {
       metricsService
     ));
     
+    jobInstances.set('cleanupUnwantedProviderTitles', new CleanupUnwantedProviderTitlesJob(
+      'cleanupUnwantedProviderTitles',
+      jobHistoryManager,
+      providersManager,
+      tmdbManager,
+      titlesManager,
+      providerTitlesManager,
+      metricsService,
+      triggerJob,
+      channelManager,
+      programManager,
+      userManager,
+      providerCategoryManager
+    ));
+    
+    jobInstances.set('syncProviderCategories', new SyncProviderCategoriesJob(
+      'syncProviderCategories',
+      jobHistoryManager,
+      providersManager,
+      tmdbManager,
+      titlesManager,
+      providerTitlesManager,
+      metricsService,
+      providerCategoryManager
+    ));
+    
     // Initialize EngineScheduler with job instances
     jobScheduler = new EngineScheduler(jobInstances, jobHistoryManager, metricsService);
     await jobScheduler.initialize();
@@ -366,7 +412,7 @@ async function initialize() {
     const settingsRouter = new SettingsRouter(settingsManager, middleware);
     const statsRouter = new StatsRouter(statsManager, middleware);
     const titlesRouter = new TitlesRouter(titlesManager, providersManager, userManager, middleware, metricsService);
-    const providersRouter = new ProvidersRouter(providersManager, middleware, metricsService);
+    const providersRouter = new ProvidersRouter(providersManager, middleware, metricsService, providerCategoryManager);
     const streamRouter = new StreamRouter(stremioManager, middleware, metricsService);
     const playlistRouter = new PlaylistRouter(playlistManager, middleware);
     const tmdbRouter = new TMDBRouter(tmdbManager, settingsManager, middleware);

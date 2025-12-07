@@ -852,6 +852,29 @@ class UserManager extends BaseDomainManager {
   }
 
   /**
+   * Remove channel keys from all users' watchlists (bulk operation)
+   * Used for cleanup when channels are deleted
+   * @param {Array<string>} channelKeys - Array of channel keys to remove (format: live-{providerId}-{channelId})
+   * @returns {Promise<number>} Number of users updated
+   */
+  async removeChannelKeysFromAllWatchlists(channelKeys) {
+    try {
+      if (!channelKeys || channelKeys.length === 0) {
+        return 0;
+      }
+
+      const result = await this._repository.updateMany(
+        { 'watchlist.live': { $in: channelKeys } },
+        { $pull: { 'watchlist.live': { $in: channelKeys } } }
+      );
+      return result.modifiedCount || 0;
+    } catch (error) {
+      this.logger.error(`Failed to remove channel keys from watchlists: ${error.message}`);
+      throw new AppError('Failed to remove channel keys from watchlists', 500);
+    }
+  }
+
+  /**
    * Update user watchlist (add or remove title keys)
    * Matches Python's AuthenticationManager.update_user_watchlist()
    * @param {string} username - Username

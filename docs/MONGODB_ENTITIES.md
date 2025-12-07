@@ -17,6 +17,7 @@ Playarr uses MongoDB to store all runtime data including titles, provider inform
 7. [channels](#channels)
 8. [programs](#programs)
 9. [stats](#stats)
+10. [provider_categories](#provider_categories)
 
 ---
 
@@ -542,6 +543,7 @@ channels (1) ──< (many) users.watchlist.live (via array)
 iptv_providers (1) ──< (many) provider_titles
 iptv_providers (1) ──< (many) channels
 iptv_providers (1) ──< (many) programs
+iptv_providers (1) ──< (many) provider_categories
 
 channels (1) ──< (many) programs (via provider_id + channel_id)
 ```
@@ -568,6 +570,7 @@ channels (1) ──< (many) programs (via provider_id + channel_id)
 - `provider_titles.provider_id + title_key`: Ensures unique provider title per provider
 - `channels.provider_id + channel_id`: Ensures unique channel per provider
 - `programs.provider_id + channel_id + start + stop`: Ensures unique program per time slot
+- `provider_categories.provider_id + type + category_id`: Ensures unique category per provider/type/id
 
 ### Compound Indexes
 Used for common query patterns:

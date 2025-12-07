@@ -11,6 +11,7 @@ export const DatabaseCollections = {
   USERS: 'users',
   CHANNELS: 'channels',
   PROGRAMS: 'programs',
+  PROVIDER_CATEGORIES: 'provider_categories',
 };
 
 /**

@@ -28,6 +28,19 @@
       "interval": "1m",
       "description": "Sync provider account details (expiration, connections) from authentication endpoints",
       "schedule": "On startup and Every 1 minute"
+    },
+    {
+      "name": "cleanupUnwantedProviderTitles",
+      "jobHistoryName": "CleanupUnwantedProviderTitlesJob",
+      "description": "Cleanup unwanted provider titles (disabled providers, disabled media types, disabled categories)",
+      "schedule": "Manually triggered"
+    },
+    {
+      "name": "syncProviderCategories",
+      "jobHistoryName": "SyncProviderCategoriesJob",
+      "interval": "12h",
+      "description": "Sync provider categories (movies and TV shows) from IPTV providers",
+      "schedule": "On startup and Every 12 hours"
     }
   ]
 }

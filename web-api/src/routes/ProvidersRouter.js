@@ -10,13 +10,13 @@ class ProvidersRouter extends BaseRouter {
    * @param {ProvidersManager} providersManager - Providers manager instance
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
    * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
+   * @param {import('../managers/domain/ProviderCategoryManager.js').ProviderCategoryManager} providerCategoryManager - Provider category manager instance
    */
-  constructor(providersManager, middleware, metricsService) {
+  constructor(providersManager, middleware, metricsService, providerCategoryManager) {
     super(middleware, 'ProvidersRouter');
     this._providersManager = providersManager;
     this._metricsService = metricsService;
-    // In-memory cache for categories: Map<`${providerId}:${type}`, { categories: Array, lastUpdated: string }>
-    this._categoriesCache = new Map();
+    this._providerCategoryManager = providerCategoryManager;
   }
 
   /**
@@ -248,42 +248,22 @@ class ProvidersRouter extends BaseRouter {
         const { provider_id } = req.params;
         const { type } = req.query;
 
-        // If type query param is provided, use the old cached route (backward compatibility)
+        // If type query param is provided, get categories by type (backward compatibility)
         if (type && ['movies', 'tvshows'].includes(type)) {
-          // Check in-memory cache with daily invalidation
-          const cacheKey = `${provider_id}:${type}`;
-          const today = new Date().toISOString().split('T')[0];
-          const cached = this._categoriesCache.get(cacheKey);
+          // Query categories from database
+          const dbCategories = await this._providerCategoryManager.getCategoriesByProvider(provider_id, type);
           
-          let categories;
-          if (cached && cached.lastUpdated === today) {
-            // Cache hit - use cached categories
-            categories = cached.categories;
-          } else {
-            // Cache miss or expired - fetch from provider API
-            categories = await this._providersManager.fetchCategories(provider_id, type);
-            
-            // Store in cache with today's date
-            this._categoriesCache.set(cacheKey, {
-              categories,
-              lastUpdated: today
-            });
-          }
-
-          // Get provider config to merge enabled status (always fresh, not cached)
+          // Get provider config to merge enabled status
           const provider = await this._providersManager.getProvider(provider_id);
           const enabledCategories = provider.enabled_categories || { movies: [], tvshows: [] };
           const enabledCategoryKeys = new Set(enabledCategories[type] || []);
 
-          // Merge enabled status into categories
-          const categoriesWithStatus = categories.map(cat => {
-            // Generate category_key (same format as engine)
-            const categoryKey = `${type}-${cat.category_id}`;
-            return {
-              ...cat,
-              enabled: enabledCategoryKeys.has(categoryKey)
-            };
-          });
+          // Transform to API format and merge enabled status
+          const categoriesWithStatus = dbCategories.map(cat => ({
+            category_id: cat.category_id,
+            category_name: cat.category_name,
+            enabled: enabledCategoryKeys.has(cat.category_key)
+          }));
 
           return res.status(200).json(categoriesWithStatus);
         }

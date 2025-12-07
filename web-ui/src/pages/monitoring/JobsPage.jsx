@@ -8,8 +8,11 @@ import {
     Button,
     Grid,
     Divider,
+    IconButton,
+    Tooltip,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import axiosInstance from '../../config/axios';
 import { API_ENDPOINTS } from '../../config/api';
 import { intervalToDuration, formatDuration } from 'date-fns';
@@ -117,9 +120,57 @@ const formatJobResult = (jobName, lastResult) => {
 };
 
 /**
+ * Check if a job is manual (no interval property)
+ */
+const isManualJob = (job) => {
+    return !job.interval;
+};
+
+/**
  * Job card component
  */
-const JobCard = ({ job }) => {
+const JobCard = ({ job, onTrigger, engineReachable }) => {
+    const [triggering, setTriggering] = useState(false);
+    const [triggerError, setTriggerError] = useState(null);
+    const [triggerSuccess, setTriggerSuccess] = useState(false);
+
+    /**
+     * Handle job trigger
+     */
+    const handleTrigger = async () => {
+        if (!engineReachable) {
+            setTriggerError('Engine API is not reachable');
+            return;
+        }
+
+        setTriggering(true);
+        setTriggerError(null);
+        setTriggerSuccess(false);
+
+        try {
+            await axiosInstance.post(API_ENDPOINTS.triggerJob(job.name));
+            setTriggerSuccess(true);
+            // Clear success message after 3 seconds
+            setTimeout(() => {
+                setTriggerSuccess(false);
+            }, 3000);
+            // Refresh jobs list after a short delay to show updated status
+            if (onTrigger) {
+                setTimeout(() => {
+                    onTrigger();
+                }, 1000);
+            }
+        } catch (err) {
+            console.error('Error triggering job:', err);
+            const errorMessage = err.response?.data?.error || err.message || 'Failed to trigger job';
+            setTriggerError(errorMessage);
+        } finally {
+            setTriggering(false);
+        }
+    };
+
+    const manualJob = isManualJob(job);
+
     return (
         <Paper
             elevation={2}
@@ -134,9 +185,42 @@ const JobCard = ({ job }) => {
             }}
         >
             <Box>
-                <Typography variant="h6" gutterBottom>
-                    {job.name}
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    <Typography variant="h6" sx={{ flex: 1 }}>
+                        {job.name}
+                    </Typography>
+                    {manualJob && (
+                        <Tooltip title="Trigger job manually">
+                            <IconButton
+                                onClick={handleTrigger}
+                                disabled={triggering || !engineReachable}
+                                color="primary"
+                                size="small"
+                                sx={{
+                                    '&:hover': {
+                                        backgroundColor: 'action.hover',
+                                    },
+                                }}
+                            >
+                                {triggering ? (
+                                    <CircularProgress size={20} />
+                                ) : (
+                                    <PlayArrowIcon />
+                                )}
+                            </IconButton>
+                        </Tooltip>
+                    )}
+                </Box>
+                {triggerSuccess && (
+                    <Alert severity="success" sx={{ mb: 1, py: 0.5 }}>
+                        Job triggered successfully
+                    </Alert>
+                )}
+                {triggerError && (
+                    <Alert severity="error" sx={{ mb: 1, py: 0.5 }} onClose={() => setTriggerError(null)}>
+                        {triggerError}
+                    </Alert>
+                )}
                 <Divider sx={{ mb: 2 }} />
                 <Typography variant="body2" color="text.secondary" paragraph>
                     {job.description}
@@ -336,7 +420,11 @@ const SettingsJobs = () => {
                 <Grid container spacing={2}>
                     {jobs.map((job) => (
                         <Grid item xs={12} sm={6} md={3} key={job.name}>
-                            <JobCard job={job} />
+                            <JobCard 
+                                job={job} 
+                                onTrigger={fetchJobs}
+                                engineReachable={engineReachable}
+                            />
                         </Grid>
                     ))}
                 </Grid>

@@ -300,6 +300,28 @@ export class ChannelManager extends BaseDomainManager {
   }
 
   /**
+   * Delete channels by provider ID and channel IDs
+   * @param {string} providerId - Provider ID
+   * @param {Array<string>} channelIds - Array of channel IDs to delete
+   * @returns {Promise<number>} Number of deleted channels
+   */
+  async deleteByProviderAndChannelIds(providerId, channelIds) {
+    try {
+      if (!channelIds || channelIds.length === 0) {
+        return 0;
+      }
+      const result = await this._repository.deleteManyByQuery({
+        provider_id: providerId,
+        channel_id: { $in: channelIds }
+      });
+      return result.deletedCount || 0;
+    } catch (error) {
+      this.logger.error(`Error deleting channels for provider ${providerId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Get count of channels grouped by provider_id and category (group_title)
    * Uses MongoDB aggregation for efficiency
    * @returns {Promise<Array<{provider_id: string, category: string, count: number}>>}
