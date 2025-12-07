@@ -28,6 +28,7 @@ import {
   Assessment as AssessmentIcon,
   Logout as LogoutIcon,
   Close as CloseIcon,
+  Home as HomeIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useAuth } from '../../context/AuthContext';
@@ -77,6 +78,13 @@ function Sidebar({ open, onClose }) {
 
   const menuItems = [
     {
+      id: 'home',
+      label: 'Home',
+      icon: <HomeIcon />,
+      path: '/home',
+      expandable: false,
+    },
+    {
       id: 'media',
       label: 'Media',
       icon: <VideoLibraryIcon />,
@@ -107,12 +115,19 @@ function Sidebar({ open, onClose }) {
               { path: '/settings/general', label: 'General', icon: <GeneralSettingsIcon /> },
               { path: '/settings/iptv-providers', label: 'IPTV Providers', icon: <RouterIcon /> },
               { path: '/settings/users', label: 'Users', icon: <PersonAddIcon /> },
-              { path: '/settings/jobs', label: 'Jobs', icon: <WorkIcon /> },
-              { path: '/settings/logs', label: 'Log', icon: <DescriptionIcon /> },
               { path: '/settings/metrics', label: 'Metrics', icon: <BarChartIcon /> },
-              { path: '/statistics', label: 'Statistics', icon: <AssessmentIcon /> },
             ],
           },
+            {
+              id: 'monitoring',
+              label: 'Monitoring',
+              icon: <AssessmentIcon />,
+              expandable: true,
+              items: [
+                { path: '/settings/jobs', label: 'Jobs', icon: <WorkIcon /> },
+                { path: '/settings/logs', label: 'Log', icon: <DescriptionIcon /> },
+              ],
+            },
         ]
       : []),
   ];
@@ -152,37 +167,49 @@ function Sidebar({ open, onClose }) {
       </Toolbar>
       <Box sx={{ overflow: 'auto', height: '100%' }}>
         <List>
-          {menuItems.map((section) => (
-            <React.Fragment key={section.id}>
-              <ListItem disablePadding>
+          {menuItems.map((section) =>
+            section.expandable ? (
+              <React.Fragment key={section.id}>
+                <ListItem disablePadding>
+                  <ListItemButton
+                    disabled
+                    sx={{
+                      '&.Mui-disabled': {
+                        opacity: 1,
+                        color: 'text.primary',
+                      },
+                    }}
+                  >
+                    <ListItemText primary={section.label} />
+                  </ListItemButton>
+                </ListItem>
+                <List component="div" disablePadding>
+                  {section.items.map((item) => (
+                    <ListItem key={item.path} disablePadding>
+                      <ListItemButton
+                        selected={isActive(item.path)}
+                        onClick={() => handleNavigate(item.path)}
+                        sx={{ pl: 4 }}
+                      >
+                        <ListItemIcon>{item.icon}</ListItemIcon>
+                        <ListItemText primary={item.label} />
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              </React.Fragment>
+            ) : (
+              <ListItem key={section.id} disablePadding>
                 <ListItemButton
-                  disabled
-                  sx={{
-                    '&.Mui-disabled': {
-                      opacity: 1,
-                      color: 'text.primary',
-                    },
-                  }}
+                  selected={isActive(section.path)}
+                  onClick={() => handleNavigate(section.path)}
                 >
+                  <ListItemIcon>{section.icon}</ListItemIcon>
                   <ListItemText primary={section.label} />
                 </ListItemButton>
               </ListItem>
-              <List component="div" disablePadding>
-                {section.items.map((item) => (
-                  <ListItem key={item.path} disablePadding>
-                    <ListItemButton
-                      selected={isActive(item.path)}
-                      onClick={() => handleNavigate(item.path)}
-                      sx={{ pl: 4 }}
-                    >
-                      <ListItemIcon>{item.icon}</ListItemIcon>
-                      <ListItemText primary={item.label} />
-                    </ListItemButton>
-                  </ListItem>
-                ))}
-              </List>
-            </React.Fragment>
-          ))}
+            )
+          )}
         </List>
         <Divider />
         <List>

@@ -23,7 +23,7 @@ import SettingsJobs from './components/settings/SettingsJobs';
 import SettingsLogger from './components/settings/SettingsLogger';
 import SettingsStatistics from './components/settings/SettingsStatistics';
 import SettingsMetrics from './components/settings/SettingsMetrics';
-import Statistics from './pages/Statistics';
+import HomePage from './pages/HomePage';
 
 const AppContent = () => {
     const dispatch = useDispatch();
@@ -219,7 +219,15 @@ const AppContent = () => {
                             path="/"
                             element={
                                 <PrivateRoute>
-                                    <Navigate to="/media/vod" replace />
+                                    <Navigate to="/home" replace />
+                                </PrivateRoute>
+                            }
+                        />
+                        <Route
+                            path="/home"
+                            element={
+                                <PrivateRoute>
+                                    <HomePage />
                                 </PrivateRoute>
                             }
                         />
@@ -267,7 +275,7 @@ const AppContent = () => {
                             path="/statistics"
                             element={
                                 <PrivateRoute>
-                                    <Statistics />
+                                    <Navigate to="/home" replace />
                                 </PrivateRoute>
                             }
                         />

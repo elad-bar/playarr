@@ -51,9 +51,9 @@ const formatNumber = (num) => {
 };
 
 /**
- * Statistics page component displaying Prometheus metrics dashboard
+ * Home page component displaying Prometheus metrics dashboard
  */
-const Statistics = () => {
+const HomePage = () => {
     const theme = useTheme();
     const [metrics, setMetrics] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -96,8 +96,8 @@ const Statistics = () => {
             }
             setMetrics(metricsObject);
         } catch (err) {
-            const errorMessage = err.message || 'Failed to load statistics';
-            setError(`Failed to load statistics: ${errorMessage}`);
+            const errorMessage = err.message || 'Failed to load metrics';
+            setError(`Failed to load home data: ${errorMessage}`);
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -350,10 +350,7 @@ const Statistics = () => {
     return (
         <Box sx={{ p: 3 }}>
             {/* Header with refresh button */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-                <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
-                    Statistics Dashboard
-                </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', mb: 3 }}>
                 <Button
                     variant="outlined"
                     startIcon={refreshing ? <CircularProgress size={20} /> : <RefreshIcon />}
@@ -667,12 +664,12 @@ const Statistics = () => {
             {/* Empty state */}
             {!loading && !error && activeUsers === 0 && totalTitles === 0 && totalChannels === 0 && totalEpisodes === 0 && totalBestSourceSelections === 0 && (
                 <Alert severity="info">
-                    No statistics data available. Metrics will appear here once data is collected.
+                    No metrics data available. Metrics will appear here once data is collected.
                 </Alert>
             )}
         </Box>
     );
 };
 
-export default Statistics;
+export default HomePage;
 
