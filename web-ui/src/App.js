@@ -21,8 +21,8 @@ import SettingsIPTVProviders from './components/settings/SettingsIPTVProviders';
 import SettingsUsers from './components/settings/SettingsUsers';
 import SettingsJobs from './components/settings/SettingsJobs';
 import SettingsLogger from './components/settings/SettingsLogger';
+import SettingsStatistics from './components/settings/SettingsStatistics';
 import SettingsMetrics from './components/settings/SettingsMetrics';
-import Statistics from './pages/Statistics';
 
 const AppContent = () => {
     const dispatch = useDispatch();
@@ -201,7 +201,7 @@ const AppContent = () => {
                     component="main"
                     sx={{
                         flexGrow: 1,
-                        p: isLoginPage ? 0 : 3,
+                        p: isLoginPage ? 0 : { xs: 0, sm: 3 },
                         width: '100%',
                         ml: 0,
                         transition: (theme) =>
@@ -262,14 +262,6 @@ const AppContent = () => {
                                 </PrivateRoute>
                             }
                         />
-                        <Route
-                            path="/statistics"
-                            element={
-                                <PrivateRoute>
-                                    <Statistics />
-                                </PrivateRoute>
-                            }
-                        />
                         {user?.role === 'admin' && (
                             <>
                                 <Route
@@ -312,14 +304,22 @@ const AppContent = () => {
                                         </PrivateRoute>
                                     }
                                 />
-                                <Route
-                                    path="/settings/metrics"
-                                    element={
-                                        <PrivateRoute>
-                                            <SettingsMetrics />
-                                        </PrivateRoute>
-                                    }
-                                />
+                        <Route
+                            path="/settings/statistics"
+                            element={
+                                <PrivateRoute>
+                                    <SettingsStatistics />
+                                </PrivateRoute>
+                            }
+                        />
+                        <Route
+                            path="/settings/metrics"
+                            element={
+                                <PrivateRoute>
+                                    <SettingsMetrics />
+                                </PrivateRoute>
+                            }
+                        />
                             </>
                         )}
                         {/* Keep /titles route for backwards compatibility */}

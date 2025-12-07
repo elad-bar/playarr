@@ -107,7 +107,7 @@ const TitleDetailsPage = () => {
 
   if (loading || !selectedTitle) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px', p: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px', p: { xs: 0, sm: 3 } }}>
         <CircularProgress />
       </Box>
     );

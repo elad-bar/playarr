@@ -125,7 +125,7 @@ const SettingsStatistics = () => {
 
     if (loading && providerStats.length === 0) {
         return (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: { xs: 0, sm: 3 } }}>
                 <CircularProgress />
             </Box>
         );
@@ -148,7 +148,7 @@ const SettingsStatistics = () => {
     });
 
     return (
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ p: { xs: 0, sm: 3 } }}>
             {filteredProviders.map((provider, index) => (
                 <StatsCard
                     key={index}

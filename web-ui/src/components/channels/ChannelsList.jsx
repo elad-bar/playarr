@@ -531,7 +531,7 @@ const ChannelsList = () => {
       </Drawer>
 
       {/* Main Content */}
-      <Box sx={{ flexGrow: 1, p: 3 }}>
+      <Box sx={{ flexGrow: 1, p: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 3 }}>
           {/* Search, Toggle Button, and Title Count */}
           <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'center' }}>

@@ -290,14 +290,14 @@ const SettingsJobs = () => {
 
     if (loading && jobs.length === 0) {
         return (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'center', p: { xs: 2, sm: 3 } }}>
                 <CircularProgress />
             </Box>
         );
     }
 
-    return (
-        <Box sx={{ p: 3 }}>
+  return (
+    <Box sx={{ p: { xs: 2, sm: 3 } }}>
             <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
                 <Button
                     variant="contained"

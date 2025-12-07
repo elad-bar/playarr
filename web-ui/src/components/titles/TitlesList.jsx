@@ -414,7 +414,7 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                     flexGrow: 1,
                     minWidth: 0, // Prevent overflow
                     width: sidebarOpen && !isMobile ? `calc(100% - ${drawerWidth}px)` : '100%',
-                    p: 3,
+                    p: { xs: 2, sm: 3 },
                     transition: theme.transitions.create('width', {
                         easing: theme.transitions.easing.sharp,
                         duration: theme.transitions.duration.enteringScreen,

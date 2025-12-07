@@ -352,7 +352,14 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                             <Grid item xs={12} sm={8} md={9} lg={10}>
                                 <Box display="flex" flexDirection="column" gap={3}>
                                     <Box display="flex" alignItems="center" gap={2}>
-                                        <Box display="flex" gap={1}>
+                                        <Box
+                                            display="flex"
+                                            gap={1}
+                                            flexWrap="wrap"
+                                            rowGap={1}
+                                            width="100%"
+                                            minWidth={0}
+                                        >
                                             <Chip
                                                 icon={details.type === 'tvshows' ? <Tv /> : <Movie />}
                                                 label={details.type === 'tvshows' ? 'TV Show' : 'Movie'}
@@ -360,7 +367,8 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                                                 sx={{
                                                     backgroundColor: 'rgba(255, 255, 255, 0.08)',
                                                     color: 'white',
-                                                    '& .MuiSvgIcon-root': { color: 'white' }
+                                                    '& .MuiSvgIcon-root': { color: 'white' },
+                                                    flexShrink: 0
                                                 }}
                                             />
                                             {details.release_date && (
@@ -371,7 +379,8 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                                                     sx={{
                                                         backgroundColor: 'rgba(255, 255, 255, 0.08)',
                                                         color: 'white',
-                                                        '& .MuiSvgIcon-root': { color: 'white' }
+                                                        '& .MuiSvgIcon-root': { color: 'white' },
+                                                        flexShrink: 0
                                                     }}
                                                 />
                                             )}
@@ -383,7 +392,8 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                                                     sx={{
                                                         backgroundColor: 'rgba(255, 255, 255, 0.08)',
                                                         color: 'white',
-                                                        '& .MuiSvgIcon-root': { color: 'white' }
+                                                        '& .MuiSvgIcon-root': { color: 'white' },
+                                                        flexShrink: 0
                                                     }}
                                                 />
                                             )}
@@ -397,6 +407,7 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                                                     color: 'white',
                                                     '& .MuiSvgIcon-root': { color: 'white' },
                                                     cursor: 'pointer',
+                                                    flexShrink: 0,
                                                     '&:hover': {
                                                         backgroundColor: details.watchlist ? 'success.dark' : 'rgba(255, 255, 255, 0.12)'
                                                     }
@@ -414,6 +425,7 @@ const TitleDetailsDialog = ({ open, onClose, title, onWatchlistToggle, onSimilar
                                                         color: 'white',
                                                         '& .MuiSvgIcon-root': { color: 'white' },
                                                         cursor: (!details.streams || details.streams.length === 0) ? 'not-allowed' : 'pointer',
+                                                        flexShrink: 0,
                                                         '&:hover': {
                                                             backgroundColor: (!details.streams || details.streams.length === 0) ? 'rgba(255, 255, 255, 0.08)' : 'primary.dark'
                                                         }

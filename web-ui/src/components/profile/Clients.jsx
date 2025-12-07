@@ -78,7 +78,7 @@ function Clients() {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px', p: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px', p: { xs: 2, sm: 3 } }}>
         <CircularProgress />
       </Box>
     );
@@ -101,7 +101,7 @@ function Clients() {
       </Box>
 
       {/* Tab Content */}
-      <Box sx={{ p: 3 }}>
+      <Box sx={{ p: { xs: 2, sm: 3 } }}>
         {selectedTab === 0 && (
           <ProfileM3UEndpoint
             apiKey={profile.api_key}

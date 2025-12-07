@@ -110,7 +110,7 @@ function Sidebar({ open, onClose }) {
               { path: '/settings/jobs', label: 'Jobs', icon: <WorkIcon /> },
               { path: '/settings/logs', label: 'Log', icon: <DescriptionIcon /> },
               { path: '/settings/metrics', label: 'Metrics', icon: <BarChartIcon /> },
-              { path: '/statistics', label: 'Statistics', icon: <AssessmentIcon /> },
+              { path: '/settings/statistics', label: 'Statistics', icon: <AssessmentIcon /> },
             ],
           },
         ]

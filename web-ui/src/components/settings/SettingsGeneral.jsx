@@ -115,7 +115,7 @@ const SettingsGeneral = () => {
     }
 
     return (
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ p: { xs: 2, sm: 3 } }}>
             {/* Save Button - Always Visible */}
             <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
                 <Button
