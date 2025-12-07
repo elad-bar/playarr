@@ -665,7 +665,20 @@ const ChannelsList = () => {
                       />
                     )}
                     <CardContent sx={{ flexGrow: 1 }}>
-                      <Typography variant="h6" component="div" gutterBottom noWrap>
+                      <Typography
+                        variant="h6"
+                        component="div"
+                        gutterBottom
+                        noWrap={!isMobile}
+                        sx={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          display: isMobile ? '-webkit-box' : 'block',
+                          WebkitBoxOrient: 'vertical',
+                          WebkitLineClamp: isMobile ? 2 : 'unset',
+                          whiteSpace: isMobile ? 'normal' : 'nowrap'
+                        }}
+                      >
                         {channel.name}
                       </Typography>
                       <Typography variant="body2" color="text.secondary" gutterBottom>
