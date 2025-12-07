@@ -124,7 +124,7 @@ class TitlesRouter extends BaseRouter {
         // Track watchlist operation
         this._metricsService.incrementCounter('watchlist_operations', {
           operation: watchlist ? 'add' : 'remove',
-          media_type: title.media_type || 'unknown',
+          media_type: title.type || 'unknown',
           username: req.user.username
         });
 
@@ -167,11 +167,11 @@ class TitlesRouter extends BaseRouter {
         // Validate titles exist and get their media types
         const existingTitles = await this._titlesManager.findTitlesByQuery(
           { title_key: { $in: titleKeys } },
-          { projection: { title_key: 1, media_type: 1, _id: 0 } }
+          { projection: { title_key: 1, type: 1, _id: 0 } }
         );
 
         const existingKeys = new Set(existingTitles.map(t => t.title_key));
-        const titleMediaTypeMap = new Map(existingTitles.map(t => [t.title_key, t.media_type || 'unknown']));
+        const titleMediaTypeMap = new Map(existingTitles.map(t => [t.title_key, t.type || 'unknown']));
         const notFound = titleKeys.filter(key => !existingKeys.has(key));
 
         // Separate titles to add and remove

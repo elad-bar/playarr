@@ -412,10 +412,6 @@ async function initialize() {
     app.use('/player_api.php', xtreamRouter.router); // Xtream Code API at specific path
     
     // Prometheus metrics endpoint (before React Router fallback)
-    // Add logging middleware to debug routing
-    app.use('/metrics', (req, res, next) => {
-      next();
-    });
     app.use('/metrics', metricsRouter.router);
     
     // Add direct stream routes (Xtream Code API standard format)

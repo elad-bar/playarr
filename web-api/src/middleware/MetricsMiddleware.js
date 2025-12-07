@@ -65,17 +65,17 @@ class MetricsMiddleware {
   trackRequest(req, res, next) {
     const startTime = Date.now();
     
-    // Store endpoint and username on request for later use
+    // Store endpoint on request for later use
     req._metricsStartTime = startTime;
     req._metricsEndpoint = this._getEndpoint(req);
-    req._metricsUsername = this._getUsername(req);
 
     // Track response finish
     res.on('finish', () => {
       const duration = (Date.now() - startTime) / 1000;
       const statusCode = res.statusCode;
       const endpoint = req._metricsEndpoint || this._getEndpoint(req);
-      const username = req._metricsUsername || this._getUsername(req);
+      // Always re-evaluate username since authentication middleware runs after this middleware
+      const username = this._getUsername(req);
 
       // Track request count
       this.metricsService.incrementCounter('http_requests', {
@@ -102,7 +102,8 @@ class MetricsMiddleware {
    */
   trackManagedError(req, error) {
     const endpoint = req._metricsEndpoint || this._getEndpoint(req);
-    const username = req._metricsUsername || this._getUsername(req);
+    // Always re-evaluate username since authentication middleware runs after metrics middleware
+    const username = this._getUsername(req);
     const errorType = error.constructor.name || 'AppError';
 
     this.metricsService.incrementCounter('managed_errors', {
