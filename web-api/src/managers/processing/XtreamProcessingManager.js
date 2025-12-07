@@ -308,13 +308,13 @@ export class XtreamProcessingManager extends BaseIPTVProcessingManager {
     } else {
       try {
         const fetchStartTime = Date.now();
-        this.logger.debug(`${type}: Fetching extended info for title ${formatNumber(titleId)}`);
+        this.logger.debug(`${type}: Fetching extended info for title ${titleId}`);
 
         // Fetch extended info from providersManager (rate limiting handled by provider)
-        this.logger.debug(`Fetching extended info from providersManager: ${this.providerId}/${type}/${formatNumber(titleId)}`);
+        this.logger.debug(`Fetching extended info from providersManager: ${this.providerId}/${type}/${titleId}`);
         const fullResponseData = await this.providersManager.fetchExtendedInfo(this.providerId, type, titleId);
         const fetchDuration = Date.now() - fetchStartTime;
-        this.logger.debug(`${type}: Extended info fetched for title ${formatNumber(titleId)} - ${formatNumber(fetchDuration)}ms`);
+        this.logger.debug(`${type}: Extended info fetched for title ${titleId} - ${formatNumber(fetchDuration)}ms`);
 
         if (config.parseExtendedInfo) {
           config.parseExtendedInfo(titleData, fullResponseData);

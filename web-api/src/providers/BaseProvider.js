@@ -494,7 +494,7 @@ export class BaseProvider {
       const waitTime = totalDuration - requestDuration;
       this.logger.debug(
         `API ${finalFetchOptions.method} request: ${endpoint} ${providerId}/${type}${cacheKey} - ` +
-        `${formatNumber(totalDuration)}ms (request: ${formatNumber(requestDuration)}ms, wait: ${formatNumber(waitTime)}ms)`
+        `${formatNumber(requestDuration)}ms (Waited: ${formatNumber(waitTime)}ms, total ${formatNumber(totalDuration)}ms)`
       );
 
       // Clear timeout if it was set
