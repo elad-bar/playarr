@@ -199,6 +199,10 @@ After deployment:
 ### Monitoring
 
 - Monitor system health through the web UI
+- **Prometheus Metrics**: Access Prometheus-compatible metrics at `/metrics` endpoint (Bearer token required)
+  - Get metrics token from Settings → Metrics in the web UI
+  - Configure Prometheus to scrape metrics using Bearer token authentication
+  - See [Prometheus Metrics Exporter](features/prometheus-metrics-exporter.md) for details
 - Set up external monitoring for container health
 - Monitor MongoDB performance
 - Track job execution status

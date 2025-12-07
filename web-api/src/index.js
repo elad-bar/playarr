@@ -20,6 +20,7 @@ import { formatNumber } from './utils/numberFormat.js';
 
 // Import service classes
 import { WebSocketService } from './services/websocket.js';
+import MetricsService from './services/metrics.js';
 import { MongoClient } from 'mongodb';
 
 // Import repositories
@@ -63,6 +64,8 @@ import { LiveTVFormattingManager } from './managers/formatting/LiveTVFormattingM
 
 // Import middleware
 import Middleware from './middleware/Middleware.js';
+import MetricsMiddleware from './middleware/MetricsMiddleware.js';
+import { AppError } from './errors/AppError.js';
 
 // Import router classes
 import AuthRouter from './routes/AuthRouter.js';
@@ -80,6 +83,7 @@ import XtreamRouter from './routes/XtreamRouter.js';
 import JobsRouter from './routes/JobsRouter.js';
 import StremioRouter from './routes/StremioRouter.js';
 import LiveTVRouter from './routes/LiveTVRouter.js';
+import MetricsRouter from './routes/MetricsRouter.js';
 import { XtreamProvider } from './providers/XtreamProvider.js';
 import { AGTVProvider } from './providers/AGTVProvider.js';
 import { TMDBProvider } from './providers/TMDBProvider.js';
@@ -106,13 +110,7 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  logger.error('Error:', err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal server error',
-  });
-});
+// Error handling middleware will be added after routes are registered
 
 // Initialize application
 async function initialize() {
@@ -197,6 +195,10 @@ async function initialize() {
     const allProviders = await providerRepo.findByQuery({}) || [];
     logger.info(`Loaded ${formatNumber(allProviders.length)} provider(s) from database`);
 
+    // Step 2: Initialize services (before providers to allow dependency injection)
+    const metricsService = new MetricsService();
+    const metricsMiddleware = new MetricsMiddleware(metricsService);
+
     // Group providers by type for each provider type
     const xtreamConfigs = {};
     const agtvConfigs = {};
@@ -212,16 +214,29 @@ async function initialize() {
     }
 
     // Initialize provider instances with their configs (singletons)
-    const xtreamProvider = new XtreamProvider(xtreamConfigs, cacheDir);
-    const agtvProvider = new AGTVProvider(agtvConfigs, cacheDir);
+    const xtreamProvider = new XtreamProvider(xtreamConfigs, cacheDir, metricsService);
+    const agtvProvider = new AGTVProvider(agtvConfigs, cacheDir, metricsService);
     const providerTypeMap = {
       [DataProvider.XTREAM]: xtreamProvider,
       [DataProvider.AGTV]: agtvProvider
     };
 
-    // Step 2: Initialize managers (dependency order)
+    // Step 3: Initialize managers (dependency order)
     const userManager = new UserManager(userRepo);
     const settingsManager = new SettingsManager(settingsRepo);
+    
+    // Auto-generate metrics token if not exists
+    try {
+      const metricsToken = await settingsManager.getSetting('metrics_token');
+      if (!metricsToken.value) {
+        const crypto = await import('crypto');
+        const newToken = crypto.randomBytes(32).toString('hex');
+        await settingsManager.setSetting('metrics_token', newToken);
+        logger.info('Generated new metrics token');
+      }
+    } catch (error) {
+      logger.warn('Could not check/generate metrics token on startup:', error.message);
+    }
     
     // Load TMDB API key from settings and initialize TMDB provider
     const tmdbTokenKey = 'tmdb_token';
@@ -234,7 +249,7 @@ async function initialize() {
     } catch (error) {
       logger.warn('Could not load TMDB API key on startup:', error.message);
     }
-    const tmdbProvider = new TMDBProvider(tmdbApiKey, cacheDir);
+    const tmdbProvider = new TMDBProvider(tmdbApiKey, cacheDir, metricsService);
     const statsManager = new StatsManager(statsRepo);
     const titlesManager = new TitlesManager(titleRepo);
     const providerTitlesManager = new ProviderTitlesManager(providerTitleRepo);
@@ -275,12 +290,12 @@ async function initialize() {
       programManager,
       userManager
     );
-    const liveTVFormattingManager = new LiveTVFormattingManager(titlesManager, iptvProviderManager, channelManager, programManager, userManager);
+    const liveTVFormattingManager = new LiveTVFormattingManager(titlesManager, iptvProviderManager, channelManager, programManager, userManager, metricsService);
     
-    const playlistManager = new PlaylistManager(titlesManager, iptvProviderManager, channelManager, programManager);
+    const playlistManager = new PlaylistManager(titlesManager, iptvProviderManager, channelManager, programManager, metricsService);
     const tmdbManager = new TMDBManager(tmdbProvider);
-    const xtreamManager = new XtreamManager(titlesManager, iptvProviderManager, channelManager, programManager);
-    const stremioManager = new StremioManager(titlesManager, iptvProviderManager, channelManager, programManager);
+    const xtreamManager = new XtreamManager(titlesManager, iptvProviderManager, channelManager, programManager, metricsService);
+    const stremioManager = new StremioManager(titlesManager, iptvProviderManager, channelManager, programManager, metricsService);
     
     // Create job instances with all dependencies
     const jobInstances = new Map();
@@ -290,7 +305,8 @@ async function initialize() {
       providersManager,
       tmdbManager,
       titlesManager,
-      providerTitlesManager
+      providerTitlesManager,
+      metricsService
     ));
     jobInstances.set('providerTitlesMonitor', new ProviderTitlesMonitorJob(
       'providerTitlesMonitor',
@@ -298,7 +314,8 @@ async function initialize() {
       providersManager,
       tmdbManager,
       titlesManager,
-      providerTitlesManager
+      providerTitlesManager,
+      metricsService
     ));
     jobInstances.set('syncLiveTV', new SyncLiveTVJob(iptvProviderManager, liveTVProcessingManager, jobHistoryManager));
     
@@ -308,11 +325,12 @@ async function initialize() {
       providersManager,
       tmdbManager,
       titlesManager,
-      providerTitlesManager
+      providerTitlesManager,
+      metricsService
     ));
     
     // Initialize EngineScheduler with job instances
-    jobScheduler = new EngineScheduler(jobInstances, jobHistoryManager);
+    jobScheduler = new EngineScheduler(jobInstances, jobHistoryManager, metricsService);
     await jobScheduler.initialize();
     
     // Initialize JobsManager with scheduler reference
@@ -321,26 +339,43 @@ async function initialize() {
     // Initialize user manager (creates default admin user)
     await userManager.initialize();
     
+    // Update gauge metrics on startup
+    try {
+      await metricsService.updateGaugeMetrics({
+        providerTitlesManager,
+        titlesManager,
+        channelManager,
+        userManager,
+        iptvProviderManager
+      });
+    } catch (error) {
+      logger.warn('Failed to update gauge metrics on startup:', error.message);
+    }
+    
     // Step 3: Initialize middleware (after UserManager is initialized)
-    const middleware = new Middleware(userManager);
+    const middleware = new Middleware(userManager, metricsMiddleware);
     logger.info('Middleware initialized');
+
+    // Add metrics middleware to app (before routes are registered)
+    app.use(metricsMiddleware.trackRequest);
 
     // Step 4: Initialize routers (with dependencies)
     const authRouter = new AuthRouter(userManager, middleware);
-    const usersRouter = new UsersRouter(userManager, middleware);
+    const usersRouter = new UsersRouter(userManager, middleware, metricsService);
     const profileRouter = new ProfileRouter(userManager, middleware, jobsManager);
     const settingsRouter = new SettingsRouter(settingsManager, middleware);
     const statsRouter = new StatsRouter(statsManager, middleware);
-    const titlesRouter = new TitlesRouter(titlesManager, providersManager, userManager, middleware);
-    const providersRouter = new ProvidersRouter(providersManager, middleware);
-    const streamRouter = new StreamRouter(stremioManager, middleware);
+    const titlesRouter = new TitlesRouter(titlesManager, providersManager, userManager, middleware, metricsService);
+    const providersRouter = new ProvidersRouter(providersManager, middleware, metricsService);
+    const streamRouter = new StreamRouter(stremioManager, middleware, metricsService);
     const playlistRouter = new PlaylistRouter(playlistManager, middleware);
     const tmdbRouter = new TMDBRouter(tmdbManager, settingsManager, middleware);
     const healthcheckRouter = new HealthcheckRouter(settingsManager, middleware);
     const xtreamRouter = new XtreamRouter(xtreamManager, middleware, channelManager, programManager);
     const jobsRouter = new JobsRouter(jobsManager, middleware);
     const stremioRouter = new StremioRouter(stremioManager, middleware);
-    const liveTVRouter = new LiveTVRouter(channelManager, programManager, liveTVFormattingManager, userManager, iptvProviderManager, middleware);
+    const liveTVRouter = new LiveTVRouter(channelManager, programManager, liveTVFormattingManager, userManager, iptvProviderManager, middleware, metricsService);
+    const metricsRouter = new MetricsRouter(settingsManager, middleware, metricsService);
 
     // Initialize all routers
     authRouter.initialize();
@@ -358,6 +393,7 @@ async function initialize() {
     jobsRouter.initialize();
     stremioRouter.initialize();
     liveTVRouter.initialize();
+    metricsRouter.initialize();
 
     // Step 5: Register routes
     app.use('/api/auth', authRouter.router);
@@ -374,6 +410,13 @@ async function initialize() {
     app.use('/api/healthcheck', healthcheckRouter.router);
     app.use('/api/livetv', liveTVRouter.router);
     app.use('/player_api.php', xtreamRouter.router); // Xtream Code API at specific path
+    
+    // Prometheus metrics endpoint (before React Router fallback)
+    // Add logging middleware to debug routing
+    app.use('/metrics', (req, res, next) => {
+      next();
+    });
+    app.use('/metrics', metricsRouter.router);
     
     // Add direct stream routes (Xtream Code API standard format)
     // These must come before the React Router fallback
@@ -428,7 +471,8 @@ async function initialize() {
           req.path.startsWith('/series') ||
           req.path.startsWith('/live') ||
           req.path.startsWith('/player_api.php') ||
-          req.path.startsWith('/stremio')) {
+          req.path.startsWith('/stremio') ||
+          req.path.startsWith('/metrics')) {
         return next();
       }
       // Use static middleware for other paths
@@ -438,13 +482,14 @@ async function initialize() {
     // React Router fallback - serve index.html for non-API routes
     // Handle all HTTP methods for the fallback
     app.all('*', (req, res, next) => {
-      // Skip API routes, stream routes, and Stremio routes (let their routers handle them)
+      // Skip API routes, stream routes, Stremio routes, and metrics routes (let their routers handle them)
       if (req.path.startsWith('/api') || 
           req.path.startsWith('/movie') || 
           req.path.startsWith('/series') ||
           req.path.startsWith('/live') ||
           req.path.startsWith('/player_api.php') ||
-          req.path.startsWith('/stremio')) {
+          req.path.startsWith('/stremio') ||
+          req.path.startsWith('/metrics')) {
         return next(); // Let the router handle it or return 404 if not matched
       }
       
@@ -455,6 +500,19 @@ async function initialize() {
       
       // For non-GET requests to non-API routes, return 404
       return res.status(404).json({ error: 'Not found' });
+    });
+
+    // Error handling middleware (MUST be after all routes)
+    app.use((err, req, res, next) => {
+      // Track managed errors
+      if (err instanceof AppError) {
+        metricsMiddleware.trackManagedError(req, err);
+      }
+      
+      logger.error('Error:', err);
+      res.status(err.status || 500).json({
+        error: err.message || 'Internal server error',
+      });
     });
 
     // Initialize Socket.IO server

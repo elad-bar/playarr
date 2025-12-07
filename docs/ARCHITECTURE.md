@@ -56,6 +56,17 @@ The web UI is a React application that provides:
 
 The UI is built and served statically by the API server.
 
+#### 4. Metrics Service
+
+The metrics service provides Prometheus-compatible metrics export:
+- **Metrics Collection**: Automatically tracks HTTP requests, errors, job executions, and system operations
+- **Prometheus Export**: Exposes `/metrics` endpoint in Prometheus format
+- **JSON Export**: Provides `/metrics/json` endpoint for programmatic access
+- **Secure Access**: Bearer token authentication for metrics endpoint
+- **Configuration-Driven**: Metrics defined in `metrics.json` for easy extension
+
+For detailed information, see the [Prometheus Metrics Exporter](features/prometheus-metrics-exporter.md) documentation.
+
 ## Business Capabilities
 
 ### 1. Multi-Provider Content Aggregation
@@ -151,14 +162,18 @@ playarr/
 ├── web-api/
 │   ├── src/
 │   │   ├── config/            # Configuration (database, collections)
-│   │   ├── middleware/        # Auth middleware
+│   │   ├── middleware/        # Auth and metrics middleware
+│   │   │   └── MetricsMiddleware.js  # HTTP request tracking
 │   │   ├── routes/            # API routes
 │   │   ├── managers/          # Business logic managers
 │   │   ├── repositories/      # Data access layer
 │   │   ├── handlers/          # Provider handlers
 │   │   ├── providers/         # Provider implementations
 │   │   ├── jobs/              # Scheduled jobs
-│   │   └── utils/             # Utility functions
+│   │   ├── services/          # Infrastructure services
+│   │   │   └── metrics.js     # Prometheus metrics service
+│   │   ├── utils/             # Utility functions
+│   │   └── metrics.json       # Metrics configuration
 │   ├── package.json           # API dependencies
 │   └── src/index.js           # API server entry point
 ├── web-ui/

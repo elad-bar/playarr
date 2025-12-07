@@ -10,9 +10,10 @@ class StremioManager extends BaseFormattingManager {
    * @param {import('../domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance
    * @param {import('../domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance
    * @param {import('../domain/ProgramManager.js').ProgramManager} programManager - Program manager instance
+   * @param {import('../../services/metrics.js').default} metricsService - Metrics service instance
    */
-  constructor(titlesManager, iptvProviderManager, channelManager, programManager) {
-    super('StremioManager', titlesManager, iptvProviderManager);
+  constructor(titlesManager, iptvProviderManager, channelManager, programManager, metricsService) {
+    super('StremioManager', titlesManager, iptvProviderManager, metricsService);
     this._channelManager = channelManager;
     this._programManager = programManager;
     this._tmdbPosterBase = 'https://image.tmdb.org/t/p/w300';

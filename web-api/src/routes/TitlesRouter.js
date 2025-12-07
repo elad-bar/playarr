@@ -9,12 +9,14 @@ class TitlesRouter extends BaseRouter {
    * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager instance (for getting enabled provider IDs)
    * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager instance (for watchlist operations)
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
    */
-  constructor(titlesManager, providersManager, userManager, middleware) {
+  constructor(titlesManager, providersManager, userManager, middleware, metricsService) {
     super(middleware, 'TitlesRouter');
     this._titlesManager = titlesManager;
     this._providersManager = providersManager;
     this._userManager = userManager;
+    this._metricsService = metricsService;
   }
 
   /**
@@ -119,6 +121,13 @@ class TitlesRouter extends BaseRouter {
           return res.status(500).json({ error: 'Failed to update watchlist' });
         }
 
+        // Track watchlist operation
+        this._metricsService.incrementCounter('watchlist_operations', {
+          operation: watchlist ? 'add' : 'remove',
+          media_type: title.media_type || 'unknown',
+          username: req.user.username
+        });
+
         return res.status(200).json({
           message: `Title ${watchlist ? 'added to' : 'removed from'} watchlist successfully`,
           title_key,
@@ -155,13 +164,14 @@ class TitlesRouter extends BaseRouter {
           return res.status(400).json({ error: 'No title keys provided' });
         }
 
-        // Validate titles exist
+        // Validate titles exist and get their media types
         const existingTitles = await this._titlesManager.findTitlesByQuery(
           { title_key: { $in: titleKeys } },
-          { projection: { title_key: 1, _id: 0 } }
+          { projection: { title_key: 1, media_type: 1, _id: 0 } }
         );
 
         const existingKeys = new Set(existingTitles.map(t => t.title_key));
+        const titleMediaTypeMap = new Map(existingTitles.map(t => [t.title_key, t.media_type || 'unknown']));
         const notFound = titleKeys.filter(key => !existingKeys.has(key));
 
         // Separate titles to add and remove
@@ -190,6 +200,15 @@ class TitlesRouter extends BaseRouter {
           const success = await this._userManager.updateUserWatchlist(req.user.username, titlesToWatchlist, true);
           if (success) {
             totalUpdated += titlesToWatchlist.length;
+            // Track watchlist operations
+            for (const titleKey of titlesToWatchlist) {
+              const mediaType = titleMediaTypeMap.get(titleKey) || 'unknown';
+              this._metricsService.incrementCounter('watchlist_operations', {
+                operation: 'add',
+                media_type: mediaType,
+                username: req.user.username
+              });
+            }
           }
         }
 
@@ -197,6 +216,15 @@ class TitlesRouter extends BaseRouter {
           const success = await this._userManager.updateUserWatchlist(req.user.username, titlesToUnwatchlist, false);
           if (success) {
             totalUpdated += titlesToUnwatchlist.length;
+            // Track watchlist operations
+            for (const titleKey of titlesToUnwatchlist) {
+              const mediaType = titleMediaTypeMap.get(titleKey) || 'unknown';
+              this._metricsService.incrementCounter('watchlist_operations', {
+                operation: 'remove',
+                media_type: mediaType,
+                username: req.user.username
+              });
+            }
           }
         }
 

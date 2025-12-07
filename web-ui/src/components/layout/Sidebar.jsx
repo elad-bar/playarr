@@ -10,6 +10,8 @@ import {
   Divider,
   Box,
   Toolbar,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   VideoLibrary as VideoLibraryIcon,
@@ -22,6 +24,8 @@ import {
   PersonAdd as PersonAddIcon,
   Work as WorkIcon,
   Description as DescriptionIcon,
+  BarChart as BarChartIcon,
+  Assessment as AssessmentIcon,
   Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../context/AuthContext';
@@ -35,12 +39,17 @@ const DRAWER_WIDTH = 280;
 function Sidebar({ open, onClose }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
 
   const handleNavigate = (path) => {
     navigate(path);
-    // Don't close sidebar when navigating
+    // Close sidebar on mobile after navigation, keep open on desktop
+    if (isMobile && onClose) {
+      onClose();
+    }
   };
 
   const handleLogout = async () => {
@@ -98,6 +107,8 @@ function Sidebar({ open, onClose }) {
               { path: '/settings/users', label: 'Users', icon: <PersonAddIcon /> },
               { path: '/settings/jobs', label: 'Jobs', icon: <WorkIcon /> },
               { path: '/settings/logs', label: 'Log', icon: <DescriptionIcon /> },
+              { path: '/settings/metrics', label: 'Metrics', icon: <BarChartIcon /> },
+              { path: '/statistics', label: 'Statistics', icon: <AssessmentIcon /> },
             ],
           },
         ]
@@ -106,8 +117,9 @@ function Sidebar({ open, onClose }) {
 
   return (
     <Drawer
-      variant="persistent"
+      variant={isMobile ? 'temporary' : 'persistent'}
       open={open}
+      onClose={onClose}
       sx={{
         width: open ? DRAWER_WIDTH : 0,
         flexShrink: 0,

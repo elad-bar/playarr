@@ -72,9 +72,14 @@ export const API_ENDPOINTS = {
         tmdbToken: '/settings/tmdb_token',
         logUnmanagedEndpoints: '/settings/log_unmanaged_endpoints',
         logStreamLevel: '/settings/log_stream_level',
+        metrics: '/settings/metrics',
+        metricsRegenerate: '/settings/metrics/regenerate',
     },
 
     // Jobs endpoints
     jobs: '/jobs',
     triggerJob: (jobName) => `/jobs/${jobName}/trigger`,
+
+    // Statistics endpoints
+    statistics: '/metrics/json',
 };

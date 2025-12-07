@@ -7,10 +7,12 @@ class UsersRouter extends BaseRouter {
   /**
    * @param {UserManager} userManager - User manager instance
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
    */
-  constructor(userManager, middleware) {
+  constructor(userManager, middleware, metricsService) {
     super(middleware, 'UsersRouter');
     this._userManager = userManager;
+    this._metricsService = metricsService;
   }
 
   /**
@@ -24,6 +26,13 @@ class UsersRouter extends BaseRouter {
     this.router.get('/', this.middleware.requireAdmin, async (req, res) => {
       try {
         const result = await this._userManager.getAllUsers();
+        
+        // Track user operation
+        this._metricsService.incrementCounter('user_operations', {
+          operation: 'get',
+          username: req.user.username
+        });
+        
         return res.status(200).json(result);
       } catch (error) {
         return this.handleError(res, error, 'Failed to get users');
@@ -50,6 +59,12 @@ class UsersRouter extends BaseRouter {
           role
         );
 
+        // Track user operation
+        this._metricsService.incrementCounter('user_operations', {
+          operation: 'create',
+          username: req.user.username
+        });
+
         return res.status(201).json(result);
       } catch (error) {
         return this.handleError(res, error, 'Failed to create user');
@@ -64,6 +79,13 @@ class UsersRouter extends BaseRouter {
       try {
         const { username } = req.params;
         const result = await this._userManager.getUser(username);
+        
+        // Track user operation
+        this._metricsService.incrementCounter('user_operations', {
+          operation: 'get',
+          username: req.user.username
+        });
+        
         return res.status(200).json(result);
       } catch (error) {
         return this.handleError(res, error, 'Failed to get user');
@@ -86,6 +108,13 @@ class UsersRouter extends BaseRouter {
         if (role !== undefined) updates.role = role;
 
         const result = await this._userManager.updateUser(username, updates);
+        
+        // Track user operation
+        this._metricsService.incrementCounter('user_operations', {
+          operation: 'update',
+          username: req.user.username
+        });
+        
         return res.status(200).json(result);
       } catch (error) {
         return this.handleError(res, error, 'Failed to update user');
@@ -100,6 +129,13 @@ class UsersRouter extends BaseRouter {
       try {
         const { username } = req.params;
         const result = await this._userManager.deleteUser(username);
+        
+        // Track user operation
+        this._metricsService.incrementCounter('user_operations', {
+          operation: 'delete',
+          username: req.user.username
+        });
+        
         return res.status(200).json(result);
       } catch (error) {
         return this.handleError(res, error, 'Failed to delete user');

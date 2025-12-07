@@ -12,9 +12,11 @@ const logger = createLogger('Middleware');
 class Middleware {
   /**
    * @param {import('../managers/users.js').UserManager} userManager - User manager instance
+   * @param {import('../middleware/MetricsMiddleware.js').default} [metricsMiddleware] - Optional metrics middleware instance for tracking auth failures
    */
-  constructor(userManager) {
+  constructor(userManager, metricsMiddleware = null) {
     this.userManager = userManager;
+    this.metricsMiddleware = metricsMiddleware;
     
     // Bind methods to preserve 'this' context when used as Express middleware
     this.requireAuth = this.requireAuth.bind(this);
@@ -41,12 +43,14 @@ class Middleware {
       const token = req.cookies?.access_token;
 
       if (!token) {
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ error: 'Authentication required' });
       }
 
       // Verify token
       const payload = verifyJWTToken(token);
       if (!payload) {
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ error: 'Invalid or expired token' });
       }
 
@@ -55,6 +59,7 @@ class Middleware {
       const user = await this.userManager.getUserByUsername(username);
 
       if (!user) {
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ error: 'User not found' });
       }
 
@@ -120,6 +125,7 @@ class Middleware {
       const apiKey = req.params.api_key || req.query.api_key || req.headers['x-api-key'];
 
       if (!apiKey) {
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ error: 'API key required' });
       }
 
@@ -127,6 +133,7 @@ class Middleware {
       const user = await this.userManager.getUserByApiKey(apiKey);
 
       if (!user) {
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ error: 'Invalid API key' });
       }
 
@@ -265,6 +272,7 @@ class Middleware {
 
       if (!username || !apiKey) {
         // Return Xtream Code API format error response
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ 
           user_info: { 
             auth: 0,
@@ -278,6 +286,7 @@ class Middleware {
       const user = await this.userManager.getUserByUsername(username);
 
       if (!user) {
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ 
           user_info: { 
             auth: 0,
@@ -289,6 +298,7 @@ class Middleware {
 
       // Check user status
       if (user.status !== 'active') {
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ 
           user_info: { 
             auth: 0,
@@ -300,6 +310,7 @@ class Middleware {
 
       // Verify API key matches
       if (user.api_key !== apiKey) {
+        this.metricsMiddleware?.trackAuthenticationFailure?.(req, req.path);
         return res.status(401).json({ 
           user_info: { 
             auth: 0,

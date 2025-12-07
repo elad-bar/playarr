@@ -123,6 +123,20 @@ All client access methods automatically filter content based on user watchlists.
 - **Progress Tracking**: Real-time progress monitoring for long-running operations
 - **Health Monitoring**: Health check support for containerized deployments
 
+### Monitoring & Metrics
+
+- **Prometheus Metrics Export**: Comprehensive Prometheus metrics endpoint for system monitoring
+  - Content metrics (titles, episodes, channels counts)
+  - User activity metrics (watchlists, stream requests)
+  - Provider performance metrics (API requests, connection status)
+  - System metrics (job executions, HTTP requests, errors)
+- **Bearer Token Authentication**: Secure metrics endpoint with Bearer token authentication
+- **Admin Metrics Management**: Admin UI for token management and Prometheus configuration
+- **Automatic Metric Collection**: Automatic tracking of HTTP requests, errors, and system operations
+- **Real-time Monitoring**: Track system health, performance, and usage patterns
+
+For detailed information, see the [Prometheus Metrics Exporter](features/prometheus-metrics-exporter.md) documentation.
+
 ## Automation
 
 ### Scheduled Jobs

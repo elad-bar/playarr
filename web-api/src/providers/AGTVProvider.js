@@ -12,9 +12,10 @@ export class AGTVProvider extends BaseIPTVProvider {
   /**
    * @param {Object<string, Object>} providerConfigs - Map of provider ID to provider configuration
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance (required)
    */
-  constructor(providerConfigs = {}, cacheDir = null) {
-    super('AGTVProvider', providerConfigs, cacheDir);
+  constructor(providerConfigs = {}, cacheDir = null, metricsService) {
+    super('AGTVProvider', providerConfigs, cacheDir, metricsService);
   }
 
   /**

@@ -172,6 +172,35 @@ class ProviderTitlesManager extends BaseDomainManager {
   async getProviderTitlesForChangeDetection() {
     return await this._repository.getProviderTitlesForChangeDetection();
   }
+
+  /**
+   * Get count of provider titles grouped by provider_id and type
+   * Uses MongoDB aggregation for efficiency
+   * @returns {Promise<Array<{provider_id: string, media_type: string, count: number}>>}
+   */
+  async getCountByProviderAndType() {
+    const pipeline = [
+      {
+        $group: {
+          _id: {
+            provider_id: { $ifNull: ['$provider_id', 'unknown'] },
+            media_type: { $ifNull: ['$type', 'unknown'] }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          provider_id: '$_id.provider_id',
+          media_type: '$_id.media_type',
+          count: 1
+        }
+      }
+    ];
+    
+    return await this._repository.aggregate(pipeline);
+  }
 }
 
 export { ProviderTitlesManager };

@@ -298,5 +298,34 @@ export class ChannelManager extends BaseDomainManager {
       throw error;
     }
   }
+
+  /**
+   * Get count of channels grouped by provider_id and category (group_title)
+   * Uses MongoDB aggregation for efficiency
+   * @returns {Promise<Array<{provider_id: string, category: string, count: number}>>}
+   */
+  async getCountByProviderAndCategory() {
+    const pipeline = [
+      {
+        $group: {
+          _id: {
+            provider_id: { $ifNull: ['$provider_id', 'unknown'] },
+            category: { $ifNull: ['$group_title', 'unknown'] }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          provider_id: '$_id.provider_id',
+          category: '$_id.category',
+          count: 1
+        }
+      }
+    ];
+    
+    return await this._repository.aggregate(pipeline);
+  }
 }
 

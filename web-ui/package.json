@@ -23,6 +23,7 @@
     "react-redux": "^9.2.0",
     "react-router-dom": "^6.30.0",
     "react-scripts": "5.0.1",
+    "recharts": "^2.10.3",
     "socket.io-client": "^4.7.4",
     "web-vitals": "^2.1.4"
   },
@@ -50,5 +51,6 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  }
+  },
+  "proxy": "http://localhost:3000"
 }

@@ -88,6 +88,18 @@ export class ProviderTitlesMonitorJob extends BaseJob {
       // It will only process titles that need regeneration based on provider title updates
       const result = await this.tmdbProcessingManager.processMainTitles(providerTitlesByProvider);
 
+      // Update metrics for processed main titles per provider
+      if (result.byProvider) {
+        for (const [providerId, counts] of result.byProvider) {
+          if (counts.movies !== undefined && counts.movies !== null && counts.movies > 0) {
+            this.metricsService.incrementCounter('main_titles_processed', { provider_id: providerId, media_type: 'movies' }, counts.movies);
+          }
+          if (counts.tvShows !== undefined && counts.tvShows !== null && counts.tvShows > 0) {
+            this.metricsService.incrementCounter('main_titles_processed', { provider_id: providerId, media_type: 'tvshows' }, counts.tvShows);
+          }
+        }
+      }
+
       // Cleanup outdated main titles from disabled/deleted providers
       const allProvidersResult = await this.providersManager.getProviders();
       const disabledProviders = allProvidersResult.providers.filter(p => 

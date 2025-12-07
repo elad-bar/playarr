@@ -7,10 +7,12 @@ class StreamRouter extends BaseRouter {
   /**
    * @param {import('../managers/formatting/StremioManager.js').StremioManager} stremioManager - Stremio manager instance (for stream URL resolution)
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
    */
-  constructor(stremioManager, middleware) {
+  constructor(stremioManager, middleware, metricsService) {
     super(middleware, 'StreamRouter');
     this._stremioManager = stremioManager;
+    this._metricsService = metricsService;
   }
 
   /**
@@ -22,6 +24,7 @@ class StreamRouter extends BaseRouter {
      * Get movie stream redirect (requires API key)
      */
     this.router.get('/movies/:title_id', this.middleware.requireApiKey, async (req, res) => {
+      const startTime = Date.now();
       try {
         const { title_id } = req.params;
         const username = req.user?.username || null;
@@ -30,6 +33,13 @@ class StreamRouter extends BaseRouter {
         if (!stream) {
           return this.returnErrorResponse(res, 503, 'No available providers');
         }
+
+        // Track metrics
+        if (username) {
+          this._metricsService.incrementCounter('stream_requests', { user: username });
+        }
+        const duration = (Date.now() - startTime) / 1000;
+        this._metricsService.observeHistogram('stream_request_duration', { media_type: 'movies' }, duration);
 
         // Add CORS headers for Stremio casting support
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -47,6 +57,7 @@ class StreamRouter extends BaseRouter {
      * Get TV show stream redirect (requires API key)
      */
     this.router.get('/tvshows/:title_id/:season/:episode', this.middleware.requireApiKey, async (req, res) => {
+      const startTime = Date.now();
       try {
         const { title_id, season, episode } = req.params;
         const username = req.user?.username || null;
@@ -61,6 +72,13 @@ class StreamRouter extends BaseRouter {
         if (!stream) {
           return this.returnErrorResponse(res, 503, 'No available providers');
         }
+
+        // Track metrics
+        if (username) {
+          this._metricsService.incrementCounter('stream_requests', { user: username });
+        }
+        const duration = (Date.now() - startTime) / 1000;
+        this._metricsService.observeHistogram('stream_request_duration', { media_type: 'tvshows' }, duration);
 
         // Add CORS headers for Stremio casting support
         res.setHeader('Access-Control-Allow-Origin', '*');
