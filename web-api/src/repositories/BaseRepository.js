@@ -156,6 +156,22 @@ export class BaseRepository {
   }
 
   /**
+   * Execute MongoDB aggregation pipeline
+   * @param {Array<Object>} pipeline - MongoDB aggregation pipeline
+   * @returns {Promise<Array>} Aggregation results
+   */
+  async aggregate(pipeline) {
+    try {
+      if (this._isStopping) return [];
+      const collection = this.db.collection(this.collectionName);
+      return await collection.aggregate(pipeline).toArray();
+    } catch (error) {
+      logger.error(`Error aggregating in ${this.collectionName}:`, error);
+      return [];
+    }
+  }
+
+  /**
    * Insert a single document
    * @param {Object} document - Document to insert
    * @param {Object} [options={}] - Insert options

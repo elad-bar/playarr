@@ -1,0 +1,183 @@
+{
+  "metrics": {
+    "provider_titles_count": {
+      "type": "gauge",
+      "name": "playarr_provider_titles_count",
+      "help": "Number of provider titles per provider, per media type",
+      "labelNames": ["provider_id", "media_type"]
+    },
+    "main_titles_count": {
+      "type": "gauge",
+      "name": "playarr_main_titles_count",
+      "help": "Number of main titles per media type",
+      "labelNames": ["media_type"]
+    },
+    "episodes_count": {
+      "type": "gauge",
+      "name": "playarr_episodes_count",
+      "help": "Number of episodes in main titles per source",
+      "labelNames": ["source"]
+    },
+    "channels_count": {
+      "type": "gauge",
+      "name": "playarr_channels_count",
+      "help": "Number of channels per provider, per category",
+      "labelNames": ["provider_id", "category"]
+    },
+    "watchlist_titles_count": {
+      "type": "gauge",
+      "name": "playarr_watchlist_titles_count",
+      "help": "Number of main titles in watchlist, per media type, per user",
+      "labelNames": ["user", "media_type"]
+    },
+    "watchlist_channels_count": {
+      "type": "gauge",
+      "name": "playarr_watchlist_channels_count",
+      "help": "Number of channels in watchlist, per user",
+      "labelNames": ["user"]
+    },
+    "active_users": {
+      "type": "gauge",
+      "name": "playarr_active_users",
+      "help": "Number of active users (users with API key)"
+    },
+    "provider_active_connections": {
+      "type": "gauge",
+      "name": "playarr_provider_active_connections",
+      "help": "Number of active connections per provider",
+      "labelNames": ["provider_id"]
+    },
+    "provider_max_connections": {
+      "type": "gauge",
+      "name": "playarr_provider_max_connections",
+      "help": "Number of maximum connections per provider",
+      "labelNames": ["provider_id"]
+    },
+    "provider_active": {
+      "type": "gauge",
+      "name": "playarr_provider_active",
+      "help": "Provider active status (1 = active, 0 = inactive)",
+      "labelNames": ["provider_id"]
+    },
+    "provider_expiration_days": {
+      "type": "gauge",
+      "name": "playarr_provider_expiration_days",
+      "help": "Number of days until provider expiration (negative if expired)",
+      "labelNames": ["provider_id"]
+    },
+    "cache_operations": {
+      "type": "counter",
+      "name": "playarr_cache_operations_total",
+      "help": "Cache operation count for best source selection",
+      "labelNames": ["operation"]
+    },
+    "best_source_selections": {
+      "type": "counter",
+      "name": "playarr_best_source_selections_total",
+      "help": "Number of times a provider was selected as best source",
+      "labelNames": ["provider_id"]
+    },
+    "stream_requests": {
+      "type": "counter",
+      "name": "playarr_stream_requests_total",
+      "help": "Total number of stream requests per user",
+      "labelNames": ["user"]
+    },
+    "provider_titles_processed": {
+      "type": "counter",
+      "name": "playarr_provider_titles_processed_total",
+      "help": "Total number of provider titles processed per provider and media type",
+      "labelNames": ["provider_id", "media_type"]
+    },
+    "main_titles_processed": {
+      "type": "counter",
+      "name": "playarr_main_titles_processed_total",
+      "help": "Total number of main titles processed per provider and media type",
+      "labelNames": ["provider_id", "media_type"]
+    },
+    "job_executions": {
+      "type": "counter",
+      "name": "playarr_job_executions_total",
+      "help": "Job execution count per job type",
+      "labelNames": ["job_type", "status"]
+    },
+    "best_source_selection_duration": {
+      "type": "histogram",
+      "name": "playarr_best_source_selection_duration_seconds",
+      "help": "Time taken to find valid source",
+      "labelNames": ["media_type"],
+      "buckets": [0.1, 0.5, 1, 2, 5, 10, 30]
+    },
+    "stream_request_duration": {
+      "type": "histogram",
+      "name": "playarr_stream_request_duration_seconds",
+      "help": "Stream request response time",
+      "labelNames": ["media_type"],
+      "buckets": [0.1, 0.5, 1, 2, 5, 10, 30]
+    },
+    "job_duration": {
+      "type": "histogram",
+      "name": "playarr_job_duration_seconds",
+      "help": "Job execution duration",
+      "labelNames": ["job_type"],
+      "buckets": [10, 30, 60, 120, 300, 600, 1800, 3600]
+    },
+    "provider_api_requests": {
+      "type": "counter",
+      "name": "playarr_provider_api_requests_total",
+      "help": "Total number of provider API requests per provider, endpoint, and status code",
+      "labelNames": ["provider_id", "endpoint", "status_code"]
+    },
+    "provider_api_request_duration": {
+      "type": "histogram",
+      "name": "playarr_provider_api_request_duration_seconds",
+      "help": "Duration of provider API requests per provider, endpoint, and status code",
+      "labelNames": ["provider_id", "endpoint", "status_code"],
+      "buckets": [0.1, 0.5, 1, 2, 5, 10, 30, 60]
+    },
+    "http_requests": {
+      "type": "counter",
+      "name": "playarr_http_requests_total",
+      "help": "Total number of HTTP requests per endpoint",
+      "labelNames": ["endpoint", "status_code", "username"]
+    },
+    "http_request_duration": {
+      "type": "histogram",
+      "name": "playarr_http_request_duration_seconds",
+      "help": "HTTP request duration in seconds",
+      "labelNames": ["endpoint", "username"],
+      "buckets": [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]
+    },
+    "managed_errors": {
+      "type": "counter",
+      "name": "playarr_managed_errors_total",
+      "help": "Total number of managed errors (AppError instances) by error type",
+      "labelNames": ["endpoint", "error_type", "username"]
+    },
+    "authentication_failures": {
+      "type": "counter",
+      "name": "playarr_authentication_failures_total",
+      "help": "Total number of authentication failures",
+      "labelNames": ["endpoint", "username"]
+    },
+    "watchlist_operations": {
+      "type": "counter",
+      "name": "playarr_watchlist_operations_total",
+      "help": "Total number of watchlist operations (add/remove)",
+      "labelNames": ["operation", "media_type", "username"]
+    },
+    "provider_operations": {
+      "type": "counter",
+      "name": "playarr_provider_operations_total",
+      "help": "Total number of provider CRUD operations",
+      "labelNames": ["operation", "username"]
+    },
+    "user_operations": {
+      "type": "counter",
+      "name": "playarr_user_operations_total",
+      "help": "Total number of user CRUD operations",
+      "labelNames": ["operation", "username"]
+    }
+  }
+}
+

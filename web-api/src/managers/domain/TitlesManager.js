@@ -653,6 +653,74 @@ class TitlesManager extends BaseDomainManager {
     });
   }
 
+  /**
+   * Get count of main titles grouped by media type
+   * Uses MongoDB aggregation for efficiency
+   * @returns {Promise<Array<{media_type: string, count: number}>>}
+   */
+  async getCountByType() {
+    const pipeline = [
+      {
+        $group: {
+          _id: { $ifNull: ['$type', 'unknown'] },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          media_type: '$_id',
+          count: 1
+        }
+      }
+    ];
+    
+    return await this._repository.aggregate(pipeline);
+  }
+
+  /**
+   * Get count of episodes grouped by source provider_id
+   * Unwinds media array and sources array to count individual episodes
+   * Uses MongoDB aggregation for efficiency
+   * @returns {Promise<Array<{source: string, count: number}>>}
+   */
+  async getEpisodesCountBySource() {
+    const pipeline = [
+      {
+        $match: {
+          type: 'tvshows',
+          media: { $exists: true, $ne: [] }
+        }
+      },
+      {
+        $unwind: '$media'
+      },
+      {
+        $match: {
+          'media.sources': { $exists: true, $ne: [] }
+        }
+      },
+      {
+        $unwind: '$media.sources'
+      },
+      {
+        $group: {
+          _id: { $ifNull: ['$media.sources.provider_id', 'unknown'] },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          source: '$_id',
+          count: 1
+        }
+      }
+    ];
+    
+    return await this._repository.aggregate(pipeline);
+  }
+
 }
 
 // Export class

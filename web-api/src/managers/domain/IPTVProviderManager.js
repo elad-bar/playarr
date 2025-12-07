@@ -589,6 +589,7 @@ class IPTVProviderManager extends BaseDomainManager {
         expiration_date: details.expiration_date ?? null,
         max_connections: details.max_connections ?? 0,
         active_connections: details.active_connections ?? 0,
+        active: details.active ?? null,
         last_checked: new Date().toISOString()
       };
 
@@ -768,6 +769,33 @@ class IPTVProviderManager extends BaseDomainManager {
    */
   async findByQuery(query, options = {}) {
     return await this._repository.findByQuery(query, options);
+  }
+
+  /**
+   * Get provider connection metrics (active_connections, max_connections, active status)
+   * Uses MongoDB aggregation for efficiency
+   * @returns {Promise<Array<{provider_id: string, active_connections?: number, max_connections?: number, active?: boolean}>>}
+   */
+  async getProviderConnectionMetrics() {
+    const pipeline = [
+      {
+        $match: {
+          provider_details: { $exists: true }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          provider_id: { $ifNull: ['$id', 'unknown'] },
+          active_connections: '$provider_details.active_connections',
+          max_connections: '$provider_details.max_connections',
+          active: '$provider_details.active',
+          expiration_date: '$provider_details.expiration_date'
+        }
+      }
+    ];
+    
+    return await this._repository.aggregate(pipeline);
   }
 }
 

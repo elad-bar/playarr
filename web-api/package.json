@@ -33,6 +33,7 @@
     "jsonwebtoken": "^9.0.0",
     "mongodb": "^6.3.0",
     "playarr": "file:..",
+    "prom-client": "^15.0.0",
     "sax": "^1.4.3",
     "slugify": "^1.6.5",
     "socket.io": "^4.8.1",

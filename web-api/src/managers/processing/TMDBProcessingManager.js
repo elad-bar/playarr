@@ -486,12 +486,12 @@ export class TMDBProcessingManager extends BaseProcessingManager {
    * Process main titles: generate, enrich similar, and generate streams
    * Orchestrates the complete main title processing workflow after TMDB ID matching
    * @param {Map<string, Array<Object>>} providerTitlesByProvider - Map of providerId -> titles array
-   * @returns {Promise<{movies: number, tvShows: number}>} Count of generated main titles by type
+   * @returns {Promise<{movies: number, tvShows: number, byProvider: Map<string, {movies: number, tvShows: number}>}>} Count of generated main titles by type and per provider
    */
   async processMainTitles(providerTitlesByProvider) {
     if (!providerTitlesByProvider || providerTitlesByProvider.size === 0) {
       this.logger.warn('No provider titles available for main title processing.');
-      return { movies: 0, tvShows: 0 };
+      return { movies: 0, tvShows: 0, byProvider: new Map() };
     }
 
     // Load main titles into cache for later use
@@ -633,7 +633,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       );
 
       const batchSize = this.getRecommendedBatchSize();
-      const result = await this._processTitlesBatch(batchSize, titlesToProcess, existingMainTitleMap);
+      const result = await this._processTitlesBatch(batchSize, titlesToProcess, existingMainTitleMap, providerTitlesByProvider);
       
       // Run enrichSimilarTitles
       await this.enrichSimilarTitles();
@@ -642,7 +642,7 @@ export class TMDBProcessingManager extends BaseProcessingManager {
     } else {
       // No titles to process, just run enrichSimilarTitles
       await this.enrichSimilarTitles();
-      return { movies: 0, tvShows: 0 };
+      return { movies: 0, tvShows: 0, byProvider: new Map() };
     }
   }
 
@@ -726,12 +726,23 @@ export class TMDBProcessingManager extends BaseProcessingManager {
    * @param {number} batchSize - Batch size for processing
    * @param {Array<Object>} titlesToProcess - Array of { type, tmdbId, titleKey, providerTitleGroups }
    * @param {Map<string, Object>} existingMainTitleMap - Map of existing main titles by title_key
-   * @returns {Promise<{movies: number, tvShows: number}>} Count of processed titles by type
+   * @param {Map<string, Array<Object>>} providerTitlesByProvider - Map of providerId -> titles array (for tracking)
+   * @returns {Promise<{movies: number, tvShows: number, byProvider: Map<string, {movies: number, tvShows: number}>}>} Count of processed titles by type and per provider
    */
-  async _processTitlesBatch(batchSize, titlesToProcess, existingMainTitleMap) {
+  async _processTitlesBatch(batchSize, titlesToProcess, existingMainTitleMap, providerTitlesByProvider) {
     const mainTitles = [];
     let processedCount = 0;
     const processedCountByType = { movies: 0, tvShows: 0 };
+    // Track per-provider counts
+    const processedByProvider = new Map();
+    
+    // Initialize provider counts
+    if (providerTitlesByProvider) {
+      for (const providerId of providerTitlesByProvider.keys()) {
+        processedByProvider.set(providerId, { movies: 0, tvShows: 0 });
+      }
+    }
+    
     const totalTitles = titlesToProcess.length;
     const failedTitles = []; // Track titles that failed to get TMDB details
 
@@ -769,6 +780,27 @@ export class TMDBProcessingManager extends BaseProcessingManager {
             processedCount++;
             const counterKey = this._getTypeCounterKey(type);
             processedCountByType[counterKey]++;
+            
+            // Track per-provider: count unique providers that contributed to this title
+            const uniqueProviders = new Set();
+            for (const group of providerTitleGroups) {
+              if (group.providerId) {
+                uniqueProviders.add(group.providerId);
+              }
+            }
+            
+            // Increment count for each provider that contributed
+            for (const providerId of uniqueProviders) {
+              if (!processedByProvider.has(providerId)) {
+                processedByProvider.set(providerId, { movies: 0, tvShows: 0 });
+              }
+              const providerCounts = processedByProvider.get(providerId);
+              if (type === 'movies') {
+                providerCounts.movies++;
+              } else if (type === 'tvshows') {
+                providerCounts.tvShows++;
+              }
+            }
           } else {
             // TMDB details not found - mark for ignoring
             failedTitles.push({ type, tmdbId });
@@ -809,7 +841,11 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       // Final progress log
       this.logger.info(`Completed: ${processedCount} out of ${totalTitles} titles processed`);
 
-      return processedCountByType;
+      return {
+        movies: processedCountByType.movies,
+        tvShows: processedCountByType.tvShows,
+        byProvider: processedByProvider
+      };
     } catch (error) {
       this.logger.error(`Error processing titles batch: ${error.message}`);
       throw error;

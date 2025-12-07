@@ -33,7 +33,10 @@ Playarr solves the problem of managing content from multiple IPTV providers by:
 - **Provider Management**: Add, edit, enable/disable, and prioritize IPTV providers
 - **Settings Configuration**: Configure TMDB API keys, rate limits, and other settings
 - **User Management**: Create and manage user accounts with different permission levels
-- **System Monitoring**: Monitor system health and job status
+- **System Monitoring**: Monitor system health, job status, and performance metrics
+  - Built-in health checks
+  - Prometheus metrics export (see [Features](docs/FEATURES.md))
+  - Real-time job execution tracking
 
 ### 📺 **Multiple Client Support**
 Playarr supports a wide variety of media clients through different protocols:

@@ -914,6 +914,125 @@ class UserManager extends BaseDomainManager {
       return false;
     }
   }
+
+  /**
+   * Get watchlist titles count per user and media type
+   * Uses MongoDB aggregation for efficiency
+   * @returns {Promise<Array<{user: string, media_type: string, count: number}>>}
+   */
+  async getWatchlistTitlesCountByUserAndType() {
+    const pipeline = [
+      {
+        $match: {
+          watchlist: { $exists: true },
+          username: { $exists: true }
+        }
+      },
+      {
+        $project: {
+          username: { $ifNull: ['$username', 'unknown'] },
+          moviesCount: {
+            $cond: {
+              if: { $isArray: '$watchlist.movies' },
+              then: { $size: '$watchlist.movies' },
+              else: 0
+            }
+          },
+          tvshowsCount: {
+            $cond: {
+              if: { $isArray: '$watchlist.tvshows' },
+              then: { $size: '$watchlist.tvshows' },
+              else: 0
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          username: 1,
+          counts: [
+            { media_type: 'movies', count: '$moviesCount' },
+            { media_type: 'tvshows', count: '$tvshowsCount' }
+          ]
+        }
+      },
+      {
+        $unwind: '$counts'
+      },
+      {
+        $match: {
+          'counts.count': { $gt: 0 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          user: '$username',
+          media_type: '$counts.media_type',
+          count: '$counts.count'
+        }
+      }
+    ];
+    
+    return await this._repository.aggregate(pipeline);
+  }
+
+  /**
+   * Get watchlist channels count per user
+   * Uses MongoDB aggregation for efficiency
+   * @returns {Promise<Array<{user: string, count: number}>>}
+   */
+  async getWatchlistChannelsCountByUser() {
+    const pipeline = [
+      {
+        $match: {
+          'watchlist.live': { $exists: true, $ne: [] },
+          username: { $exists: true }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          user: { $ifNull: ['$username', 'unknown'] },
+          count: {
+            $cond: {
+              if: { $isArray: '$watchlist.live' },
+              then: { $size: '$watchlist.live' },
+              else: 0
+            }
+          }
+        }
+      },
+      {
+        $match: {
+          count: { $gt: 0 }
+        }
+      }
+    ];
+    
+    return await this._repository.aggregate(pipeline);
+  }
+
+  /**
+   * Get count of active users (users with API key)
+   * Uses MongoDB aggregation for efficiency
+   * @returns {Promise<number>}
+   */
+  async getActiveUsersCount() {
+    const pipeline = [
+      {
+        $match: {
+          api_key: { $exists: true, $ne: null, $ne: '' }
+        }
+      },
+      {
+        $count: 'count'
+      }
+    ];
+    
+    const result = await this._repository.aggregate(pipeline);
+    return result.length > 0 ? result[0].count : 0;
+  }
 }
 
 // Export class

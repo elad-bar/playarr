@@ -13,8 +13,9 @@ export class BaseProvider {
   /**
    * @param {string} loggerName - Logger name (required)
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance (required)
    */
-  constructor(loggerName, cacheDir = null) {
+  constructor(loggerName, cacheDir = null, metricsService) {
     this.logger = createLogger(loggerName);
     
     // Rate limiters per providerId: Map<providerId, Bottleneck>
@@ -44,6 +45,9 @@ export class BaseProvider {
       text: (response) => response.text(),
       arraybuffer: (response) => response.arrayBuffer()
     };
+    
+    // Metrics service for tracking API request metrics
+    this.metricsService = metricsService;
   }
 
   /**
@@ -503,6 +507,29 @@ export class BaseProvider {
 
       this._setCache(providerId, type, endpoint, finalData, cacheParams);
 
+      // Track metrics for successful requests
+      if (this.metricsService && responseStatus) {
+        try {
+          const statusCode = String(responseStatus);
+          const providerIdLabel = providerId || 'unknown';
+          const endpointLabel = endpoint || 'unknown';
+          
+          this.metricsService.incrementCounter('provider_api_requests', {
+            provider_id: providerIdLabel,
+            endpoint: endpointLabel,
+            status_code: statusCode
+          });
+          this.metricsService.observeHistogram('provider_api_request_duration', {
+            provider_id: providerIdLabel,
+            endpoint: endpointLabel,
+            status_code: statusCode
+          }, requestDuration / 1000); // Convert ms to seconds
+        } catch (metricsError) {
+          // Don't let metrics tracking errors affect request flow
+          this.logger.debug(`Error tracking metrics: ${metricsError.message}`);
+        }
+      }
+
       return finalData;
     } catch (error) {
       // Clear timeout if it was set
@@ -512,9 +539,70 @@ export class BaseProvider {
       
       // Handle AbortError (timeout)
       if (error.name === 'AbortError') {
+        // Track timeout metrics
+        if (this.metricsService) {
+          try {
+            const providerIdLabel = providerId || 'unknown';
+            const endpointLabel = endpoint || 'unknown';
+            const timeoutValue = timeout || 60000; // Default 60s if not specified
+            
+            this.metricsService.incrementCounter('provider_api_requests', {
+              provider_id: providerIdLabel,
+              endpoint: endpointLabel,
+              status_code: 'timeout'
+            });
+            this.metricsService.observeHistogram('provider_api_request_duration', {
+              provider_id: providerIdLabel,
+              endpoint: endpointLabel,
+              status_code: 'timeout'
+            }, timeoutValue / 1000);
+          } catch (metricsError) {
+            this.logger.debug(`Error tracking timeout metrics: ${metricsError.message}`);
+          }
+        }
         throw new Error('Request timeout');
       } else {
         this.logger.error(`Error ${finalFetchOptions.method} ${url}: ${error.message}`);
+        
+        // Track error metrics
+        if (this.metricsService) {
+          try {
+            let errorStatusCode = 'error';
+            
+            // Try to extract status code from error
+            if (error.status || error.statusCode) {
+              errorStatusCode = String(error.status || error.statusCode);
+            } else if (error.message && error.message.includes('HTTP')) {
+              // Try to extract status code from error message like "HTTP 502"
+              const match = error.message.match(/HTTP (\d+)/);
+              if (match) {
+                errorStatusCode = match[1];
+              }
+            } else if (error.code) {
+              // Check for network error codes
+              if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ECONNRESET') {
+                errorStatusCode = 'network_error';
+              }
+            }
+            
+            const providerIdLabel = providerId || 'unknown';
+            const endpointLabel = endpoint || 'unknown';
+            const errorDuration = requestDuration > 0 ? requestDuration : (timeout || 60000);
+            
+            this.metricsService.incrementCounter('provider_api_requests', {
+              provider_id: providerIdLabel,
+              endpoint: endpointLabel,
+              status_code: errorStatusCode
+            });
+            this.metricsService.observeHistogram('provider_api_request_duration', {
+              provider_id: providerIdLabel,
+              endpoint: endpointLabel,
+              status_code: errorStatusCode
+            }, errorDuration / 1000);
+          } catch (metricsError) {
+            this.logger.debug(`Error tracking error metrics: ${metricsError.message}`);
+          }
+        }
       }
       
       throw error;

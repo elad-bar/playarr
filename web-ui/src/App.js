@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
-import { Box, CircularProgress, CssBaseline, IconButton, Toolbar, Tooltip, Typography, AppBar } from '@mui/material';
+import { Box, CircularProgress, CssBaseline, IconButton, Toolbar, Tooltip, Typography, AppBar, useMediaQuery } from '@mui/material';
 import { DarkMode as DarkModeIcon, LightMode as LightModeIcon, Menu as MenuIcon } from '@mui/icons-material';
 import { ThemeProvider as MUIThemeProvider } from '@mui/material/styles';
 import { selectTheme } from './store/slices/themeSlice';
@@ -21,11 +21,14 @@ import SettingsIPTVProviders from './components/settings/SettingsIPTVProviders';
 import SettingsUsers from './components/settings/SettingsUsers';
 import SettingsJobs from './components/settings/SettingsJobs';
 import SettingsLogger from './components/settings/SettingsLogger';
+import SettingsMetrics from './components/settings/SettingsMetrics';
+import Statistics from './pages/Statistics';
 
 const AppContent = () => {
     const dispatch = useDispatch();
     const theme = useSelector(selectTheme);
     const mode = useSelector(state => state.theme.mode);
+    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const [sidebarOpen, setSidebarOpen] = useState(() => {
         const saved = localStorage.getItem('sidebarOpen');
         return saved !== null ? JSON.parse(saved) : true;
@@ -152,8 +155,8 @@ const AppContent = () => {
                             position="fixed"
                             sx={{
                                 zIndex: (theme) => theme.zIndex.drawer + 1,
-                                ml: sidebarOpen ? '280px' : 0,
-                                width: sidebarOpen ? 'calc(100% - 280px)' : '100%',
+                                ml: isMobile ? 0 : (sidebarOpen ? '280px' : 0),
+                                width: isMobile ? '100%' : (sidebarOpen ? 'calc(100% - 280px)' : '100%'),
                                 transition: (theme) =>
                                     theme.transitions.create(['width', 'margin'], {
                                         easing: theme.transitions.easing.sharp,
@@ -255,6 +258,14 @@ const AppContent = () => {
                                 </PrivateRoute>
                             }
                         />
+                        <Route
+                            path="/statistics"
+                            element={
+                                <PrivateRoute>
+                                    <Statistics />
+                                </PrivateRoute>
+                            }
+                        />
                         {user?.role === 'admin' && (
                             <>
                                 <Route
@@ -294,6 +305,14 @@ const AppContent = () => {
                                     element={
                                         <PrivateRoute>
                                             <SettingsLogger />
+                                        </PrivateRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/settings/metrics"
+                                    element={
+                                        <PrivateRoute>
+                                            <SettingsMetrics />
                                         </PrivateRoute>
                                     }
                                 />

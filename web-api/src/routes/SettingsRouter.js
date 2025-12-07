@@ -63,6 +63,36 @@ class SettingsRouter extends BaseRouter {
     });
 
     /**
+     * GET /api/settings/metrics
+     * Get metrics token (admin only)
+     * Must be defined BEFORE /:key route to avoid route matching conflicts
+     */
+    this.router.get('/metrics', this.middleware.requireAdmin, async (req, res) => {
+      try {
+        const result = await this._settingsManager.getSetting('metrics_token');
+        return res.status(200).json(result);
+      } catch (error) {
+        return this.handleError(res, error, 'Failed to get metrics token');
+      }
+    });
+
+    /**
+     * POST /api/settings/metrics/regenerate
+     * Regenerate metrics token (admin only)
+     * Must be defined BEFORE /:key route to avoid route matching conflicts
+     */
+    this.router.post('/metrics/regenerate', this.middleware.requireAdmin, async (req, res) => {
+      try {
+        const crypto = await import('crypto');
+        const newToken = crypto.randomBytes(32).toString('hex');
+        await this._settingsManager.setSetting('metrics_token', newToken);
+        return res.status(200).json({ value: newToken });
+      } catch (error) {
+        return this.handleError(res, error, 'Failed to regenerate metrics token');
+      }
+    });
+
+    /**
      * GET /api/settings/:key
      * Get any setting by key
      */

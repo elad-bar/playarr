@@ -17,10 +17,12 @@ export class EngineScheduler {
   /**
    * @param {Map<string, import('./jobs/BaseJob.js').BaseJob>} jobInstances - Map of jobName -> job instance
    * @param {import('./managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager (for resetInProgress)
+   * @param {import('./services/metrics.js').default} metricsService - Metrics service instance
    */
-  constructor(jobInstances, jobHistoryManager) {
+  constructor(jobInstances, jobHistoryManager, metricsService) {
     this._jobInstances = jobInstances; // Map<jobName, BaseJob>
     this._jobHistoryManager = jobHistoryManager;
+    this._metricsService = metricsService;
     this._jobsManager = null;
     this._intervalIds = new Map(); // Map of jobName -> intervalId
     this._runningJobs = new Map();
@@ -172,17 +174,28 @@ export class EngineScheduler {
 
     this.logger.debug(`Starting job '${name}'${workerData?.providerId ? ` (providerId: ${workerData.providerId})` : ''}`);
 
+    const startTime = Date.now();
     try {
       // Execute the job directly (handlers are created fresh in execute() method)
       const result = await job.execute();
 
       if (result !== undefined) {
+        // Track metrics - success
+        const duration = (Date.now() - startTime) / 1000;
+        this._metricsService.incrementCounter('job_executions', { job_type: name, status: 'success' });
+        this._metricsService.observeHistogram('job_duration', { job_type: name }, duration);
+        
         this.logger.info(`Job '${name}' completed successfully`);
         await this._handlePostExecute(name, workerData);
       }
 
       return result;
     } catch (error) {
+      // Track metrics - failure
+      const duration = (Date.now() - startTime) / 1000;
+      this._metricsService.incrementCounter('job_executions', { job_type: name, status: 'failure' });
+      this._metricsService.observeHistogram('job_duration', { job_type: name }, duration);
+      
       this.logger.error(`Error executing job '${name}': ${error.message}`);
       throw error;
     }

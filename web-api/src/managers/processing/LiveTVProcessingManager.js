@@ -523,7 +523,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
         // Give parser a moment to finish, then force completion if needed
         setTimeout(() => {
           if (!isCompleted) {
-            this.logger.warn(`Parser did not call onend after stream ended, forcing completion for provider ${providerId}`);
+            this.logger.debug(`Parser did not call onend after stream ended, forcing completion for provider ${providerId}`);
             completeParsing();
           }
         }, 2000); // Wait 2 seconds for parser to finish

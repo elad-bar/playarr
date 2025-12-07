@@ -133,6 +133,20 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
         })
       );
 
+      // Update metrics for processed titles
+      for (const result of results) {
+        if (result.error) {
+          // Skip failed providers
+          continue;
+        }
+        if (result.movies !== undefined && result.movies !== null) {
+          this.metricsService.incrementCounter('provider_titles_processed', { provider_id: result.providerId, media_type: 'movies' }, result.movies);
+        }
+        if (result.tvShows !== undefined && result.tvShows !== null) {
+          this.metricsService.incrementCounter('provider_titles_processed', { provider_id: result.providerId, media_type: 'tvshows' }, result.tvShows);
+        }
+      }
+
       // Set status to completed on success with result
       await this.setJobStatus('completed', {
         providers_processed: enabledHandlers.length,

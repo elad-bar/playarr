@@ -1,4 +1,5 @@
 import { createLogger } from '../../utils/logger.js';
+import { formatNumber } from '../../utils/numberFormat.js';
 import Bottleneck from 'bottleneck';
 
 /**
@@ -102,7 +103,7 @@ export class BaseProcessingManager {
   _logProgress() {
     const activeTypes = Object.entries(this._progressTracking)
       .filter(([type, data]) => data.count > 0)
-      .map(([type, data]) => `${type}: ${data.count}`);
+      .map(([type, data]) => `${type}: ${formatNumber(data.count)}`);
 
     if (activeTypes.length > 0) {
       this.logger.info(`Progress update - ${activeTypes.join(', ')} title(s) remaining to process`);

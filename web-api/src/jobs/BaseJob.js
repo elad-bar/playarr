@@ -29,7 +29,7 @@ export class BaseJob {
    * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager (for saving titles)
    * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager (for saving provider titles)
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager) {
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService) {
     if (this.constructor === BaseJob) {
       throw new Error('BaseJob is an abstract class and cannot be instantiated directly');
     }
@@ -40,6 +40,7 @@ export class BaseJob {
     this.tmdbManager = tmdbManager;
     this.titlesManager = titlesManager;
     this.providerTitlesManager = providerTitlesManager;
+    this.metricsService = metricsService;
     this.logger = createLogger(jobName);
     
     // Processing managers will be created dynamically in execute() method

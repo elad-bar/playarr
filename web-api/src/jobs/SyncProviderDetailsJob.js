@@ -16,9 +16,10 @@ export class SyncProviderDetailsJob extends BaseJob {
    * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
    * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
    * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager) {
-    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager);
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService) {
+    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService);
   }
 
   /**
@@ -131,6 +132,28 @@ export class SyncProviderDetailsJob extends BaseJob {
           // Update provider details via lightweight method
           await this.providersManager.updateProviderDetails(providerId, details);
 
+          // Update metrics
+          if (details.active_connections !== undefined && details.active_connections !== null) {
+            this.metricsService.setGauge('provider_active_connections', { provider_id: providerId }, details.active_connections);
+          }
+          if (details.max_connections !== undefined && details.max_connections !== null) {
+            this.metricsService.setGauge('provider_max_connections', { provider_id: providerId }, details.max_connections);
+          }
+          if (details.active !== undefined && details.active !== null) {
+            this.metricsService.setGauge('provider_active', { provider_id: providerId }, details.active ? 1 : 0);
+          }
+          // Calculate and update expiration days
+          if (details.expiration_date !== null && details.expiration_date !== undefined) {
+            const expirationTimestamp = details.expiration_date * 1000; // Convert to milliseconds
+            const now = Date.now();
+            const daysUntilExpiration = Math.floor((expirationTimestamp - now) / (1000 * 60 * 60 * 24));
+            this.metricsService.setGauge('provider_expiration_days', { provider_id: providerId }, daysUntilExpiration);
+          } else {
+            // Set to a sentinel value (e.g., -999999) to indicate no expiration date
+            // Prometheus doesn't support null, so we use a very negative number
+            this.metricsService.setGauge('provider_expiration_days', { provider_id: providerId }, -999999);
+          }
+
           this.logger.debug(`[${providerId}] Provider details updated successfully`);
           results.push({
             providerId,
@@ -149,6 +172,8 @@ export class SyncProviderDetailsJob extends BaseJob {
               active: null,
               last_error: error.message
             });
+            // Update expiration days metric to indicate no expiration date
+            this.metricsService.setGauge('provider_expiration_days', { provider_id: providerId }, -999999);
           } catch (updateError) {
             this.logger.error(`[${providerId}] Failed to update provider details with error: ${updateError.message}`);
           }

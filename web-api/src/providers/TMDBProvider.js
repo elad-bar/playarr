@@ -20,9 +20,10 @@ export class TMDBProvider extends BaseProvider {
   /**
    * @param {string} [apiKey] - Optional TMDB API key (can be set later via updateApiKey)
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance (required)
    */
-  constructor(apiKey = null, cacheDir = null) {
-    super('TMDBProvider', cacheDir);
+  constructor(apiKey = null, cacheDir = null, metricsService) {
+    super('TMDBProvider', cacheDir, metricsService);
     this._apiKey = apiKey;
     this._headers = this._buildHeaders(apiKey);
     

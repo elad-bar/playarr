@@ -9,10 +9,12 @@ class ProvidersRouter extends BaseRouter {
   /**
    * @param {ProvidersManager} providersManager - Providers manager instance
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
    */
-  constructor(providersManager, middleware) {
+  constructor(providersManager, middleware, metricsService) {
     super(middleware, 'ProvidersRouter');
     this._providersManager = providersManager;
+    this._metricsService = metricsService;
     // In-memory cache for categories: Map<`${providerId}:${type}`, { categories: Array, lastUpdated: string }>
     this._categoriesCache = new Map();
   }
@@ -47,6 +49,13 @@ class ProvidersRouter extends BaseRouter {
         }
 
         const result = await this._providersManager.createProvider(providerData);
+        
+        // Track provider operation
+        this._metricsService.incrementCounter('provider_operations', {
+          operation: 'create',
+          username: req.user.username
+        });
+        
         return res.status(201).json(result);
       } catch (error) {
         return this.handleError(res, error, 'Failed to create provider');
@@ -128,9 +137,9 @@ class ProvidersRouter extends BaseRouter {
         // Create temporary provider instance
         let provider;
         if (providerType === 'xtream') {
-          provider = new XtreamProvider(tempProviderConfig);
+          provider = new XtreamProvider(tempProviderConfig, null, this._metricsService);
         } else {
-          provider = new AGTVProvider(tempProviderConfig);
+          provider = new AGTVProvider(tempProviderConfig, null, this._metricsService);
         }
 
         // Attempt authentication
@@ -179,6 +188,13 @@ class ProvidersRouter extends BaseRouter {
         }
 
         const result = await this._providersManager.updateProvider(provider_id, providerData);
+        
+        // Track provider operation
+        this._metricsService.incrementCounter('provider_operations', {
+          operation: 'update',
+          username: req.user.username
+        });
+        
         return res.status(200).json(result);
       } catch (error) {
         return this.handleError(res, error, 'Failed to update provider');
@@ -193,6 +209,12 @@ class ProvidersRouter extends BaseRouter {
       try {
         const { provider_id } = req.params;
         await this._providersManager.deleteProvider(provider_id);
+        
+        // Track provider operation
+        this._metricsService.incrementCounter('provider_operations', {
+          operation: 'delete',
+          username: req.user.username
+        });
         
         // 204 No Content should have empty body
         return res.status(204).send();

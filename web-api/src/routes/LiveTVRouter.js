@@ -38,14 +38,16 @@ class LiveTVRouter extends BaseRouter {
    * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager instance (for watchlist operations)
    * @param {import('../managers/domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance (for getting enabled provider IDs)
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
+   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
    */
-  constructor(channelManager, programManager, liveTVFormattingManager, userManager, iptvProviderManager, middleware) {
+  constructor(channelManager, programManager, liveTVFormattingManager, userManager, iptvProviderManager, middleware, metricsService) {
     super(middleware, 'LiveTVRouter');
     this._channelManager = channelManager;
     this._programManager = programManager;
     this._liveTVFormattingManager = liveTVFormattingManager;
     this._userManager = userManager;
     this._iptvProviderManager = iptvProviderManager;
+    this._metricsService = metricsService;
   }
 
   /**
@@ -220,6 +222,14 @@ class LiveTVRouter extends BaseRouter {
         }
         
         await this._userManager.addChannelToWatchlist(user.username, channelKey);
+        
+        // Track watchlist operation
+        this._metricsService.incrementCounter('watchlist_operations', {
+          operation: 'add',
+          media_type: 'live',
+          username: user.username
+        });
+        
         return res.status(200).json({ success: true, message: 'Channel added to watchlist' });
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Failed to add channel to watchlist', error.message);
@@ -237,6 +247,14 @@ class LiveTVRouter extends BaseRouter {
         const decodedChannelKey = decodeURIComponent(channelKey);
         
         await this._userManager.removeChannelFromWatchlist(user.username, decodedChannelKey);
+        
+        // Track watchlist operation
+        this._metricsService.incrementCounter('watchlist_operations', {
+          operation: 'remove',
+          media_type: 'live',
+          username: user.username
+        });
+        
         return res.status(200).json({ success: true, message: 'Channel removed from watchlist' });
       } catch (error) {
         return this.returnErrorResponse(res, 500, 'Failed to remove channel from watchlist', error.message);

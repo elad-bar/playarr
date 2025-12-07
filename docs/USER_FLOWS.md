@@ -242,6 +242,16 @@ This document outlines step-by-step user workflows for common tasks in Playarr, 
 3. Filter by log level (debug, info, error)
 4. Search logs for specific events
 
+### Metrics Settings (Admin Only)
+
+1. Navigate to **Settings → Metrics**
+2. View your metrics token (click eye icon to show/hide)
+3. Copy token to clipboard for Prometheus configuration
+4. View Prometheus configuration example
+5. Regenerate token if needed (invalidates old token)
+
+**Note**: The metrics token is automatically generated on first startup. Use this token to configure Prometheus to scrape metrics from the `/metrics` endpoint.
+
 ## Troubleshooting Flow
 
 ### Content Not Appearing
