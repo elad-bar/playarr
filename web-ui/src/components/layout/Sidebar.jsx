@@ -2,6 +2,7 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Drawer,
+  IconButton,
   List,
   ListItem,
   ListItemButton,
@@ -11,7 +12,6 @@ import {
   Box,
   Toolbar,
   useMediaQuery,
-  useTheme,
 } from '@mui/material';
 import {
   VideoLibrary as VideoLibraryIcon,
@@ -27,7 +27,9 @@ import {
   BarChart as BarChartIcon,
   Assessment as AssessmentIcon,
   Logout as LogoutIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
+import { useTheme } from '@mui/material/styles';
 import { useAuth } from '../../context/AuthContext';
 
 const DRAWER_WIDTH = 280;
@@ -40,7 +42,7 @@ function Sidebar({ open, onClose }) {
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
 
@@ -120,8 +122,9 @@ function Sidebar({ open, onClose }) {
       variant={isMobile ? 'temporary' : 'persistent'}
       open={open}
       onClose={onClose}
+      ModalProps={{ keepMounted: true }}
       sx={{
-        width: open ? DRAWER_WIDTH : 0,
+        width: open ? (isMobile ? '100%' : DRAWER_WIDTH) : 0,
         flexShrink: 0,
         transition: (theme) =>
           theme.transitions.create('width', {
@@ -129,13 +132,24 @@ function Sidebar({ open, onClose }) {
             duration: theme.transitions.duration.enteringScreen,
           }),
         '& .MuiDrawer-paper': {
-          width: DRAWER_WIDTH,
+          width: isMobile ? '100%' : DRAWER_WIDTH,
           boxSizing: 'border-box',
           overflowX: 'hidden',
         },
       }}
     >
-      <Toolbar />
+      <Toolbar
+        sx={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+        }}
+      >
+        {isMobile && (
+          <IconButton edge="end" color="inherit" onClick={onClose} aria-label="Close menu">
+            <CloseIcon />
+          </IconButton>
+        )}
+      </Toolbar>
       <Box sx={{ overflow: 'auto', height: '100%' }}>
         <List>
           {menuItems.map((section) => (

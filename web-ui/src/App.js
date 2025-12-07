@@ -28,7 +28,7 @@ const AppContent = () => {
     const dispatch = useDispatch();
     const theme = useSelector(selectTheme);
     const mode = useSelector(state => state.theme.mode);
-    const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const [sidebarOpen, setSidebarOpen] = useState(() => {
         const saved = localStorage.getItem('sidebarOpen');
         return saved !== null ? JSON.parse(saved) : true;
@@ -154,13 +154,17 @@ const AppContent = () => {
                         <AppBar 
                             position="fixed"
                             sx={{
-                                zIndex: (theme) => theme.zIndex.drawer + 1,
-                                ml: isMobile ? 0 : (sidebarOpen ? '280px' : 0),
-                                width: isMobile ? '100%' : (sidebarOpen ? 'calc(100% - 280px)' : '100%'),
-                                transition: (theme) =>
-                                    theme.transitions.create(['width', 'margin'], {
-                                        easing: theme.transitions.easing.sharp,
-                                        duration: theme.transitions.duration.enteringScreen,
+                                display: isMobile && sidebarOpen ? 'none' : 'block',
+                                zIndex: (muiTheme) =>
+                                    isMobile
+                                        ? muiTheme.zIndex.drawer - 1
+                                        : muiTheme.zIndex.drawer + 1,
+                                ml: !isMobile && sidebarOpen ? '280px' : 0,
+                                width: !isMobile && sidebarOpen ? 'calc(100% - 280px)' : '100%',
+                                transition: (muiTheme) =>
+                                    muiTheme.transitions.create(['width', 'margin'], {
+                                        easing: muiTheme.transitions.easing.sharp,
+                                        duration: muiTheme.transitions.duration.enteringScreen,
                                     }),
                             }}
                         >
