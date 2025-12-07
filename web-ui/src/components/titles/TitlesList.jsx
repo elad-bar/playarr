@@ -223,7 +223,12 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                 variant={isMobile ? 'temporary' : 'persistent'}
                 open={sidebarOpen}
                 onClose={() => setSidebarOpen(false)}
-                anchor={isMobile ? 'bottom' : 'left'}
+                anchor="left"
+                ModalProps={{
+                    sx: {
+                        zIndex: (theme) => theme.zIndex.drawer + 10,
+                    },
+                }}
                 sx={{
                     ...(isMobile ? {} : {
                         width: sidebarOpen ? drawerWidth : 0,
@@ -238,6 +243,9 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                         height: isMobile ? '100vh' : 'auto',
                         boxSizing: 'border-box',
                         position: isMobile ? 'fixed' : 'relative',
+                        top: isMobile ? 0 : 'auto',
+                        left: isMobile ? 0 : 'auto',
+                        zIndex: isMobile ? (theme) => theme.zIndex.drawer + 2 : 'auto',
                         borderRight: isMobile ? 'none' : '1px solid',
                         borderColor: 'divider',
                         transition: theme.transitions.create(['width', 'height'], {
@@ -259,27 +267,29 @@ const TitlesList = ({ title, searchQuery = '', onSearchChange }) => {
                             Filters
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 0.5 }}>
-                            <Tooltip title="Clear all filters">
-                                <span>
-                                    <IconButton
-                                        size="small"
-                                        onClick={handleClearFilters}
-                                        aria-label="clear filters"
-                                        disabled={activeFilterCount === 0}
-                                        sx={{ 
-                                            color: 'text.secondary',
-                                            '&:hover': {
-                                                backgroundColor: 'action.hover'
-                                            },
-                                            '&:disabled': {
-                                                opacity: 0.3
-                                            }
-                                        }}
-                                    >
-                                        <Clear />
-                                    </IconButton>
-                                </span>
-                            </Tooltip>
+                            {!isMobile && (
+                                <Tooltip title="Clear all filters">
+                                    <span>
+                                        <IconButton
+                                            size="small"
+                                            onClick={handleClearFilters}
+                                            aria-label="clear filters"
+                                            disabled={activeFilterCount === 0}
+                                            sx={{ 
+                                                color: 'text.secondary',
+                                                '&:hover': {
+                                                    backgroundColor: 'action.hover'
+                                                },
+                                                '&:disabled': {
+                                                    opacity: 0.3
+                                                }
+                                            }}
+                                        >
+                                            <Clear />
+                                        </IconButton>
+                                    </span>
+                                </Tooltip>
+                            )}
                             <IconButton
                                 size="small"
                                 onClick={() => setSidebarOpen(false)}
