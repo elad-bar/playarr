@@ -1,4 +1,4 @@
-# Prometheus Metrics Exporter Feature [New]
+# Prometheus Metrics Exporter Feature [Done]
 
 ## Overview
 
