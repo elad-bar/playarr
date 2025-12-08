@@ -52,10 +52,38 @@ export class BaseJob {
    * Execute the job
    * Must be implemented by subclasses
    * @abstract
+   * @param {AbortSignal} [abortSignal] - AbortSignal for cancellation
    * @returns {Promise<any>} Job execution result
    */
-  async execute() {
+  async execute(abortSignal) {
     throw new Error('execute() must be implemented by subclass');
+  }
+
+  /**
+   * Check if job execution should be cancelled
+   * @protected
+   * @param {AbortSignal} [abortSignal] - AbortSignal to check
+   * @throws {Error} If job is aborted
+   */
+  _checkCancellation(abortSignal) {
+    if (abortSignal && abortSignal.aborted) {
+      const error = new Error(`Job '${this.jobName}' was cancelled`);
+      error.name = 'AbortError';
+      error.cancelled = true;
+      throw error;
+    }
+  }
+
+  /**
+   * Helper to check cancellation periodically in loops
+   * @protected
+   * @param {AbortSignal} [abortSignal] - AbortSignal to check
+   * @param {number} [checkInterval=100] - How often to check (every N iterations)
+   * @param {number} [currentIteration] - Current iteration number
+   * @returns {boolean} True if cancellation should be checked
+   */
+  _shouldCheckCancellation(abortSignal, checkInterval = 100, currentIteration = 0) {
+    return abortSignal && currentIteration % checkInterval === 0;
   }
 
   /**

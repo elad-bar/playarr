@@ -22,9 +22,10 @@ export class ProviderTitlesMonitorJob extends BaseJob {
 
   /**
    * Execute the job - process provider titles that changed since last execution
+   * @param {AbortSignal} [abortSignal] - AbortSignal for cancellation
    * @returns {Promise<{movies: number, tvShows: number}>} Count of generated main titles by type (for reporting)
    */
-  async execute() {
+  async execute(abortSignal) {
     try {
       // Get last execution time from job history BEFORE setting status
       const lastExecution = await this.getLastExecution({
@@ -35,6 +36,9 @@ export class ProviderTitlesMonitorJob extends BaseJob {
 
       // Set status to "running" at start (after reading last_execution)
       await this.setJobStatus('running');
+      
+      // Check for cancellation after setting status
+      this._checkCancellation(abortSignal);
 
       // Create handler instances for all providers
       this.handlers = await this._createHandlers();
@@ -58,14 +62,24 @@ export class ProviderTitlesMonitorJob extends BaseJob {
 
       // Load provider titles that changed since lastExecution
       for (const [id, handler] of enabledHandlers) {
+        // Check for cancellation before processing each handler
+        this._checkCancellation(abortSignal);
+        
         await handler.loadProviderTitles(lastExecution);
       }
 
       // Load main titles for provider titles that have TMDB IDs
       // Main titles use title_key = type-tmdb_id, not type-title_id
       const mainTitleKeys = new Set();
+      let titleIndex = 0;
       for (const [id, handler] of enabledHandlers) {
         for (const title of handler.getAllTitles()) {
+          // Periodic cancellation check in main title keys collection loop
+          if (this._shouldCheckCancellation(abortSignal, 100, titleIndex)) {
+            this._checkCancellation(abortSignal);
+          }
+          titleIndex++;
+          
           if (title.tmdb_id && title.type) {
             mainTitleKeys.add(generateTitleKey(title.type, title.tmdb_id));
           }
@@ -82,6 +96,9 @@ export class ProviderTitlesMonitorJob extends BaseJob {
       // Extract provider titles into dictionary for main title processing
       const providerTitlesByProvider = new Map();
       for (const [id, handler] of enabledHandlers) {
+        // Check for cancellation before processing each handler
+        this._checkCancellation(abortSignal);
+        
         providerTitlesByProvider.set(id, handler.getAllTitles());
       }
 
@@ -102,6 +119,9 @@ export class ProviderTitlesMonitorJob extends BaseJob {
       }
 
       // Cleanup outdated main titles from disabled/deleted providers
+      // Check for cancellation before cleanup
+      this._checkCancellation(abortSignal);
+      
       const allProvidersResult = await this.providersManager.getProviders();
       const disabledProviders = allProvidersResult.providers.filter(p => 
         p.enabled === false || p.deleted === true
@@ -118,14 +138,24 @@ export class ProviderTitlesMonitorJob extends BaseJob {
 
       return result;
     } catch (error) {
-      this.logger.error(`Job execution failed: ${error.message}`);
-      
-      // Set status to failed with error result
-      await this.setJobStatus('failed', {
-        error: error.message
-      }).catch(err => {
-        this.logger.error(`Failed to update job history: ${err.message}`);
-      });
+      // Check if error is due to cancellation
+      if (error.cancelled || error.name === 'AbortError') {
+        this.logger.info(`Job execution cancelled: ${error.message}`);
+        await this.setJobStatus('cancelled', {
+          cancelled: true
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      } else {
+        this.logger.error(`Job execution failed: ${error.message}`);
+        
+        // Set status to failed with error result
+        await this.setJobStatus('failed', {
+          error: error.message
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      }
       throw error;
     } finally {
       // Unload titles from memory to free resources

@@ -227,5 +227,48 @@ export class JobsManager extends BaseManager {
       throw new AppError('Failed to trigger job', 500);
     }
   }
+
+  /**
+   * Abort a running job
+   * @param {string} jobName - Job name (e.g., "syncIPTVProviderTitles")
+   * @returns {Promise<{success: boolean, message: string, jobName: string}>} Abort result
+   * @throws {JobSchedulerUnavailableError} If scheduler is not available
+   * @throws {AppError} If job is not running
+   */
+  async abortJob(jobName) {
+    try {
+      if (!this._scheduler) {
+        throw new JobSchedulerUnavailableError('Job scheduler is not available');
+      }
+
+      // Check if job is actually running
+      if (!(await this.isJobRunning(jobName))) {
+        throw new AppError(`Job '${jobName}' is not currently running`, 400);
+      }
+
+      try {
+        const result = await this._scheduler.abortJob(jobName);
+        
+        return {
+          success: true,
+          message: `Job '${jobName}' abort signal sent`,
+          jobName: jobName
+        };
+      } catch (error) {
+        if (error.code === 'JOB_NOT_RUNNING') {
+          throw new AppError(`Job '${jobName}' is not running`, 400);
+        }
+        
+        this.logger.error(`Error aborting job ${jobName}:`, error.message);
+        throw new AppError(`Failed to abort job: ${error.message}`, 500);
+      }
+    } catch (error) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+      this.logger.error(`Error aborting job ${jobName}:`, error);
+      throw new AppError('Failed to abort job', 500);
+    }
+  }
 }
 

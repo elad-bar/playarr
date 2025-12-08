@@ -26,14 +26,18 @@ export class SyncProviderDetailsJob extends BaseJob {
    * Execute the job - sync provider details for all active providers
    * Xtream providers: checked every minute
    * AGTV providers: checked only if details missing or last_checked > 1 day old
+   * @param {AbortSignal} [abortSignal] - AbortSignal for cancellation
    * @returns {Promise<Array<{providerId: string, success: boolean, error?: string}>>} Array of sync results
    */
-  async execute() {
+  async execute(abortSignal) {
     const executionStartTime = Date.now();
 
     try {
       // Set status to "running" at start
       await this.setJobStatus('running');
+      
+      // Check for cancellation after setting status
+      this._checkCancellation(abortSignal);
 
       // Fetch enabled, non-deleted providers
       const activeProviders = await this.providersManager.getEnabledProviders({ excludeDeleted: true });
@@ -91,6 +95,9 @@ export class SyncProviderDetailsJob extends BaseJob {
 
       // Process each provider
       for (const provider of providersToProcess) {
+        // Check for cancellation before processing each provider
+        this._checkCancellation(abortSignal);
+        
         const providerId = provider.id;
         const providerType = provider.type?.toLowerCase();
         try {
@@ -207,15 +214,27 @@ export class SyncProviderDetailsJob extends BaseJob {
       return results;
     } catch (error) {
       const executionTime = Date.now() - executionStartTime;
-      this.logger.error(`Job execution failed after ${executionTime}ms: ${error.message}`);
       
-      // Set status to failed with error result
-      await this.setJobStatus('failed', {
-        error: error.message,
-        execution_time_ms: executionTime
-      }).catch(err => {
-        this.logger.error(`Failed to update job history: ${err.message}`);
-      });
+      // Check if error is due to cancellation
+      if (error.cancelled || error.name === 'AbortError') {
+        this.logger.info(`Job execution cancelled after ${executionTime}ms: ${error.message}`);
+        await this.setJobStatus('cancelled', {
+          cancelled: true,
+          execution_time_ms: executionTime
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      } else {
+        this.logger.error(`Job execution failed after ${executionTime}ms: ${error.message}`);
+        
+        // Set status to failed with error result
+        await this.setJobStatus('failed', {
+          error: error.message,
+          execution_time_ms: executionTime
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      }
       throw error;
     }
   }

@@ -79,6 +79,7 @@ export const API_ENDPOINTS = {
     // Jobs endpoints
     jobs: '/jobs',
     triggerJob: (jobName) => `/jobs/${jobName}/trigger`,
+    abortJob: (jobName) => `/jobs/${jobName}/abort`,
 
     // Statistics endpoints
     statistics: '/metrics/json',

@@ -177,6 +177,12 @@
       "name": "playarr_user_operations_total",
       "help": "Total number of user CRUD operations",
       "labelNames": ["operation", "username"]
+    },
+    "provider_categories_synced": {
+      "type": "counter",
+      "name": "playarr_provider_categories_synced_total",
+      "help": "Total number of provider categories synced per provider and media type",
+      "labelNames": ["provider_id", "media_type"]
     }
   }
 }

@@ -1,5 +1,6 @@
 import { BaseJob } from './BaseJob.js';
 import { formatNumber } from '../utils/numberFormat.js';
+import { ProviderTypeConfig } from '../config/providers.js';
 
 /**
  * Job for cleaning up unwanted provider titles
@@ -51,6 +52,7 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
       .filter(id => id !== null && !isNaN(id));
   }
 
+
   /**
    * Cleanup all channels for a provider (used when provider is disabled/deleted or Live TV is disabled)
    * @private
@@ -91,12 +93,16 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
 
   /**
    * Execute the job - cleanup unwanted provider titles
+   * @param {AbortSignal} [abortSignal] - AbortSignal for cancellation
    * @returns {Promise<Object>} Cleanup statistics
    */
-  async execute() {
+  async execute(abortSignal) {
     try {
       // Set status to "running" at start
       await this.setJobStatus('running');
+      
+      // Check for cancellation after setting status
+      this._checkCancellation(abortSignal);
 
       this.logger.info('Starting cleanup of unwanted provider titles...');
 
@@ -124,9 +130,13 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
 
       // Step 2: Initialize collection for titles to delete
       const titlesToDelete = []; // Array of { provider_id, title_key, tmdb_id, type }
+      const providerDeletionCounts = new Map(); // Track per-provider counts for summary
 
       // Step 3: For each provider, determine which provider titles should be deleted
       for (const provider of allProviders) {
+        // Check for cancellation before processing each provider
+        this._checkCancellation(abortSignal);
+        
         const providerId = provider.id;
         const isEnabled = provider.enabled !== false;
         const syncTypes = provider.sync_media_types || { 
@@ -136,73 +146,124 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
         };
         const enabledCategories = provider.enabled_categories || { movies: [], tvshows: [], live: [] };
 
+        // Check if provider supports categories
+        const providerType = provider.type?.toLowerCase();
+        const supportsCategories = ProviderTypeConfig[providerType]?.supportsCategories === true;
+        
         // Build query for provider titles that should be deleted
-        let deleteQuery = { provider_id: providerId };
+        let deleteQuery = null;
+        const deletionReasons = []; // Track reasons for debugging
+
+        // Log provider configuration
+        this.logger.debug(`[${providerId}] Provider config: enabled=${isEnabled}, deleted=${provider.deleted || false}, sync_types=${JSON.stringify(syncTypes)}, enabled_categories={movies:${enabledCategories.movies?.length || 0}, tvshows:${enabledCategories.tvshows?.length || 0}}, supports_categories=${supportsCategories}`);
 
         // If provider is disabled/deleted, delete ALL titles
         if (!isEnabled || provider.deleted) {
-          // Query remains: { provider_id: providerId } - all titles
+          deleteQuery = { provider_id: providerId };
+          deletionReasons.push(`provider_disabled_or_deleted (enabled: ${isEnabled}, deleted: ${provider.deleted || false})`);
+          this.logger.debug(`[${providerId}] Deletion criteria: Provider is disabled or deleted - will delete ALL titles`);
         } else {
           // Provider is enabled - check media types and categories
           const typesToDelete = [];
-          if (!syncTypes.movies) typesToDelete.push('movies');
-          if (!syncTypes.tvshows) typesToDelete.push('tvshows');
-
-          if (typesToDelete.length > 0) {
-            deleteQuery.type = { $in: typesToDelete };
+          if (!syncTypes.movies) {
+            typesToDelete.push('movies');
+            deletionReasons.push('media_type_disabled (movies)');
+          }
+          if (!syncTypes.tvshows) {
+            typesToDelete.push('tvshows');
+            deletionReasons.push('media_type_disabled (tvshows)');
           }
 
-          // Also check disabled categories
-          const enabledMovieIds = this._extractCategoryIdsFromKeys(enabledCategories.movies || []);
-          const enabledTvshowIds = this._extractCategoryIdsFromKeys(enabledCategories.tvshows || []);
-
+          // Also check disabled categories (only if provider supports categories)
           const orConditions = [];
           
-          // Movies: delete if category_id is NOT in enabled movie category IDs
-          if (enabledMovieIds.length > 0 && syncTypes.movies) {
-            orConditions.push({
-              type: 'movies',
-              category_id: { $nin: enabledMovieIds }
-            });
-          } else if (syncTypes.movies && enabledMovieIds.length === 0) {
-            // No enabled movie categories, all movies are disabled
-            orConditions.push({ type: 'movies' });
+          if (supportsCategories) {
+            const enabledMovieIds = this._extractCategoryIdsFromKeys(enabledCategories.movies || []);
+            const enabledTvshowIds = this._extractCategoryIdsFromKeys(enabledCategories.tvshows || []);
+
+            if (syncTypes.movies) {
+              if (enabledMovieIds.length > 0) {
+                // Convert to strings to match database type (category_id is stored as string)
+                const enabledMovieIdsAsStrings = enabledMovieIds.map(id => String(id));
+                orConditions.push({ type: 'movies', category_id: { $nin: enabledMovieIdsAsStrings } });
+                deletionReasons.push(`category_disabled (movies: enabled_categories=${enabledCategories.movies?.length || 0}, enabled_ids=[${enabledMovieIds.join(',')}])`);
+              } else {
+                orConditions.push({ type: 'movies' });
+                deletionReasons.push('no_enabled_categories (movies: sync enabled but enabled_categories is empty)');
+              }
+            }
+
+            if (syncTypes.tvshows) {
+              if (enabledTvshowIds.length > 0) {
+                // Convert to strings to match database type (category_id is stored as string)
+                const enabledTvshowIdsAsStrings = enabledTvshowIds.map(id => String(id));
+                orConditions.push({ type: 'tvshows', category_id: { $nin: enabledTvshowIdsAsStrings } });
+                deletionReasons.push(`category_disabled (tvshows: enabled_categories=${enabledCategories.tvshows?.length || 0}, enabled_ids=[${enabledTvshowIds.join(',')}])`);
+              } else {
+                orConditions.push({ type: 'tvshows' });
+                deletionReasons.push('no_enabled_categories (tvshows: sync enabled but enabled_categories is empty)');
+              }
+            }
           }
 
-          // TV shows: delete if category_id is NOT in enabled tvshow category IDs
-          if (enabledTvshowIds.length > 0 && syncTypes.tvshows) {
-            orConditions.push({
-              type: 'tvshows',
-              category_id: { $nin: enabledTvshowIds }
-            });
-          } else if (syncTypes.tvshows && enabledTvshowIds.length === 0) {
-            // No enabled tvshow categories, all tvshows are disabled
-            orConditions.push({ type: 'tvshows' });
-          }
+          // Build delete query only if we have deletion criteria
+          if (typesToDelete.length > 0 || orConditions.length > 0) {
+            deleteQuery = { provider_id: providerId };
+            
+            if (typesToDelete.length > 0) {
+              this.logger.debug(`[${providerId}] Deletion criteria: Media types disabled - ${typesToDelete.join(', ')}`);
+            }
 
-          if (orConditions.length > 0) {
-            // If we already have type filter, combine with $and
-            if (deleteQuery.type) {
+            if (typesToDelete.length > 0 && orConditions.length > 0) {
               deleteQuery = {
                 provider_id: providerId,
                 $and: [
-                  { type: deleteQuery.type },
+                  { type: { $in: typesToDelete } },
                   { $or: orConditions }
                 ]
               };
-            } else {
+            } else if (typesToDelete.length > 0) {
+              deleteQuery.type = { $in: typesToDelete };
+            } else if (orConditions.length > 0) {
               deleteQuery.$or = orConditions;
             }
           }
         }
 
-        // Find provider titles matching the delete query
-        const providerTitlesToDelete = await this.providerTitlesManager.findByQuery(deleteQuery, {
-          projection: { title_key: 1, tmdb_id: 1, type: 1, provider_id: 1 }
-        });
+        // Find provider titles matching the delete query (skip if no deletion criteria)
+        const providerTitlesToDelete = deleteQuery ? await this.providerTitlesManager.findByQuery(deleteQuery, {
+          projection: { title_key: 1, tmdb_id: 1, type: 1, provider_id: 1, category_id: 1 }
+        }) : [];
+
+        // Count by type and category for debugging
+        const countByType = {};
+        const countByCategory = {};
+        for (const pt of providerTitlesToDelete) {
+          countByType[pt.type] = (countByType[pt.type] || 0) + 1;
+          if (pt.category_id !== undefined && pt.category_id !== null) {
+            const key = `${pt.type}-${pt.category_id}`;
+            countByCategory[key] = (countByCategory[key] || 0) + 1;
+          }
+        }
+
+        if (providerTitlesToDelete.length > 0) {
+          this.logger.debug(`[${providerId}] Found ${formatNumber(providerTitlesToDelete.length)} titles to delete. Reasons: ${deletionReasons.join('; ')}. Breakdown by type: ${JSON.stringify(countByType)}. Breakdown by category: ${JSON.stringify(countByCategory)}`);
+          providerDeletionCounts.set(providerId, {
+            count: providerTitlesToDelete.length,
+            reasons: deletionReasons,
+            breakdown: countByType
+          });
+        }
 
         // Add to collection
+        let deleteIndex = 0;
         for (const pt of providerTitlesToDelete) {
+          // Periodic cancellation check in titlesToDelete processing loop
+          if (this._shouldCheckCancellation(abortSignal, 100, deleteIndex)) {
+            this._checkCancellation(abortSignal);
+          }
+          deleteIndex++;
+          
           if (pt.title_key && pt.type) {
             titlesToDelete.push({
               provider_id: pt.provider_id,
@@ -211,6 +272,14 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
               type: pt.type
             });
           }
+        }
+      }
+
+      // Log summary of deletions by provider
+      if (providerDeletionCounts.size > 0) {
+        this.logger.debug('Deletion summary by provider:');
+        for (const [providerId, stats] of providerDeletionCounts.entries()) {
+          this.logger.debug(`  [${providerId}]: ${formatNumber(stats.count)} titles - ${stats.reasons.join('; ')} - Types: ${JSON.stringify(stats.breakdown)}`);
         }
       }
 
@@ -250,6 +319,9 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
 
         // Remove sources from main titles per provider
         for (const [providerId, titleKeysSet] of titleKeysByProvider.entries()) {
+          // Check for cancellation before processing each provider
+          this._checkCancellation(abortSignal);
+          
           const titleKeys = Array.from(titleKeysSet);
           const pullResult = await this.titlesManager.removeProviderSourcesFromTitles(titleKeys, providerId);
           titlesUpdated += pullResult.modifiedCount || 0;
@@ -270,6 +342,9 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
       // Step 6.5: Cleanup categories for disabled/deleted providers or disabled media types
       let categoriesDeleted = 0;
       for (const provider of allProviders) {
+        // Check for cancellation before processing each provider
+        this._checkCancellation(abortSignal);
+        
         const providerId = provider.id;
         const isEnabled = provider.enabled !== false;
         const syncTypes = provider.sync_media_types || { 
@@ -317,6 +392,9 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
       // Step 7: Cleanup Live TV channels for disabled providers/media types
       let channelsDeleted = 0;
       for (const provider of allProviders) {
+        // Check for cancellation before processing each provider
+        this._checkCancellation(abortSignal);
+        
         const providerId = provider.id;
         const isEnabled = provider.enabled !== false;
         const syncTypes = provider.sync_media_types || { 
@@ -365,14 +443,24 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
         categories_deleted: categoriesDeleted
       };
     } catch (error) {
-      this.logger.error(`Job execution failed: ${error.message}`);
-      
-      // Set status to failed with error result
-      await this.setJobStatus('failed', {
-        error: error.message
-      }).catch(err => {
-        this.logger.error(`Failed to update job history: ${err.message}`);
-      });
+      // Check if error is due to cancellation
+      if (error.cancelled || error.name === 'AbortError') {
+        this.logger.info(`Job execution cancelled: ${error.message}`);
+        await this.setJobStatus('cancelled', {
+          cancelled: true
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      } else {
+        this.logger.error(`Job execution failed: ${error.message}`);
+        
+        // Set status to failed with error result
+        await this.setJobStatus('failed', {
+          error: error.message
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      }
       throw error;
     }
   }

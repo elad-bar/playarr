@@ -26,6 +26,7 @@ export class EngineScheduler {
     this._jobsManager = null;
     this._intervalIds = new Map(); // Map of jobName -> intervalId
     this._runningJobs = new Map();
+    this._abortControllers = new Map(); // Map<jobName, AbortController>
     this._scheduledJobs = []; // Store scheduled jobs for later starting
     this.logger = createLogger('EngineScheduler');
   }
@@ -87,7 +88,11 @@ export class EngineScheduler {
         try {
           await this.runJob(job.name);
         } catch (error) {
-          this.logger.error(`Error running scheduled job '${job.name}': ${error.message}`);
+          if (error.code === 'JOB_ALREADY_RUNNING' || error.isAlreadyRunning) {
+            this.logger.info(`Skipping scheduled job '${job.name}': ${error.message}`);
+          } else {
+            this.logger.error(`Error running scheduled job '${job.name}': ${error.message}`);
+          }
         }
       };
       
@@ -106,7 +111,11 @@ export class EngineScheduler {
           this.logger.info(`Running job '${job.name}' on startup${job.delayMs > 0 ? ` (after ${job.delay} delay)` : ''}`);
           await runJobAsync();
         } catch (error) {
-          this.logger.error(`Error running job '${job.name}' on startup: ${error.message}`);
+          if (error.code === 'JOB_ALREADY_RUNNING' || error.isAlreadyRunning) {
+            this.logger.info(`Skipping job '${job.name}' on startup: ${error.message}`);
+          } else {
+            this.logger.error(`Error running job '${job.name}' on startup: ${error.message}`);
+          }
         }
       })();
     });
@@ -131,6 +140,42 @@ export class EngineScheduler {
   }
 
   /**
+   * Abort a running job
+   * @param {string} name - Job name
+   * @returns {Promise<{success: boolean, message: string}>} Abort result
+   */
+  async abortJob(name) {
+    if (!this._runningJobs.has(name)) {
+      const error = new Error(`Job '${name}' is not running`);
+      error.code = 'JOB_NOT_RUNNING';
+      throw error;
+    }
+
+    const abortController = this._abortControllers.get(name);
+    if (abortController) {
+      abortController.abort();
+      this.logger.info(`Abort signal sent to job '${name}'`);
+      
+      // Update job status to cancelled
+      try {
+        await this._jobHistoryManager.updateStatus(name, 'cancelled', null, {
+          cancelled: true,
+          cancelledAt: new Date()
+        });
+      } catch (error) {
+        this.logger.error(`Error updating job status for ${name}:`, error.message);
+      }
+      
+      return {
+        success: true,
+        message: `Job '${name}' abort signal sent`
+      };
+    }
+
+    throw new Error(`No abort controller found for job '${name}'`);
+  }
+
+  /**
    * Run a job by name
    * @param {string} name - Job name
    * @param {Object} [workerData] - Optional worker data
@@ -152,21 +197,37 @@ export class EngineScheduler {
       throw error;
     }
 
-    const promise = this._executeJob(name, workerData);
+    // Create AbortController for this job execution
+    const abortController = new AbortController();
+    this._abortControllers.set(name, abortController);
+
+    const promise = this._executeJob(name, workerData, abortController.signal);
     this._runningJobs.set(name, promise);
 
     try {
       return await promise;
+    } catch (error) {
+      // Check if error is due to abortion
+      if (error.name === 'AbortError' || abortController.signal.aborted) {
+        this.logger.info(`Job '${name}' was aborted`);
+        // Status already updated in abortJob method
+        throw error;
+      }
+      throw error;
     } finally {
       this._runningJobs.delete(name);
+      this._abortControllers.delete(name);
     }
   }
 
   /**
    * Execute a job internally
    * @private
+   * @param {string} name - Job name
+   * @param {Object} [workerData] - Optional worker data
+   * @param {AbortSignal} [abortSignal] - AbortSignal for cancellation
    */
-  async _executeJob(name, workerData) {
+  async _executeJob(name, workerData, abortSignal) {
     const job = this._jobInstances.get(name);
     if (!job) {
       throw new Error(`Job "${name}" not found`);
@@ -177,9 +238,10 @@ export class EngineScheduler {
     const startTime = Date.now();
     try {
       // Execute the job directly (handlers are created fresh in execute() method)
-      const result = await job.execute();
+      // Pass abortSignal to job execution
+      const result = await job.execute(abortSignal);
 
-      if (result !== undefined) {
+      if (result !== undefined && !abortSignal?.aborted) {
         // Track metrics - success
         const duration = (Date.now() - startTime) / 1000;
         this._metricsService.incrementCounter('job_executions', { job_type: name, status: 'success' });
@@ -191,12 +253,17 @@ export class EngineScheduler {
 
       return result;
     } catch (error) {
-      // Track metrics - failure
+      // Track metrics - failure or cancellation
       const duration = (Date.now() - startTime) / 1000;
-      this._metricsService.incrementCounter('job_executions', { job_type: name, status: 'failure' });
+      const status = abortSignal?.aborted ? 'cancelled' : 'failure';
+      this._metricsService.incrementCounter('job_executions', { job_type: name, status });
       this._metricsService.observeHistogram('job_duration', { job_type: name }, duration);
       
-      this.logger.error(`Error executing job '${name}': ${error.message}`);
+      if (abortSignal?.aborted) {
+        this.logger.info(`Job '${name}' was cancelled`);
+      } else {
+        this.logger.error(`Error executing job '${name}': ${error.message}`);
+      }
       throw error;
     }
   }
@@ -213,7 +280,11 @@ export class EngineScheduler {
           this.logger.info(`Triggering post-execute job '${postJobName}'`);
           await this.runJob(postJobName, workerData);
         } catch (error) {
-          this.logger.error(`Failed to trigger post-execute job '${postJobName}': ${error.message}`);
+          if (error.code === 'JOB_ALREADY_RUNNING' || error.isAlreadyRunning) {
+            this.logger.info(`Skipping post-execute job '${postJobName}': ${error.message}`);
+          } else {
+            this.logger.error(`Failed to trigger post-execute job '${postJobName}': ${error.message}`);
+          }
         }
       }
     }

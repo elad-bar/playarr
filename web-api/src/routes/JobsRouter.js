@@ -51,6 +51,25 @@ class JobsRouter extends BaseRouter {
         return this.handleError(res, error, 'Failed to trigger job');
       }
     });
+
+    /**
+     * POST /api/jobs/:jobName/abort
+     * Abort a running job (admin only)
+     */
+    this.router.post('/:jobName/abort', this.middleware.requireAdmin, async (req, res) => {
+      try {
+        const { jobName } = req.params;
+
+        if (!jobName) {
+          return this.returnErrorResponse(res, 400, 'Job name is required');
+        }
+
+        const result = await this._jobsManager.abortJob(jobName);
+        return res.status(200).json(result);
+      } catch (error) {
+        return this.handleError(res, error, 'Failed to abort job');
+      }
+    });
   }
 }
 

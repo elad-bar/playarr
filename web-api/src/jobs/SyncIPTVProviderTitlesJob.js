@@ -23,9 +23,10 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
 
   /**
    * Execute the job - fetch metadata from all IPTV providers (incremental)
+   * @param {AbortSignal} [abortSignal] - AbortSignal for cancellation
    * @returns {Promise<Array<{providerId: string, providerName: string, movies?: number, tvShows?: number, error?: string}>>} Array of fetch results
    */
-  async execute() {
+  async execute(abortSignal) {
     try {
       // Get last execution time from job history BEFORE setting status
       // This ensures we have the correct last_execution value from previous successful run
@@ -37,6 +38,9 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
 
       // Set status to "running" at start (after reading last_execution)
       await this.setJobStatus('running');
+      
+      // Check for cancellation after setting status
+      this._checkCancellation(abortSignal);
 
       // Create handler instances for all providers
       this.handlers = await this._createHandlers();
@@ -70,8 +74,13 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
       // Note: fetchMetadata() will load all provider titles internally for comparison
       this.logger.info(`Starting metadata fetch process for ${formatNumber(enabledHandlers.length)} enabled provider(s) (${formatNumber(this.handlers.size)} total)...`);
       
+      // Check for cancellation before processing providers
+      this._checkCancellation(abortSignal);
+      
       const results = await Promise.all(
         enabledHandlers.map(async ([providerId, handler]) => {
+          // Check for cancellation before processing each provider
+          this._checkCancellation(abortSignal);
           try {
             this.logger.debug(`[${providerId}] Processing provider (${handler.getProviderType()})`);
             this.logger.info(`Fetching metadata from provider ${providerId}...`);
@@ -135,7 +144,14 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
       );
 
       // Update metrics for processed titles
+      let index = 0;
       for (const result of results) {
+        // Periodic cancellation check in metrics loop
+        if (this._shouldCheckCancellation(abortSignal, 100, index)) {
+          this._checkCancellation(abortSignal);
+        }
+        index++;
+        
         if (result.error) {
           // Skip failed providers
           continue;
@@ -156,14 +172,24 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
 
       return results;
     } catch (error) {
-      this.logger.error(`Job execution failed: ${error.message}`);
-      
-      // Set status to failed with error result
-      await this.setJobStatus('failed', {
-        error: error.message
-      }).catch(err => {
-        this.logger.error(`Failed to update job history: ${err.message}`);
-      });
+      // Check if error is due to cancellation
+      if (error.cancelled || error.name === 'AbortError') {
+        this.logger.info(`Job execution cancelled: ${error.message}`);
+        await this.setJobStatus('cancelled', {
+          cancelled: true
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      } else {
+        this.logger.error(`Job execution failed: ${error.message}`);
+        
+        // Set status to failed with error result
+        await this.setJobStatus('failed', {
+          error: error.message
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      }
       throw error;
     } finally {
       // Unload titles from memory to free resources

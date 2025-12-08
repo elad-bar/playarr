@@ -24,12 +24,16 @@ export class SyncProviderCategoriesJob extends BaseJob {
 
   /**
    * Execute the job - sync categories from all enabled IPTV providers
+   * @param {AbortSignal} [abortSignal] - AbortSignal for cancellation
    * @returns {Promise<Array<{providerId: string, providerName: string, movies?: number, tvshows?: number, error?: string}>>} Array of sync results
    */
-  async execute() {
+  async execute(abortSignal) {
     try {
       // Set status to "running" at start
       await this.setJobStatus('running');
+      
+      // Check for cancellation after setting status
+      this._checkCancellation(abortSignal);
 
       this.logger.info('Starting provider categories sync...');
 
@@ -55,9 +59,14 @@ export class SyncProviderCategoriesJob extends BaseJob {
 
       this.logger.info(`Syncing categories for ${formatNumber(enabledProviders.length)} enabled provider(s)...`);
 
+      // Check for cancellation before processing providers
+      this._checkCancellation(abortSignal);
+
       // Process each provider
       const results = await Promise.all(
         enabledProviders.map(async (provider) => {
+          // Check for cancellation before processing each provider
+          this._checkCancellation(abortSignal);
           const providerId = provider.id;
           try {
             this.logger.debug(`[${providerId}] Processing provider categories`);
@@ -118,7 +127,14 @@ export class SyncProviderCategoriesJob extends BaseJob {
       );
 
       // Update metrics
+      let index = 0;
       for (const result of results) {
+        // Periodic cancellation check in metrics loop
+        if (this._shouldCheckCancellation(abortSignal, 100, index)) {
+          this._checkCancellation(abortSignal);
+        }
+        index++;
+        
         if (result.error) {
           continue;
         }
@@ -145,14 +161,24 @@ export class SyncProviderCategoriesJob extends BaseJob {
       this.logger.info(`Categories sync completed for ${formatNumber(enabledProviders.length)} provider(s)`);
       return results;
     } catch (error) {
-      this.logger.error(`Job execution failed: ${error.message}`);
-      
-      // Set status to failed with error result
-      await this.setJobStatus('failed', {
-        error: error.message
-      }).catch(err => {
-        this.logger.error(`Failed to update job history: ${err.message}`);
-      });
+      // Check if error is due to cancellation
+      if (error.cancelled || error.name === 'AbortError') {
+        this.logger.info(`Job execution cancelled: ${error.message}`);
+        await this.setJobStatus('cancelled', {
+          cancelled: true
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      } else {
+        this.logger.error(`Job execution failed: ${error.message}`);
+        
+        // Set status to failed with error result
+        await this.setJobStatus('failed', {
+          error: error.message
+        }).catch(err => {
+          this.logger.error(`Failed to update job history: ${err.message}`);
+        });
+      }
       throw error;
     }
   }

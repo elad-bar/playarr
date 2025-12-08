@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import StopIcon from '@mui/icons-material/Stop';
 import axiosInstance from '../../config/axios';
 import { API_ENDPOINTS } from '../../config/api';
 import { intervalToDuration, formatDuration } from 'date-fns';
@@ -133,6 +134,9 @@ const JobCard = ({ job, onTrigger, engineReachable }) => {
     const [triggering, setTriggering] = useState(false);
     const [triggerError, setTriggerError] = useState(null);
     const [triggerSuccess, setTriggerSuccess] = useState(false);
+    const [aborting, setAborting] = useState(false);
+    const [abortError, setAbortError] = useState(null);
+    const [abortSuccess, setAbortSuccess] = useState(false);
 
     /**
      * Handle job trigger
@@ -169,6 +173,41 @@ const JobCard = ({ job, onTrigger, engineReachable }) => {
         }
     };
 
+    /**
+     * Handle job abort
+     */
+    const handleAbort = async () => {
+        if (!engineReachable) {
+            setAbortError('Engine API is not reachable');
+            return;
+        }
+
+        setAborting(true);
+        setAbortError(null);
+        setAbortSuccess(false);
+
+        try {
+            await axiosInstance.post(API_ENDPOINTS.abortJob(job.name));
+            setAbortSuccess(true);
+            setTimeout(() => {
+                setAbortSuccess(false);
+            }, 3000);
+            // Refresh jobs list after a short delay to show updated status
+            if (onTrigger) {
+                setTimeout(() => {
+                    onTrigger();
+                }, 1000);
+            }
+        } catch (err) {
+            console.error('Error aborting job:', err);
+            const errorMessage = err.response?.data?.error || err.message || 'Failed to abort job';
+            setAbortError(errorMessage);
+        } finally {
+            setAborting(false);
+        }
+    };
+
+    const isRunning = job.status === 'running';
     const manualJob = isManualJob(job);
 
     return (
@@ -189,7 +228,30 @@ const JobCard = ({ job, onTrigger, engineReachable }) => {
                     <Typography variant="h6" sx={{ flex: 1 }}>
                         {job.name}
                     </Typography>
-                    {manualJob && (
+                    {/* Show abort button if job is running */}
+                    {isRunning && (
+                        <Tooltip title="Abort running job">
+                            <IconButton
+                                onClick={handleAbort}
+                                disabled={aborting || !engineReachable}
+                                color="error"
+                                size="small"
+                                sx={{
+                                    '&:hover': {
+                                        backgroundColor: 'error.light',
+                                    },
+                                }}
+                            >
+                                {aborting ? (
+                                    <CircularProgress size={20} />
+                                ) : (
+                                    <StopIcon />
+                                )}
+                            </IconButton>
+                        </Tooltip>
+                    )}
+                    {/* Show trigger button for manual jobs when not running */}
+                    {manualJob && !isRunning && (
                         <Tooltip title="Trigger job manually">
                             <IconButton
                                 onClick={handleTrigger}
@@ -216,9 +278,19 @@ const JobCard = ({ job, onTrigger, engineReachable }) => {
                         Job triggered successfully
                     </Alert>
                 )}
+                {abortSuccess && (
+                    <Alert severity="info" sx={{ mb: 1, py: 0.5 }}>
+                        Job abort signal sent
+                    </Alert>
+                )}
                 {triggerError && (
                     <Alert severity="error" sx={{ mb: 1, py: 0.5 }} onClose={() => setTriggerError(null)}>
                         {triggerError}
+                    </Alert>
+                )}
+                {abortError && (
+                    <Alert severity="error" sx={{ mb: 1, py: 0.5 }} onClose={() => setAbortError(null)}>
+                        {abortError}
                     </Alert>
                 )}
                 <Divider sx={{ mb: 2 }} />

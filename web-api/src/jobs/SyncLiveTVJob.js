@@ -19,12 +19,31 @@ export class SyncLiveTVJob {
   }
 
   /**
+   * Check if job execution should be cancelled
+   * @private
+   * @param {AbortSignal} [abortSignal] - AbortSignal to check
+   * @throws {Error} If job is aborted
+   */
+  _checkCancellation(abortSignal) {
+    if (abortSignal && abortSignal.aborted) {
+      const error = new Error('SyncLiveTVJob was cancelled');
+      error.name = 'AbortError';
+      error.cancelled = true;
+      throw error;
+    }
+  }
+
+  /**
    * Execute the job
+   * @param {AbortSignal} [abortSignal] - AbortSignal for cancellation
    * @returns {Promise<Object>} Job execution result
    */
-  async execute() {
+  async execute(abortSignal) {
     try {
       this.logger.info('Starting Live TV sync job...');
+      
+      // Check for cancellation after starting
+      this._checkCancellation(abortSignal);
       
       // Get active providers
       const allProviders = await this._iptvProviderManager.findByQuery({
@@ -52,13 +71,23 @@ export class SyncLiveTVJob {
         };
       }
       
+      // Check for cancellation before calling syncProviders
+      this._checkCancellation(abortSignal);
+      
       // Sync Live TV for enabled providers
       const result = await this._liveTVProcessingManager.syncProviders(providers);
       
       this.logger.info(`Live TV sync completed: ${result.providers_processed} provider(s) processed`);
       return result;
     } catch (error) {
-      this.logger.error(`Live TV sync job failed: ${error.message}`);
+      // Check if error is due to cancellation
+      if (error.cancelled || error.name === 'AbortError') {
+        this.logger.info(`Live TV sync job cancelled: ${error.message}`);
+        // Note: This job doesn't extend BaseJob, so we can't use setJobStatus
+        // The EngineScheduler will handle status update
+      } else {
+        this.logger.error(`Live TV sync job failed: ${error.message}`);
+      }
       throw error;
     }
   }
