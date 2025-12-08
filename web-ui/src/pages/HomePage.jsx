@@ -27,18 +27,27 @@ import {
     Star as StarIcon,
 } from '@mui/icons-material';
 import {
-    BarChart,
-    Bar,
-    PieChart,
-    Pie,
-    Cell,
-    XAxis,
-    YAxis,
-    CartesianGrid,
+    Chart as ChartJS,
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    ArcElement,
+    Title,
     Tooltip,
     Legend,
-    ResponsiveContainer,
-} from 'recharts';
+} from 'chart.js';
+import { Bar, Doughnut } from 'react-chartjs-2';
+
+// Register Chart.js components
+ChartJS.register(
+    CategoryScale,
+    LinearScale,
+    BarElement,
+    ArcElement,
+    Title,
+    Tooltip,
+    Legend
+);
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
@@ -49,6 +58,150 @@ const formatNumber = (num) => {
     if (num === null || num === undefined) return '0';
     return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(num);
 };
+
+/**
+ * Get Chart.js options for bar charts with Material-UI theme integration
+ */
+const getBarChartOptions = (theme, labelKey, stacked = false, horizontal = false) => ({
+    indexAxis: horizontal ? 'y' : 'x',
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+        legend: {
+            display: true,
+            position: 'top',
+            labels: {
+                color: theme.palette.text.primary,
+                usePointStyle: true,
+            },
+        },
+        tooltip: {
+            callbacks: {
+                label: (context) => {
+                    const value = horizontal ? context.parsed.x : context.parsed.y;
+                    return `${context.dataset.label || ''}: ${formatNumber(value)}`;
+                },
+            },
+        },
+    },
+    scales: {
+        x: {
+            stacked: horizontal ? stacked : false,
+            ticks: {
+                color: theme.palette.text.secondary,
+                ...(horizontal ? {} : { maxRotation: -45, minRotation: -45 }),
+            },
+            grid: {
+                color: theme.palette.mode === 'dark' 
+                    ? 'rgba(255, 255, 255, 0.1)' 
+                    : 'rgba(0, 0, 0, 0.1)',
+                drawBorder: false,
+            },
+            beginAtZero: horizontal ? true : undefined,
+        },
+        y: {
+            stacked: horizontal ? false : stacked,
+            ticks: {
+                color: theme.palette.text.secondary,
+            },
+            grid: {
+                color: theme.palette.mode === 'dark' 
+                    ? 'rgba(255, 255, 255, 0.1)' 
+                    : 'rgba(0, 0, 0, 0.1)',
+                drawBorder: false,
+            },
+            beginAtZero: horizontal ? undefined : true,
+        },
+    },
+});
+
+/**
+ * Transform Recharts bar chart data format to Chart.js format
+ * Input: [{ labelKey: 'label1', value: 10 }, ...]
+ * Output: { labels: ['label1', ...], datasets: [{ data: [10, ...] }] }
+ */
+const transformBarChartData = (data, labelKey, valueKey, color, label = '') => {
+    const labels = data.map(item => item[labelKey]);
+    const values = data.map(item => item[valueKey]);
+    
+    return {
+        labels,
+        datasets: [{
+            label: label || valueKey,
+            data: values,
+            backgroundColor: color,
+        }],
+    };
+};
+
+/**
+ * Transform stacked bar chart data format to Chart.js format
+ * Input: [{ labelKey: 'label1', success: 10, failure: 5 }, ...]
+ * Output: { labels: ['label1', ...], datasets: [{ label: 'Success', data: [10, ...] }, { label: 'Failure', data: [5, ...] }] }
+ */
+const transformStackedBarChartData = (data, labelKey, datasets) => {
+    const labels = data.map(item => item[labelKey]);
+    
+    const chartDatasets = datasets.map(dataset => ({
+        label: dataset.label,
+        data: data.map(item => item[dataset.key]),
+        backgroundColor: dataset.color,
+    }));
+    
+    return {
+        labels,
+        datasets: chartDatasets,
+    };
+};
+
+/**
+ * Get Chart.js options for doughnut/pie charts with Material-UI theme integration
+ */
+const getDoughnutChartOptions = (theme) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+        legend: {
+            display: true,
+            position: 'right',
+            labels: {
+                color: theme.palette.text.primary,
+                usePointStyle: true,
+                padding: 15,
+                generateLabels: (chart) => {
+                    const data = chart.data;
+                    if (data.labels.length && data.datasets.length) {
+                        return data.labels.map((label, i) => {
+                            const dataset = data.datasets[0];
+                            const value = dataset.data[i];
+                            const total = dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(0);
+                            
+                            return {
+                                text: `${label}: ${percentage}%`,
+                                fillStyle: dataset.backgroundColor[i],
+                                hidden: false,
+                                index: i,
+                            };
+                        });
+                    }
+                    return [];
+                },
+            },
+        },
+        tooltip: {
+            callbacks: {
+                label: (context) => {
+                    const label = context.label || '';
+                    const value = context.parsed || 0;
+                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                    const percentage = ((value / total) * 100).toFixed(0);
+                    return `${label}: ${formatNumber(value)} (${percentage}%)`;
+                },
+            },
+        },
+    },
+});
 
 /**
  * Home page component displaying Prometheus metrics dashboard
@@ -473,25 +626,18 @@ const HomePage = () => {
                 <Card elevation={3} sx={{ mb: 3 }}>
                     <CardHeader title="Error Breakdown" />
                     <CardContent>
-                        <ResponsiveContainer width="100%" height={300}>
-                            <PieChart>
-                                <Pie
-                                    data={errorChartData}
-                                    cx="50%"
-                                    cy="50%"
-                                    labelLine={false}
-                                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                                    outerRadius={80}
-                                    fill="#8884d8"
-                                    dataKey="value"
-                                >
-                                    {errorChartData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip formatter={(value) => formatNumber(value)} />
-                            </PieChart>
-                        </ResponsiveContainer>
+                        <Box sx={{ height: 300 }}>
+                            <Doughnut
+                                data={{
+                                    labels: errorChartData.map(item => item.name),
+                                    datasets: [{
+                                        data: errorChartData.map(item => item.value),
+                                        backgroundColor: errorChartData.map((_, index) => COLORS[index % COLORS.length]),
+                                    }],
+                                }}
+                                options={getDoughnutChartOptions(theme)}
+                            />
+                        </Box>
                     </CardContent>
                 </Card>
             )}
@@ -583,17 +729,19 @@ const HomePage = () => {
                         <Card elevation={3} sx={{ height: '100%' }}>
                             <CardHeader title="Job Executions" />
                             <CardContent>
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={jobExecutionsChartData}>
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="jobType" angle={-45} textAnchor="end" height={100} />
-                                        <YAxis />
-                                        <Tooltip formatter={(value) => formatNumber(value)} />
-                                        <Legend />
-                                        <Bar dataKey="success" stackId="a" fill="#00C49F" name="Success" />
-                                        <Bar dataKey="failure" stackId="a" fill="#FF8042" name="Failure" />
-                                    </BarChart>
-                                </ResponsiveContainer>
+                                <Box sx={{ height: 300 }}>
+                                    <Bar
+                                        data={transformStackedBarChartData(
+                                            jobExecutionsChartData,
+                                            'jobType',
+                                            [
+                                                { key: 'success', label: 'Success', color: '#4caf50' },
+                                                { key: 'failure', label: 'Failure', color: '#f44336' },
+                                            ]
+                                        )}
+                                        options={getBarChartOptions(theme, 'jobType', false, true)}
+                                    />
+                                </Box>
                             </CardContent>
                         </Card>
                     </Grid>
@@ -607,16 +755,18 @@ const HomePage = () => {
                         <CardHeader title="Stream Requests by User" />
                         <CardContent>
                             {streamRequestsChartData.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={streamRequestsChartData}>
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="user" angle={-45} textAnchor="end" height={100} />
-                                        <YAxis />
-                                        <Tooltip formatter={(value) => formatNumber(value)} />
-                                        <Legend />
-                                        <Bar dataKey="value" fill="#0088FE" name="Requests" />
-                                    </BarChart>
-                                </ResponsiveContainer>
+                                <Box sx={{ height: 300 }}>
+                                    <Bar
+                                        data={transformBarChartData(
+                                            streamRequestsChartData,
+                                            'user',
+                                            'value',
+                                            '#0088FE',
+                                            'Requests'
+                                        )}
+                                        options={getBarChartOptions(theme, 'user', false)}
+                                    />
+                                </Box>
                             ) : (
                                 <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 300 }}>
                                     <Typography variant="body2" color="text.secondary">
@@ -638,16 +788,18 @@ const HomePage = () => {
                         />
                         <CardContent>
                             {bestSourceSelectionsChartData.length > 0 ? (
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={bestSourceSelectionsChartData}>
-                                        <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="providerId" angle={-45} textAnchor="end" height={100} />
-                                        <YAxis />
-                                        <Tooltip formatter={(value) => formatNumber(value)} />
-                                        <Legend />
-                                        <Bar dataKey="value" fill="#00C49F" name="Selections" />
-                                    </BarChart>
-                                </ResponsiveContainer>
+                                <Box sx={{ height: 300 }}>
+                                    <Bar
+                                        data={transformBarChartData(
+                                            bestSourceSelectionsChartData,
+                                            'providerId',
+                                            'value',
+                                            '#00C49F',
+                                            'Selections'
+                                        )}
+                                        options={getBarChartOptions(theme, 'providerId', false)}
+                                    />
+                                </Box>
                             ) : (
                                 <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 300 }}>
                                     <Typography variant="body2" color="text.secondary">
