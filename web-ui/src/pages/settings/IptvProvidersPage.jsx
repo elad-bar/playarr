@@ -7,12 +7,11 @@ import {
   Typography,
   CircularProgress,
   Alert,
-  Dialog,
-  DialogTitle,
-  DialogContent,
   Button,
   Chip,
   useTheme,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import {
   fetchIPTVProviders,
@@ -20,12 +19,15 @@ import {
   getProviderTypeColor,
   getMediaTypeLabel,
   getMediaTypeColors,
+  fetchProviderCounts,
 } from '../../components/settings/iptv/utils';
-import ProviderWizard from '../../components/settings/iptv/ProviderWizard';
+import ProviderEditorDialog from '../../components/settings/iptv/ProviderEditorDialog';
+import MediaTypeDialog from '../../components/settings/iptv/MediaTypeDialog';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
-import CloseIcon from '@mui/icons-material/Close';
+import axiosInstance from '../../config/axios';
+import { API_ENDPOINTS } from '../../config/api';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 
@@ -37,8 +39,9 @@ function SettingsIPTVProviders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [wizardKey, setWizardKey] = useState(0); // Force complete remount on each open
+  const [editorDialogOpen, setEditorDialogOpen] = useState(false);
+  const [mediaTypeDialogOpen, setMediaTypeDialogOpen] = useState(false);
+  const [providerCounts, setProviderCounts] = useState({}); // { providerId: { movies, tvshows, live } }
 
   const loadProviders = useCallback(async () => {
     try {
@@ -64,27 +67,72 @@ function SettingsIPTVProviders() {
     loadProviders();
   }, [loadProviders]);
 
+  // Load counts for all providers
+  useEffect(() => {
+    const loadCounts = async () => {
+      if (providers.length === 0) return;
+      
+      const countsPromises = providers.map(async (provider) => {
+        try {
+          const counts = await fetchProviderCounts(provider.id);
+          return { providerId: provider.id, counts };
+        } catch (error) {
+          console.error(`Error loading counts for ${provider.id}:`, error);
+          return { providerId: provider.id, counts: { movies: 0, tvshows: 0, live: 0 } };
+        }
+      });
+
+      const results = await Promise.all(countsPromises);
+      const countsMap = {};
+      results.forEach(({ providerId, counts }) => {
+        countsMap[providerId] = counts;
+      });
+      setProviderCounts(countsMap);
+    };
+
+    loadCounts();
+  }, [providers]);
+
   const handleEdit = (provider) => {
     setSelectedProvider(provider);
     setIsNewProvider(false);
-    setWizardKey(prev => prev + 1); // Force remount
-    setDialogOpen(true);
+    setEditorDialogOpen(true);
   };
 
   const handleAdd = (providerType = null) => {
     setSelectedProvider(providerType ? { type: providerType } : null);
     setIsNewProvider(true);
-    setWizardKey(prev => prev + 1); // Force remount
-    setDialogOpen(true);
+    setEditorDialogOpen(true);
   };
 
-  const handleCloseDialog = () => {
-    setDialogOpen(false);
-    // Don't reset provider/key immediately - let Dialog close animation complete
+  const handleCloseEditorDialog = () => {
+    setEditorDialogOpen(false);
     setTimeout(() => {
       setSelectedProvider(null);
       setIsNewProvider(false);
     }, 100);
+  };
+
+  const handleOpenMediaTypeDialog = (provider) => {
+    setSelectedProvider(provider);
+    setMediaTypeDialogOpen(true);
+  };
+
+  const handleCloseMediaTypeDialog = () => {
+    setMediaTypeDialogOpen(false);
+    loadProviders(); // Reload to get updated sync_media_types
+  };
+
+  const handleToggleEnabled = async (provider, enabled) => {
+    try {
+      await axiosInstance.put(`${API_ENDPOINTS.providers}/${provider.id}/enabled`, { enabled });
+      setSuccess(`Provider ${enabled ? 'enabled' : 'disabled'} successfully`);
+      setTimeout(() => setSuccess(null), 3000);
+      loadProviders();
+    } catch (error) {
+      console.error('Error toggling provider enabled state:', error);
+      setError(`Failed to ${enabled ? 'enable' : 'disable'} provider`);
+    }
   };
 
   const handleDelete = async (providerId) => {
@@ -93,7 +141,7 @@ function SettingsIPTVProviders() {
       setSuccess('Provider deleted successfully');
       setTimeout(() => setSuccess(null), 3000);
       if (selectedProvider?.id === providerId) {
-        handleCloseDialog();
+        handleCloseEditorDialog();
       }
       loadProviders();
     } catch (error) {
@@ -112,26 +160,34 @@ function SettingsIPTVProviders() {
 
       setSelectedProvider(savedProvider);
       setIsNewProvider(false);
+      handleCloseEditorDialog();
     } catch (error) {
       console.error('Error saving provider:', error);
       setError('Failed to save provider');
     }
   };
 
-  const handleSaveAndClose = async (savedProvider) => {
+  const handleSaveAndManageMediaTypes = async (savedProvider) => {
     try {
-      setSuccess(isNewProvider ? 'Provider added successfully' : 'Provider updated successfully');
+      setSuccess('Provider added successfully');
       setTimeout(() => setSuccess(null), 3000);
 
-      // Reload providers to get fresh data (this will also sort them)
-      loadProviders();
+      // Reload providers to get fresh data
+      await loadProviders();
 
-      // Close dialog
-      handleCloseDialog();
+      // Close editor dialog and open media type dialog
+      handleCloseEditorDialog();
+      setSelectedProvider(savedProvider);
+      setMediaTypeDialogOpen(true);
     } catch (error) {
       console.error('Error saving provider:', error);
       setError('Failed to save provider');
     }
+  };
+
+  const handleMediaTypeDialogSave = () => {
+    handleCloseMediaTypeDialog();
+    loadProviders(); // Reload to refresh counts
   };
 
   if (loading) {
@@ -232,12 +288,17 @@ function SettingsIPTVProviders() {
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                         {Object.entries(provider.sync_media_types).map(([mediaType, enabled]) => {
                           const colors = getMediaTypeColors(mediaType, theme);
+                          const counts = providerCounts[provider.id] || { movies: 0, tvshows: 0, live: 0 };
+                          const count = counts[mediaType] || 0;
+                          const showCount = enabled || count > 0;
+                          
                           return (
                             <Chip
                               key={mediaType}
-                              label={getMediaTypeLabel(mediaType)}
+                              label={showCount ? `${getMediaTypeLabel(mediaType)} (${count.toLocaleString()})` : getMediaTypeLabel(mediaType)}
                               size="small"
                               variant={enabled ? 'filled' : 'outlined'}
+                              onClick={() => handleOpenMediaTypeDialog(provider)}
                               sx={{
                                 backgroundColor: enabled ? colors.main : 'transparent',
                                 color: enabled ? colors.contrastText : colors.main,
@@ -246,6 +307,10 @@ function SettingsIPTVProviders() {
                                 borderStyle: 'solid',
                                 fontSize: '0.7rem',
                                 height: '24px',
+                                cursor: 'pointer',
+                                '&:hover': {
+                                  opacity: 0.8,
+                                },
                               }}
                             />
                           );
@@ -278,7 +343,7 @@ function SettingsIPTVProviders() {
                       
                       return (
                         <Chip
-                          label={`${daysLeft} days left`}
+                          label={`${daysLeft}d`}
                           size="small"
                           color={isWarning ? 'warning' : 'default'}
                           sx={{
@@ -292,21 +357,39 @@ function SettingsIPTVProviders() {
                   })()}
                   
                   {/* Action Buttons */}
-                  <Box sx={{ display: 'flex', gap: 0.5 }}>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleEdit(provider)}
-                      color="primary"
-                    >
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={() => handleDelete(provider.id)}
-                      color="error"
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                  <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                    <Tooltip title={provider.enabled ? 'Disable provider' : 'Enable provider'}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={provider.enabled !== false}
+                            onChange={(e) => handleToggleEnabled(provider, e.target.checked)}
+                            size="small"
+                            color="primary"
+                          />
+                        }
+                        label=""
+                        sx={{ m: 0, mr: 0.5 }}
+                      />
+                    </Tooltip>
+                    <Tooltip title="Edit Provider Details">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleEdit(provider)}
+                        color="primary"
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="Delete Provider">
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDelete(provider.id)}
+                        color="error"
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   </Box>
                 </Box>
               </Card>
@@ -315,57 +398,25 @@ function SettingsIPTVProviders() {
         </Grid>
       </Box>
 
-      {/* Provider Form Dialog */}
-      <Dialog
-        open={dialogOpen}
-        onClose={handleCloseDialog}
-        maxWidth="lg"
-        fullWidth
-        fullScreen
-        TransitionProps={{ timeout: 0 }}
-        sx={{
-          // Disable all transitions to prevent ResizeObserver loops
-          '& .MuiDialog-container': {
-            transition: 'none !important',
-          },
-          '& .MuiDialog-paper': {
-            transition: 'none !important',
-            animation: 'none !important',
-          },
-        }}
-      >
-        <DialogTitle sx={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center',
-          pb: 2,
-          borderBottom: 1,
-          borderColor: 'divider',
-        }}>
-          <Typography variant="h5" component="span" fontWeight={600}>
-            {isNewProvider ? 'Add New Provider' : `Edit Provider: ${selectedProvider?.id}`}
-          </Typography>
-          <Tooltip title="Close">
-            <IconButton
-              onClick={handleCloseDialog}
-              size="small"
-            >
-              <CloseIcon />
-            </IconButton>
-          </Tooltip>
-        </DialogTitle>
-        <DialogContent sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-          {dialogOpen && (
-            <ProviderWizard
-              key={`wizard-${wizardKey}-${selectedProvider?.id || 'new'}`}
-              provider={selectedProvider}
-              onSave={handleSave}
-              onCancel={handleCloseDialog}
-              onSaveAndClose={handleSaveAndClose}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Provider Editor Dialog */}
+      <ProviderEditorDialog
+        open={editorDialogOpen}
+        provider={selectedProvider}
+        onClose={handleCloseEditorDialog}
+        onSave={handleSave}
+        onSaveAndManageMediaTypes={handleSaveAndManageMediaTypes}
+      />
+
+      {/* Media Type Dialog */}
+      {selectedProvider && selectedProvider.id && (
+        <MediaTypeDialog
+          open={mediaTypeDialogOpen}
+          provider={selectedProvider}
+          onClose={handleCloseMediaTypeDialog}
+          onSave={handleMediaTypeDialogSave}
+        />
+      )}
+
     </Box>
   );
 }

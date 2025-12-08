@@ -219,9 +219,24 @@ const SettingsUsers = () => {
                         ? new Date(user.created_at).toLocaleDateString()
                         : '-'}
                     </Typography>
+                  </CardContent>
 
+                  {/* Footer with Action Buttons */}
+                  <Box sx={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 0.5, 
+                    p: 1.5, 
+                    borderTop: '1px solid', 
+                    borderColor: 'divider',
+                    backgroundColor: 'action.hover'
+                  }}>
+                    {/* Left side - empty for now, can be used for future features */}
+                    <Box />
+                    
                     {/* Action Buttons */}
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 0.5, mt: 2, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                    <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
                       <Tooltip title={isCurrentUser ? 'Cannot edit your own account' : 'Edit User'}>
                         <span>
                           <IconButton
@@ -259,7 +274,7 @@ const SettingsUsers = () => {
                         </span>
                       </Tooltip>
                     </Box>
-                  </CardContent>
+                  </Box>
                 </Card>
               </Grid>
             );

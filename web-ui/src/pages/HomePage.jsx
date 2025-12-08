@@ -26,6 +26,7 @@ import {
     RefreshOutlined as RefreshIcon,
     StarOutlined as StarIcon,
 } from '@mui/icons-material';
+import { getMediaTypeColors } from '../components/settings/iptv/utils';
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -36,7 +37,7 @@ import {
     Tooltip,
     Legend,
 } from 'chart.js';
-import { Bar, Doughnut } from 'react-chartjs-2';
+import { Bar } from 'react-chartjs-2';
 
 // Register Chart.js components
 ChartJS.register(
@@ -48,8 +49,6 @@ ChartJS.register(
     Tooltip,
     Legend
 );
-
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
 /**
  * Format number with commas
@@ -153,55 +152,6 @@ const transformStackedBarChartData = (data, labelKey, datasets) => {
         datasets: chartDatasets,
     };
 };
-
-/**
- * Get Chart.js options for doughnut/pie charts with Material-UI theme integration
- */
-const getDoughnutChartOptions = (theme) => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-        legend: {
-            display: true,
-            position: 'right',
-            labels: {
-                color: theme.palette.text.primary,
-                usePointStyle: true,
-                padding: 15,
-                generateLabels: (chart) => {
-                    const data = chart.data;
-                    if (data.labels.length && data.datasets.length) {
-                        return data.labels.map((label, i) => {
-                            const dataset = data.datasets[0];
-                            const value = dataset.data[i];
-                            const total = dataset.data.reduce((a, b) => a + b, 0);
-                            const percentage = ((value / total) * 100).toFixed(0);
-                            
-                            return {
-                                text: `${label}: ${percentage}%`,
-                                fillStyle: dataset.backgroundColor[i],
-                                hidden: false,
-                                index: i,
-                            };
-                        });
-                    }
-                    return [];
-                },
-            },
-        },
-        tooltip: {
-            callbacks: {
-                label: (context) => {
-                    const label = context.label || '';
-                    const value = context.parsed || 0;
-                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                    const percentage = ((value / total) * 100).toFixed(0);
-                    return `${label}: ${formatNumber(value)} (${percentage}%)`;
-                },
-            },
-        },
-    },
-});
 
 /**
  * Home page component displaying Prometheus metrics dashboard
@@ -354,25 +304,12 @@ const HomePage = () => {
         .sort((a, b) => b.value - a.value)
         .slice(0, 10); // Top 10 users
 
-    // Error Breakdown data
-    const errorData = getMetricValuesWithLabels('playarr_managed_errors_total');
-    const errorsByType = {};
-    errorData.forEach(item => {
-        const errorType = item.error_type || 'unknown';
-        if (!errorsByType[errorType]) {
-            errorsByType[errorType] = 0;
-        }
-        errorsByType[errorType] += item.value;
-    });
-    const errorChartData = Object.entries(errorsByType)
-        .map(([errorType, value]) => ({ name: errorType, value }))
-        .sort((a, b) => b.value - a.value);
-
     // Provider Statistics
     const providerTitlesData = getMetricValuesWithLabels('playarr_provider_titles_count');
     const providerChannelsData = getMetricValuesWithLabels('playarr_channels_count');
     const providerActiveData = getMetricValuesWithLabels('playarr_provider_active');
     const providerExpirationDaysData = getMetricValuesWithLabels('playarr_provider_expiration_days');
+    const ignoredTitlesData = getMetricValuesWithLabels('playarr_ignored_provider_titles_count');
     
     const providerStats = {};
     
@@ -386,7 +323,7 @@ const HomePage = () => {
                 providerId, 
                 movies: 0, 
                 shows: 0, 
-                channels: 0, 
+                channels: 0,
                 active: false,
                 expirationDays: null
             };
@@ -399,6 +336,28 @@ const HomePage = () => {
         }
     });
     
+    // Aggregate ignored provider titles by media type (movies and tvshows) - separate structure for chart
+    const ignoredStats = {};
+    ignoredTitlesData.forEach(item => {
+        const providerId = item.provider_id || 'unknown';
+        const mediaType = item.media_type || 'unknown';
+        
+        if (!ignoredStats[providerId]) {
+            ignoredStats[providerId] = { 
+                providerId, 
+                ignoredMovies: 0, 
+                ignoredShows: 0
+            };
+        }
+        
+        // Split ignored counts by media type
+        if (mediaType === 'movies') {
+            ignoredStats[providerId].ignoredMovies += item.value;
+        } else if (mediaType === 'tvshows') {
+            ignoredStats[providerId].ignoredShows += item.value;
+        }
+    });
+    
     // Aggregate provider channels
     providerChannelsData.forEach(item => {
         const providerId = item.provider_id || 'unknown';
@@ -407,7 +366,7 @@ const HomePage = () => {
                 providerId, 
                 movies: 0, 
                 shows: 0, 
-                channels: 0, 
+                channels: 0,
                 active: false,
                 expirationDays: null
             };
@@ -423,7 +382,7 @@ const HomePage = () => {
                 providerId, 
                 movies: 0, 
                 shows: 0, 
-                channels: 0, 
+                channels: 0,
                 active: false,
                 expirationDays: null
             };
@@ -439,7 +398,7 @@ const HomePage = () => {
                 providerId, 
                 movies: 0, 
                 shows: 0, 
-                channels: 0, 
+                channels: 0,
                 active: false,
                 expirationDays: null
             };
@@ -450,10 +409,18 @@ const HomePage = () => {
     });
     
     const providerStatsArray = Object.values(providerStats).sort((a, b) => {
-        const totalA = a.movies + a.shows;
-        const totalB = b.movies + b.shows;
+        const totalA = a.movies + a.shows + a.channels;
+        const totalB = b.movies + b.shows + b.channels;
         return totalB - totalA;
     });
+    
+    const ignoredStatsArray = Object.values(ignoredStats)
+        .filter(stat => stat.ignoredMovies > 0 || stat.ignoredShows > 0)
+        .sort((a, b) => {
+            const totalA = a.ignoredMovies + a.ignoredShows;
+            const totalB = b.ignoredMovies + b.ignoredShows;
+            return totalB - totalA;
+        });
 
     // Best Source Selections data
     const bestSourceSelectionsData = getMetricValuesWithLabels('playarr_best_source_selections_total');
@@ -621,42 +588,18 @@ const HomePage = () => {
             </Grid>
 
 
-            {/* Error Breakdown */}
-            {errorChartData.length > 0 && (
-                <Card elevation={3} sx={{ mb: 3 }}>
-                    <CardHeader title="Error Breakdown" />
-                    <CardContent>
-                        <Box sx={{ height: 300 }}>
-                            <Doughnut
-                                data={{
-                                    labels: errorChartData.map(item => item.name),
-                                    datasets: [{
-                                        data: errorChartData.map(item => item.value),
-                                        backgroundColor: errorChartData.map((_, index) => COLORS[index % COLORS.length]),
-                                    }],
-                                }}
-                                options={getDoughnutChartOptions(theme)}
-                            />
-                        </Box>
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* Provider Statistics Table and Job Executions Chart */}
+            {/* First Row: Providers, Provider Titles, Ignored Titles */}
             <Grid container spacing={3} sx={{ mb: 3 }}>
                 {providerStatsArray.length > 0 && (
-                    <Grid item xs={12} md={6}>
+                    <Grid item xs={12} md={4}>
                         <Card elevation={3} sx={{ height: '100%' }}>
-                            <CardHeader title="Provider Statistics" />
+                            <CardHeader title="Providers" />
                             <CardContent>
                                 <TableContainer>
                                     <Table>
                                         <TableHead>
                                             <TableRow>
                                                 <TableCell>Provider ID</TableCell>
-                                                <TableCell align="right">Movies</TableCell>
-                                                <TableCell align="right">Shows</TableCell>
-                                                <TableCell align="right">Channels</TableCell>
                                                 <TableCell align="right">Expiration Days</TableCell>
                                                 <TableCell align="center">Status</TableCell>
                                             </TableRow>
@@ -684,15 +627,6 @@ const HomePage = () => {
                                                     <TableRow key={provider.providerId}>
                                                         <TableCell component="th" scope="row">
                                                             {provider.providerId}
-                                                        </TableCell>
-                                                        <TableCell align="right">
-                                                            {formatNumber(provider.movies)}
-                                                        </TableCell>
-                                                        <TableCell align="right">
-                                                            {formatNumber(provider.shows)}
-                                                        </TableCell>
-                                                        <TableCell align="right">
-                                                            {formatNumber(provider.channels)}
                                                         </TableCell>
                                                         <TableCell align="right">
                                                             {expirationDays !== null && expirationDays !== undefined ? (
@@ -724,8 +658,57 @@ const HomePage = () => {
                         </Card>
                     </Grid>
                 )}
+                {providerStatsArray.length > 0 && (
+                    <Grid item xs={12} md={4}>
+                        <Card elevation={3} sx={{ height: '100%' }}>
+                            <CardHeader title="Provider Titles" />
+                            <CardContent>
+                                <Box sx={{ height: 300 }}>
+                                    <Bar
+                                        data={transformStackedBarChartData(
+                                            providerStatsArray,
+                                            'providerId',
+                                            [
+                                                { key: 'movies', label: 'Movies', color: getMediaTypeColors('movies', theme).main },
+                                                { key: 'shows', label: 'Shows', color: getMediaTypeColors('tvshows', theme).main },
+                                                { key: 'channels', label: 'Channels', color: getMediaTypeColors('live', theme).main },
+                                            ]
+                                        )}
+                                        options={getBarChartOptions(theme, 'providerId', false, true)}
+                                    />
+                                </Box>
+                            </CardContent>
+                        </Card>
+                    </Grid>
+                )}
+                {ignoredStatsArray.length > 0 && (
+                    <Grid item xs={12} md={4}>
+                        <Card elevation={3} sx={{ height: '100%' }}>
+                            <CardHeader title="Ignored Provider Titles" />
+                            <CardContent>
+                                <Box sx={{ height: 300 }}>
+                                    <Bar
+                                        data={transformStackedBarChartData(
+                                            ignoredStatsArray,
+                                            'providerId',
+                                            [
+                                                { key: 'ignoredMovies', label: 'Ignored Movies', color: getMediaTypeColors('movies', theme).main },
+                                                { key: 'ignoredShows', label: 'Ignored Shows', color: getMediaTypeColors('tvshows', theme).main },
+                                            ]
+                                        )}
+                                        options={getBarChartOptions(theme, 'providerId', false, true)}
+                                    />
+                                </Box>
+                            </CardContent>
+                        </Card>
+                    </Grid>
+                )}
+            </Grid>
+
+            {/* Second Row: Job Executions, Stream Requests, Best Source Selections */}
+            <Grid container spacing={3} sx={{ mb: 3 }}>
                 {jobExecutionsChartData.length > 0 && (
-                    <Grid item xs={12} md={6}>
+                    <Grid item xs={12} md={4}>
                         <Card elevation={3} sx={{ height: '100%' }}>
                             <CardHeader title="Job Executions" />
                             <CardContent>
@@ -746,11 +729,7 @@ const HomePage = () => {
                         </Card>
                     </Grid>
                 )}
-            </Grid>
-
-            {/* Stream Requests and Best Source Selections Charts */}
-            <Grid container spacing={3} sx={{ mb: 3 }}>
-                <Grid item xs={12} md={6}>
+                <Grid item xs={12} md={4}>
                     <Card elevation={3} sx={{ height: '100%' }}>
                         <CardHeader title="Stream Requests by User" />
                         <CardContent>
@@ -777,7 +756,7 @@ const HomePage = () => {
                         </CardContent>
                     </Card>
                 </Grid>
-                <Grid item xs={12} md={6}>
+                <Grid item xs={12} md={4}>
                     <Card elevation={3} sx={{ height: '100%' }}>
                         <CardHeader 
                             title="Best Source Selections by Provider"

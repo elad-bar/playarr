@@ -154,6 +154,21 @@ export const fetchIPTVProviderIgnoredTitles = async (providerId) => {
   return response.data;
 };
 
+/**
+ * Fetch provider counts (movies, tvshows, live) from API
+ * @param {string} providerId - Provider ID
+ * @returns {Promise<{movies: number, tvshows: number, live: number}>} Provider counts
+ */
+export const fetchProviderCounts = async (providerId) => {
+  try {
+    const response = await axiosInstance.get(`${API_ENDPOINTS.providers}/${providerId}/counts`);
+    return response.data || { movies: 0, tvshows: 0, live: 0 };
+  } catch (error) {
+    console.error(`Error fetching counts for provider ${providerId}:`, error);
+    return { movies: 0, tvshows: 0, live: 0 };
+  }
+};
+
 export const fetchTMDBProviders = async () => {
   try {
     const response = await axiosInstance.get(`${API_ENDPOINTS.providers}/tmdb`);

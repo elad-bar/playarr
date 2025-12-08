@@ -21,6 +21,7 @@ import GeneralSettingsPage from './pages/settings/GeneralSettingsPage';
 import IptvProvidersPage from './pages/settings/IptvProvidersPage';
 import UsersSettingsPage from './pages/settings/UsersSettingsPage';
 import MetricsSettingsPage from './pages/settings/MetricsSettingsPage';
+import IgnoredTitlesPage from './pages/settings/IgnoredTitlesPage';
 import JobsPage from './pages/monitoring/JobsPage';
 import LogsPage from './pages/monitoring/LogsPage';
 import HomePage from './pages/HomePage';
@@ -305,6 +306,14 @@ const AppContent = () => {
                                     element={
                                         <PrivateRoute>
                                             <MetricsSettingsPage />
+                                        </PrivateRoute>
+                                    }
+                                />
+                                <Route
+                                    path="/settings/ignored-titles"
+                                    element={
+                                        <PrivateRoute>
+                                            <IgnoredTitlesPage />
                                         </PrivateRoute>
                                     }
                                 />

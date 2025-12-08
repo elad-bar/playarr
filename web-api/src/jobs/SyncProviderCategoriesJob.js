@@ -71,14 +71,6 @@ export class SyncProviderCategoriesJob extends BaseJob {
           try {
             this.logger.debug(`[${providerId}] Processing provider categories`);
 
-            // Get sync_media_types from provider config
-            // Default to true for v1 providers (backward compatibility during migration)
-            const syncTypes = provider.sync_media_types || { 
-              movies: true,
-              tvshows: true,
-              live: true
-            };
-
             const result = {
               providerId,
               providerName: providerId,
@@ -86,32 +78,24 @@ export class SyncProviderCategoriesJob extends BaseJob {
               tvshows: 0
             };
 
-            // Fetch and sync categories for each enabled media type
-            const syncPromises = [];
+            // Fetch and sync ALL categories regardless of sync_media_types
+            // This allows users to configure categories separately from sync state
+            const syncPromises = [
+              this._syncCategoriesForType(providerId, 'movies')
+                .then(count => { result.movies = count; })
+                .catch(err => {
+                  this.logger.error(`[${providerId}] Error syncing movies categories: ${err.message}`);
+                  result.movies = 0;
+                }),
+              this._syncCategoriesForType(providerId, 'tvshows')
+                .then(count => { result.tvshows = count; })
+                .catch(err => {
+                  this.logger.error(`[${providerId}] Error syncing tvshows categories: ${err.message}`);
+                  result.tvshows = 0;
+                })
+            ];
 
-            if (syncTypes.movies) {
-              syncPromises.push(
-                this._syncCategoriesForType(providerId, 'movies')
-                  .then(count => { result.movies = count; })
-                  .catch(err => {
-                    this.logger.error(`[${providerId}] Error syncing movies categories: ${err.message}`);
-                    result.movies = 0;
-                  })
-              );
-            }
-
-            if (syncTypes.tvshows) {
-              syncPromises.push(
-                this._syncCategoriesForType(providerId, 'tvshows')
-                  .then(count => { result.tvshows = count; })
-                  .catch(err => {
-                    this.logger.error(`[${providerId}] Error syncing tvshows categories: ${err.message}`);
-                    result.tvshows = 0;
-                  })
-              );
-            }
-
-            // Wait for all enabled type syncs
+            // Wait for all category syncs
             await Promise.all(syncPromises);
 
             return result;

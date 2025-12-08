@@ -2,6 +2,7 @@ import { BaseManager } from '../BaseManager.js';
 import { formatNumber } from '../../utils/numberFormat.js';
 import { DataProvider } from '../../config/collections.js';
 import { NotFoundError, AppError } from '../../errors/AppError.js';
+import DebounceService from '../../services/debounce.js';
 
 /**
  * Providers Manager (Type D: Orchestration Manager)
@@ -41,6 +42,9 @@ class ProvidersManager extends BaseManager {
 
     // Function to trigger jobs (passed via constructor)
     this._triggerJob = triggerJob;
+
+    // Initialize debounce service
+    this._debounceService = new DebounceService(triggerJob);
   }
 
   /**
@@ -476,36 +480,14 @@ class ProvidersManager extends BaseManager {
 
     // Delegate domain operation to IPTVProviderManager
     const updatedProvider = await this._iptvProviderManager.updateProvider(providerId, providerData);
-    const shouldClean = (enabledChanged && !willBeEnabled) || mediaRemoved;
 
     // Orchestration: Reload provider configs in provider instances
     await this._reloadProviderConfigs();
 
-    // Orchestration: Check if credentials changed for job triggering
-    const credentialsChanged =
-      ('username' in providerData && providerData.username !== existingProvider.username) ||
-      ('password' in providerData && providerData.password !== existingProvider.password) ||
-      ('streams_urls' in providerData && JSON.stringify(providerData.streams_urls || []) !== JSON.stringify(existingProvider.streams_urls || []));
-
-    const jobsToTrigger = [];
-
-    if (credentialsChanged) {
-      jobsToTrigger.push('syncProviderDetails');
-    }
-
-    if (credentialsChanged || shouldClean || enabledChanged || vodAdded) {
-      const jobToTrigger = shouldClean ? 'cleanupUnwantedProviderTitles' : 'syncIPTVProviderTitles';
-
-      jobsToTrigger.push(jobToTrigger);
-    }
-
-    // Orchestration: Handle Live TV addition
-    if (liveAdded) {
-      // Trigger sync job to fetch channels
-      jobsToTrigger.push('syncLiveTV');
-    }
-
-    jobsToTrigger.forEach(job => this._triggerJobAsync(job));
+    // Orchestration: Record change in debounce service
+    // Debounce service will automatically trigger cleanup and provider details jobs after 1 minute
+    // These jobs will trigger sync jobs (existing behavior)
+    this._debounceService.recordChange(providerId);
 
     // Orchestration: Broadcast WebSocket event
     this._webSocketService.broadcastEvent('provider_changed', {
@@ -615,35 +597,13 @@ class ProvidersManager extends BaseManager {
       // Validate provider exists using IPTVProviderManager
       const providerData = await this._iptvProviderManager.getProvider(providerId);
 
-      // Get sync_media_types
-      // Default to true for v1 providers (backward compatibility during migration)
-      const syncTypes = providerData.sync_media_types || { 
-        movies: true,  // Default true for v1 providers
-        tvshows: true,
-        live: true
-      };
-
-      // Query categories from database only for enabled types (Movies and TV Shows only)
+      // Query ALL categories from database (Movies and TV Shows only)
       // NOTE: Live TV categories are NOT included - they are managed automatically
-      const queryPromises = [];
-
-      if (syncTypes.movies) {
-        queryPromises.push(
-          this._providerCategoryManager.getCategoriesByProvider(providerId, 'movies').catch(() => [])
-        );
-      } else {
-        queryPromises.push(Promise.resolve([]));
-      }
-
-      if (syncTypes.tvshows) {
-        queryPromises.push(
-          this._providerCategoryManager.getCategoriesByProvider(providerId, 'tvshows').catch(() => [])
-        );
-      } else {
-        queryPromises.push(Promise.resolve([]));
-      }
-
-      const [moviesCategories, tvshowsCategories] = await Promise.all(queryPromises);
+      // Return all categories regardless of sync_media_types to allow separate configuration
+      const [moviesCategories, tvshowsCategories] = await Promise.all([
+        this._providerCategoryManager.getCategoriesByProvider(providerId, 'movies').catch(() => []),
+        this._providerCategoryManager.getCategoriesByProvider(providerId, 'tvshows').catch(() => [])
+      ]);
 
       // DO NOT fetch live categories - they are not shown in provider settings
       // Live TV categories are extracted automatically from synced channels

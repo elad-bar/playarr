@@ -167,6 +167,15 @@ class MetricsService {
         }, item.count);
       }
 
+      // 1a. Ignored provider titles count per provider, per media type
+      const ignoredTitlesCounts = await providerTitlesManager.getIgnoredCountByProviderAndType();
+      for (const item of ignoredTitlesCounts) {
+        this.setGauge('ignored_provider_titles_count', {
+          provider_id: item.provider_id,
+          media_type: item.media_type
+        }, item.count);
+      }
+
       // 2. Main titles count per media type
       const mainTitlesCounts = await titlesManager.getCountByType();
       for (const item of mainTitlesCounts) {
@@ -249,6 +258,59 @@ class MetricsService {
     } catch (error) {
       logger.error('Error updating gauge metrics:', error);
       // Don't throw - metrics update failure shouldn't break the app
+    }
+  }
+
+  /**
+   * Get provider counts (movies, tvshows, live) from cached metrics
+   * @param {string} providerId - Provider ID
+   * @returns {Promise<{movies: number, tvshows: number, live: number}>} Provider counts by media type
+   */
+  async getProviderCounts(providerId) {
+    try {
+      const metrics = await this.getMetricsAsJSON();
+      
+      // Initialize counts
+      const counts = {
+        movies: 0,
+        tvshows: 0,
+        live: 0
+      };
+
+      // Get provider titles count (movies and tvshows)
+      const providerTitlesMetric = metrics.find(m => m.name === 'playarr_provider_titles_count');
+      if (providerTitlesMetric && providerTitlesMetric.values) {
+        for (const value of providerTitlesMetric.values) {
+          if (value.labels && value.labels.provider_id === providerId) {
+            const mediaType = value.labels.media_type;
+            if (mediaType === 'movies') {
+              counts.movies = value.value || 0;
+            } else if (mediaType === 'tvshows') {
+              counts.tvshows = value.value || 0;
+            }
+          }
+        }
+      }
+
+      // Get channels count (live TV)
+      const channelsMetric = metrics.find(m => m.name === 'playarr_channels_count');
+      if (channelsMetric && channelsMetric.values) {
+        for (const value of channelsMetric.values) {
+          if (value.labels && value.labels.provider_id === providerId) {
+            counts.live += value.value || 0;
+          }
+        }
+      }
+
+      return counts;
+    } catch (error) {
+      logger.error(`Error getting provider counts for ${providerId}:`, error);
+      // Return zero counts on error
+      return {
+        movies: 0,
+        tvshows: 0,
+        live: 0
+      };
     }
   }
 

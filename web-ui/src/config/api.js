@@ -52,6 +52,27 @@ export const API_ENDPOINTS = {
     providerStatus: (providerId) => `/iptv/providers/${providerId}/status`,
     providerIgnoredTitles: (providerId) => `/iptv/providers/${providerId}/ignored`,
 
+    // Provider Titles endpoints
+    providerTitlesIgnored: (filters = {}) => {
+        const params = new URLSearchParams();
+        if (filters.media_type) params.append('media_type', filters.media_type);
+        if (filters.issue_type) params.append('issue_type', filters.issue_type);
+        if (filters.provider_id) {
+            if (Array.isArray(filters.provider_id)) {
+                filters.provider_id.forEach(id => params.append('provider_id', id));
+            } else {
+                params.append('provider_id', filters.provider_id);
+            }
+        }
+        if (filters.search) params.append('search', filters.search);
+        if (filters.page) params.append('page', filters.page);
+        if (filters.per_page) params.append('per_page', filters.per_page);
+        return `/provider-titles/ignored${params.toString() ? `?${params.toString()}` : ''}`;
+    },
+    providerTitleIgnored: (id) => `/provider-titles/ignored/${id}`,
+    validateProviderTitleTMDB: (id) => `/provider-titles/ignored/${id}/validate-tmdb`,
+    updateProviderTitle: (id) => `/provider-titles/ignored/${id}`,
+
     // TMDB endpoints
     tmdb: {
         apiKey: `/tmdb/api-key`,

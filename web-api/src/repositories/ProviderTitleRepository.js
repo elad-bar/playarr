@@ -68,6 +68,11 @@ export class ProviderTitleRepository extends BaseRepository {
         key: { type: 1, tmdb_id: 1, ignored: 1 },
         options: {},
         description: 'Change detection queries (type + tmdb_id + ignored filter)'
+      },
+      {
+        key: { ignored: 1, type: 1, ignored_reason: 1 },
+        options: {},
+        description: 'Ignored titles page queries (filtering by ignored status, type, and reason)'
       }
     ];
   }

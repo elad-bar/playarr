@@ -238,6 +238,85 @@ class ProvidersRouter extends BaseRouter {
     });
 
     /**
+     * GET /api/iptv/providers/:provider_id/counts
+     * Get provider counts (movies, tvshows, live) from cached metrics
+     */
+    this.router.get('/:provider_id/counts', this.middleware.requireAuth, async (req, res) => {
+      try {
+        const { provider_id } = req.params;
+        const counts = await this._metricsService.getProviderCounts(provider_id);
+        return res.status(200).json(counts);
+      } catch (error) {
+        return this.handleError(res, error, 'Failed to get provider counts');
+      }
+    });
+
+    /**
+     * PUT /api/iptv/providers/:provider_id/enabled
+     * Toggle provider enabled state (admin only)
+     */
+    this.router.put('/:provider_id/enabled', this.middleware.requireAdmin, async (req, res) => {
+      try {
+        const { provider_id } = req.params;
+        const { enabled } = req.body;
+
+        if (typeof enabled !== 'boolean') {
+          return this.returnErrorResponse(res, 400, 'enabled must be a boolean');
+        }
+
+        const result = await this._providersManager.updateProvider(provider_id, { enabled });
+        
+        // Track provider operation
+        this._metricsService.incrementCounter('provider_operations', {
+          operation: 'update',
+          username: req.user.username
+        });
+        
+        return res.status(200).json(result);
+      } catch (error) {
+        return this.handleError(res, error, 'Failed to update provider enabled state');
+      }
+    });
+
+    /**
+     * PUT /api/iptv/providers/:provider_id/sync-media-types
+     * Update sync media types for a provider (admin only)
+     */
+    this.router.put('/:provider_id/sync-media-types', this.middleware.requireAdmin, async (req, res) => {
+      try {
+        const { provider_id } = req.params;
+        const { sync_media_types } = req.body;
+
+        if (!sync_media_types || typeof sync_media_types !== 'object') {
+          return this.returnErrorResponse(res, 400, 'sync_media_types must be an object');
+        }
+
+        // Validate sync_media_types structure
+        const validKeys = ['movies', 'tvshows', 'live'];
+        for (const key of Object.keys(sync_media_types)) {
+          if (!validKeys.includes(key)) {
+            return this.returnErrorResponse(res, 400, `Invalid key in sync_media_types: ${key}. Valid keys are: ${validKeys.join(', ')}`);
+          }
+          if (typeof sync_media_types[key] !== 'boolean') {
+            return this.returnErrorResponse(res, 400, `sync_media_types.${key} must be a boolean`);
+          }
+        }
+
+        const result = await this._providersManager.updateProvider(provider_id, { sync_media_types });
+        
+        // Track provider operation
+        this._metricsService.incrementCounter('provider_operations', {
+          operation: 'update',
+          username: req.user.username
+        });
+        
+        return res.status(200).json(result);
+      } catch (error) {
+        return this.handleError(res, error, 'Failed to update sync media types');
+      }
+    });
+
+    /**
      * GET /api/iptv/providers/:provider_id/categories
      * Get categories for a provider
      * - If type query param is provided: Get categories by type (cached, backward compatibility)

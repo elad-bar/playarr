@@ -6,6 +6,12 @@
       "help": "Number of provider titles per provider, per media type",
       "labelNames": ["provider_id", "media_type"]
     },
+    "ignored_provider_titles_count": {
+      "type": "gauge",
+      "name": "playarr_ignored_provider_titles_count",
+      "help": "Number of ignored provider titles per provider, per media type",
+      "labelNames": ["provider_id", "media_type"]
+    },
     "main_titles_count": {
       "type": "gauge",
       "name": "playarr_main_titles_count",

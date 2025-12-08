@@ -88,6 +88,7 @@ import JobsRouter from './routes/JobsRouter.js';
 import StremioRouter from './routes/StremioRouter.js';
 import LiveTVRouter from './routes/LiveTVRouter.js';
 import MetricsRouter from './routes/MetricsRouter.js';
+import ProviderTitlesRouter from './routes/ProviderTitlesRouter.js';
 import { XtreamProvider } from './providers/XtreamProvider.js';
 import { AGTVProvider } from './providers/AGTVProvider.js';
 import { TMDBProvider } from './providers/TMDBProvider.js';
@@ -422,6 +423,7 @@ async function initialize() {
     const stremioRouter = new StremioRouter(stremioManager, middleware);
     const liveTVRouter = new LiveTVRouter(channelManager, programManager, liveTVFormattingManager, userManager, iptvProviderManager, middleware, metricsService);
     const metricsRouter = new MetricsRouter(settingsManager, middleware, metricsService);
+    const providerTitlesRouter = new ProviderTitlesRouter(providerTitlesManager, tmdbManager, providerRepo, middleware);
 
     // Initialize all routers
     authRouter.initialize();
@@ -440,6 +442,7 @@ async function initialize() {
     stremioRouter.initialize();
     liveTVRouter.initialize();
     metricsRouter.initialize();
+    providerTitlesRouter.initialize();
 
     // Step 5: Register routes
     app.use('/api/auth', authRouter.router);
@@ -455,6 +458,7 @@ async function initialize() {
     app.use('/api/tmdb', tmdbRouter.router);
     app.use('/api/healthcheck', healthcheckRouter.router);
     app.use('/api/livetv', liveTVRouter.router);
+    app.use('/api/provider-titles', providerTitlesRouter.router);
     app.use('/player_api.php', xtreamRouter.router); // Xtream Code API at specific path
     
     // Prometheus metrics endpoint (before React Router fallback)

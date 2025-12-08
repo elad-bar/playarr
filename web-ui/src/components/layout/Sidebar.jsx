@@ -29,6 +29,7 @@ import {
   LogoutOutlined as LogoutIcon,
   CloseOutlined as CloseIcon,
   HomeOutlined as HomeIcon,
+  ErrorOutlineOutlined as ErrorOutlineIcon,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useAuth } from '../../context/AuthContext';
@@ -114,6 +115,7 @@ function Sidebar({ open, onClose }) {
             items: [
               { path: '/settings/general', label: 'General', icon: <GeneralSettingsIcon /> },
               { path: '/settings/iptv-providers', label: 'IPTV Providers', icon: <RouterIcon /> },
+              { path: '/settings/ignored-titles', label: 'Ignored Titles', icon: <ErrorOutlineIcon /> },
               { path: '/settings/users', label: 'Users', icon: <PersonAddIcon /> },
               { path: '/settings/metrics', label: 'Metrics', icon: <BarChartIcon /> },
             ],

@@ -121,13 +121,6 @@ const formatJobResult = (jobName, lastResult) => {
 };
 
 /**
- * Check if a job is manual (no interval property)
- */
-const isManualJob = (job) => {
-    return !job.interval;
-};
-
-/**
  * Job card component
  */
 const JobCard = ({ job, onTrigger, engineReachable }) => {
@@ -208,7 +201,6 @@ const JobCard = ({ job, onTrigger, engineReachable }) => {
     };
 
     const isRunning = job.status === 'running';
-    const manualJob = isManualJob(job);
 
     return (
         <Paper
@@ -250,8 +242,8 @@ const JobCard = ({ job, onTrigger, engineReachable }) => {
                             </IconButton>
                         </Tooltip>
                     )}
-                    {/* Show trigger button for manual jobs when not running */}
-                    {manualJob && !isRunning && (
+                    {/* Show trigger button when not running */}
+                    {!isRunning && (
                         <Tooltip title="Trigger job manually">
                             <IconButton
                                 onClick={handleTrigger}
