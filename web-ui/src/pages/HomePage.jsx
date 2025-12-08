@@ -19,12 +19,12 @@ import {
     useTheme,
 } from '@mui/material';
 import {
-    People as PeopleIcon,
-    Movie as MovieIcon,
-    Tv as TvIcon,
-    PlayArrow as PlayIcon,
-    Refresh as RefreshIcon,
-    Star as StarIcon,
+    PeopleOutlined as PeopleIcon,
+    MovieOutlined as MovieIcon,
+    TvOutlined as TvIcon,
+    PlayArrowOutlined as PlayIcon,
+    RefreshOutlined as RefreshIcon,
+    StarOutlined as StarIcon,
 } from '@mui/icons-material';
 import {
     Chart as ChartJS,

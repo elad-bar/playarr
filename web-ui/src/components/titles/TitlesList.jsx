@@ -2,7 +2,7 @@ import React, { useEffect, useCallback, useRef, useMemo, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Card, CardContent, CardMedia, IconButton, CircularProgress, TextField, InputAdornment, Tooltip, ToggleButtonGroup, ToggleButton, useTheme, useMediaQuery, Button, Chip, Drawer, Divider, Badge } from '@mui/material';
-import { PlaylistAdd, PlaylistAddCheck, Search as SearchIcon, FilterList, CalendarMonth, Star as StarIcon, Movie as MovieIcon, LiveTv as LiveTvIcon, ErrorOutline, ChevronLeft, Close, Clear } from '@mui/icons-material';
+import { PlaylistAddOutlined as PlaylistAdd, PlaylistAddCheckOutlined as PlaylistAddCheck, SearchOutlined as SearchIcon, FilterListOutlined as FilterList, CalendarMonthOutlined as CalendarMonth, StarOutlined as StarIcon, MovieOutlined as MovieIcon, LiveTvOutlined as LiveTvIcon, ErrorOutline, ChevronLeftOutlined as ChevronLeft, CloseOutlined as Close, ClearOutlined as Clear } from '@mui/icons-material';
 import { debounce } from 'lodash';
 import { fetchTitles, updateFilters, addToWatchlist, removeFromWatchlist, incrementPage, clearFilters } from '../../store/slices/titlesSlice';
 

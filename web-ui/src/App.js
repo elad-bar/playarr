@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Box, CircularProgress, CssBaseline, IconButton, Toolbar, Tooltip, Typography, AppBar, useMediaQuery } from '@mui/material';
-import { DarkMode as DarkModeIcon, LightMode as LightModeIcon, Menu as MenuIcon } from '@mui/icons-material';
+import { DarkModeOutlined as DarkModeIcon, LightModeOutlined as LightModeIcon, MenuOutlined as MenuIcon } from '@mui/icons-material';
 import { ThemeProvider as MUIThemeProvider } from '@mui/material/styles';
 import { selectTheme } from './store/slices/themeSlice';
 import { toggleTheme } from './store/slices/themeSlice';
@@ -160,13 +160,8 @@ const AppContent = () => {
                                     isMobile
                                         ? muiTheme.zIndex.drawer - 1
                                         : muiTheme.zIndex.drawer + 1,
-                                ml: !isMobile && sidebarOpen ? '280px' : 0,
-                                width: !isMobile && sidebarOpen ? 'calc(100% - 280px)' : '100%',
-                                transition: (muiTheme) =>
-                                    muiTheme.transitions.create(['width', 'margin'], {
-                                        easing: muiTheme.transitions.easing.sharp,
-                                        duration: muiTheme.transitions.duration.enteringScreen,
-                                    }),
+                                width: '100%',
+                                left: 0,
                             }}
                         >
                             <Toolbar>

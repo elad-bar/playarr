@@ -10,7 +10,7 @@ import {
   useTheme,
   useMediaQuery,
 } from '@mui/material';
-import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon } from '@mui/icons-material';
+import { AddOutlined as AddIcon, DeleteOutlined as DeleteIcon, EditOutlined as EditIcon } from '@mui/icons-material';
 import { getProviderTypeColor } from './utils';
 
 /**

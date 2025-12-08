@@ -17,7 +17,7 @@ import {
   Alert,
   Snackbar,
 } from '@mui/material';
-import { Search as SearchIcon, Clear as ClearIcon, Save as SaveIcon } from '@mui/icons-material';
+import { SearchOutlined as SearchIcon, ClearOutlined as ClearIcon, SaveOutlined as SaveIcon } from '@mui/icons-material';
 import axiosInstance from '../../../config/axios';
 import { API_ENDPOINTS } from '../../../config/api';
 

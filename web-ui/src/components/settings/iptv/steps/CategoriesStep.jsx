@@ -13,7 +13,7 @@ import {
   Alert,
   useTheme,
 } from '@mui/material';
-import { Search as SearchIcon, Clear as ClearIcon } from '@mui/icons-material';
+import { SearchOutlined as SearchIcon, ClearOutlined as ClearIcon } from '@mui/icons-material';
 import { fetchIPTVProviderCategories, getMediaTypeColors } from '../utils';
 
 /**

@@ -15,14 +15,14 @@ import {
     Tooltip
 } from '@mui/material';
 import {
-    Close as CloseIcon,
-    PlaylistAdd,
-    PlaylistAddCheck,
-    Movie,
-    Tv,
-    CalendarMonth,
-    Stream,
-    Download as DownloadIcon
+    CloseOutlined as CloseIcon,
+    PlaylistAddOutlined as PlaylistAdd,
+    PlaylistAddCheckOutlined as PlaylistAddCheck,
+    MovieOutlined as Movie,
+    TvOutlined as Tv,
+    CalendarMonthOutlined as CalendarMonth,
+    StreamOutlined as Stream,
+    DownloadOutlined as DownloadIcon
 } from '@mui/icons-material';
 import SimilarTitles from './SimilarTitles';
 import axiosInstance from '../../config/axios';

@@ -12,14 +12,23 @@ const createAppTheme = (mode) => createTheme({
   palette: {
     mode,
     primary: {
-      main: '#1976d2',
-      light: '#42a5f5',
-      dark: '#1565c0',
+      main: '#00bcd4',
+      light: '#4dd0e1',
+      dark: '#0097a7',
     },
     secondary: {
       main: '#9c27b0',
       light: '#ba68c8',
       dark: '#7b1fa2',
+    },
+    success: {
+      main: '#4caf50',
+    },
+    warning: {
+      main: '#ff9800',
+    },
+    error: {
+      main: '#f44336',
     },
     background: {
       default: mode === 'light' ? '#f5f5f5' : '#121212',
@@ -30,7 +39,51 @@ const createAppTheme = (mode) => createTheme({
       secondary: mode === 'light' ? 'rgba(0, 0, 0, 0.6)' : 'rgba(255, 255, 255, 0.7)',
     },
   },
+  typography: {
+    fontFamily: [
+      'Inter',
+      'Roboto',
+      'Segoe UI',
+      'Arial',
+      'sans-serif'
+    ].join(','),
+    fontSize: 13,
+  },
   components: {
+    MuiButton: {
+      defaultProps: {
+        size: 'small'
+      }
+    },
+    MuiTextField: {
+      defaultProps: {
+        size: 'small'
+      }
+    },
+    MuiTableCell: {
+      styleOverrides: {
+        root: {
+          padding: '6px 10px'
+        }
+      }
+    },
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          scrollbarColor: mode === 'dark' ? '#555 #121212' : '#999 #f5f5f5'
+        },
+        '*::-webkit-scrollbar': {
+          width: '8px'
+        },
+        '*::-webkit-scrollbar-track': {
+          background: mode === 'dark' ? '#121212' : '#f5f5f5'
+        },
+        '*::-webkit-scrollbar-thumb': {
+          background: mode === 'dark' ? '#555' : '#999',
+          borderRadius: '4px'
+        }
+      }
+    },
     MuiDrawer: {
       styleOverrides: {
         paper: {
@@ -41,7 +94,7 @@ const createAppTheme = (mode) => createTheme({
     MuiAppBar: {
       styleOverrides: {
         root: {
-          backgroundColor: mode === 'light' ? '#1976d2' : '#1e1e1e',
+          backgroundColor: mode === 'light' ? '#00bcd4' : '#1e1e1e',
         },
       },
     },

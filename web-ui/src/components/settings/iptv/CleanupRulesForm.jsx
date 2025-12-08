@@ -6,7 +6,7 @@ import {
   TextField,
   IconButton,
 } from '@mui/material';
-import { Delete as DeleteIcon } from '@mui/icons-material';
+import { DeleteOutlined as DeleteIcon } from '@mui/icons-material';
 
 function CleanupRulesForm({ provider, onSave, onCancel }) {
   const [rules, setRules] = useState(provider.cleanup || {});

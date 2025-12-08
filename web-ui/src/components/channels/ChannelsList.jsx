@@ -30,16 +30,16 @@ import {
   FormGroup
 } from '@mui/material';
 import {
-  PlaylistAdd,
-  PlaylistAddCheck,
-  Search as SearchIcon,
-  FilterList,
-  OpenInNew as OpenInNewIcon,
-  ContentCopy as ContentCopyIcon,
+  PlaylistAddOutlined as PlaylistAdd,
+  PlaylistAddCheckOutlined as PlaylistAddCheck,
+  SearchOutlined as SearchIcon,
+  FilterListOutlined as FilterList,
+  OpenInNewOutlined as OpenInNewIcon,
+  ContentCopyOutlined as ContentCopyIcon,
   ErrorOutline,
-  ChevronLeft,
-  Close,
-  Clear
+  ChevronLeftOutlined as ChevronLeft,
+  CloseOutlined as Close,
+  ClearOutlined as Clear
 } from '@mui/icons-material';
 import { debounce } from 'lodash';
 import {
