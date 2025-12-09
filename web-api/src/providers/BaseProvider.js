@@ -514,12 +514,12 @@ export class BaseProvider {
           const providerIdLabel = providerId || 'unknown';
           const endpointLabel = endpoint || 'unknown';
           
-          this.metricsService.incrementCounter('provider_api_requests', {
+          this.metricsManager.incrementCounter('provider_api_requests', {
             provider_id: providerIdLabel,
             endpoint: endpointLabel,
             status_code: statusCode
           });
-          this.metricsService.observeHistogram('provider_api_request_duration', {
+          this.metricsManager.observeHistogram('provider_api_request_duration', {
             provider_id: providerIdLabel,
             endpoint: endpointLabel,
             status_code: statusCode
@@ -546,12 +546,12 @@ export class BaseProvider {
             const endpointLabel = endpoint || 'unknown';
             const timeoutValue = timeout || 60000; // Default 60s if not specified
             
-            this.metricsService.incrementCounter('provider_api_requests', {
+            this.metricsManager.incrementCounter('provider_api_requests', {
               provider_id: providerIdLabel,
               endpoint: endpointLabel,
               status_code: 'timeout'
             });
-            this.metricsService.observeHistogram('provider_api_request_duration', {
+            this.metricsManager.observeHistogram('provider_api_request_duration', {
               provider_id: providerIdLabel,
               endpoint: endpointLabel,
               status_code: 'timeout'
@@ -589,12 +589,12 @@ export class BaseProvider {
             const endpointLabel = endpoint || 'unknown';
             const errorDuration = requestDuration > 0 ? requestDuration : (timeout || 60000);
             
-            this.metricsService.incrementCounter('provider_api_requests', {
+            this.metricsManager.incrementCounter('provider_api_requests', {
               provider_id: providerIdLabel,
               endpoint: endpointLabel,
               status_code: errorStatusCode
             });
-            this.metricsService.observeHistogram('provider_api_request_duration', {
+            this.metricsManager.observeHistogram('provider_api_request_duration', {
               provider_id: providerIdLabel,
               endpoint: endpointLabel,
               status_code: errorStatusCode
