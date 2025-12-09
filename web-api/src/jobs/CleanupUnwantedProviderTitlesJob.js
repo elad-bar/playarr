@@ -5,7 +5,7 @@ import { ProviderTypeConfig } from '../config/providers.js';
 /**
  * Job for cleaning up unwanted provider titles
  * Removes provider titles from disabled/deleted providers, disabled media types, and disabled categories
- * Triggers sync jobs after cleanup completes
+ * Uses postExecute configuration to trigger subsequent jobs
  * @extends {BaseJob}
  */
 export class CleanupUnwantedProviderTitlesJob extends BaseJob {
@@ -17,14 +17,12 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
    * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
    * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
    * @param {import('../services/metrics.js').default} metricsService - Metrics service for recording counters
-   * @param {Function<string>} triggerJob - Function to trigger jobs by name
    * @param {import('../managers/domain/ChannelManager.js').ChannelManager} channelManager - Channel manager for Live TV cleanup
    * @param {import('../managers/domain/ProgramManager.js').ProgramManager} programManager - Program manager for Live TV cleanup
    * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager for watchlist cleanup
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService, triggerJob, channelManager, programManager, userManager, providerCategoryManager) {
+  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService, channelManager, programManager, userManager, providerCategoryManager) {
     super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService);
-    this._triggerJob = triggerJob;
     this._channelManager = channelManager;
     this._programManager = programManager;
     this._userManager = userManager;
@@ -414,15 +412,6 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
 
       if (channelsDeleted > 0) {
         this.logger.info(`Deleted ${formatNumber(channelsDeleted)} channel(s) from disabled providers/media types`);
-      }
-
-      // Step 8: Trigger sync jobs after cleanup completes (fire-and-forget)
-      if (this._triggerJob) {
-        this.logger.info('Triggering sync jobs after cleanup...');
-        this._triggerJob('syncIPTVProviderTitles');
-        this._triggerJob('syncLiveTV');
-      } else {
-        this.logger.warn('Trigger job function not available, skipping job triggers');
       }
 
       // Set status to completed on success with result

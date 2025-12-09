@@ -45,6 +45,7 @@ import { SyncLiveTVJob } from './jobs/SyncLiveTVJob.js';
 import { SyncProviderDetailsJob } from './jobs/SyncProviderDetailsJob.js';
 import { CleanupUnwantedProviderTitlesJob } from './jobs/CleanupUnwantedProviderTitlesJob.js';
 import { SyncProviderCategoriesJob } from './jobs/SyncProviderCategoriesJob.js';
+import { UpdateMetricsJob } from './jobs/UpdateMetricsJob.js';
 
 // Import manager classes
 import { UserManager } from './managers/domain/UserManager.js';
@@ -358,7 +359,6 @@ async function initialize() {
       titlesManager,
       providerTitlesManager,
       metricsService,
-      triggerJob,
       channelManager,
       programManager,
       userManager,
@@ -376,6 +376,19 @@ async function initialize() {
       providerCategoryManager
     ));
     
+    jobInstances.set('updateMetrics', new UpdateMetricsJob(
+      'updateMetrics',
+      jobHistoryManager,
+      providersManager,
+      tmdbManager,
+      titlesManager,
+      providerTitlesManager,
+      metricsService,
+      channelManager,
+      userManager,
+      iptvProviderManager
+    ));
+    
     // Initialize EngineScheduler with job instances
     jobScheduler = new EngineScheduler(jobInstances, jobHistoryManager, metricsService);
     await jobScheduler.initialize();
@@ -386,18 +399,7 @@ async function initialize() {
     // Initialize user manager (creates default admin user)
     await userManager.initialize();
     
-    // Update gauge metrics on startup
-    try {
-      await metricsService.updateGaugeMetrics({
-        providerTitlesManager,
-        titlesManager,
-        channelManager,
-        userManager,
-        iptvProviderManager
-      });
-    } catch (error) {
-      logger.warn('Failed to update gauge metrics on startup:', error.message);
-    }
+    // Metrics are updated via UpdateMetricsJob (triggered on startup after scheduler starts)
     
     // Step 3: Initialize middleware (after UserManager is initialized)
     const middleware = new Middleware(userManager, metricsMiddleware);
@@ -649,6 +651,16 @@ async function initialize() {
       
       // Start job scheduler after server is ready
       await jobScheduler.start();
+      
+      // Trigger metrics update job on startup (after scheduler is ready)
+      setImmediate(async () => {
+        try {
+          await jobsManager.triggerJob('updateMetrics');
+          logger.info('Triggered updateMetrics job on startup');
+        } catch (error) {
+          logger.error(`Failed to trigger updateMetrics job on startup: ${error.message}`);
+        }
+      });
     });
   } catch (error) {
     logger.error('Failed to initialize application:', error);
