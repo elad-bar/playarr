@@ -215,11 +215,12 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
             }
 
             if (typesToDelete.length > 0 && orConditions.length > 0) {
+              // Use $or to match titles that are EITHER disabled media types OR disabled categories
               deleteQuery = {
                 provider_id: providerId,
-                $and: [
+                $or: [
                   { type: { $in: typesToDelete } },
-                  { $or: orConditions }
+                  ...orConditions
                 ]
               };
             } else if (typesToDelete.length > 0) {
@@ -247,7 +248,7 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
         }
 
         if (providerTitlesToDelete.length > 0) {
-          this.logger.debug(`[${providerId}] Found ${formatNumber(providerTitlesToDelete.length)} titles to delete. Reasons: ${deletionReasons.join('; ')}. Breakdown by type: ${JSON.stringify(countByType)}. Breakdown by category: ${JSON.stringify(countByCategory)}`);
+          this.logger.info(`[${providerId}] Found ${formatNumber(providerTitlesToDelete.length)} titles to delete. Reasons: ${deletionReasons.join('; ')}. Breakdown by type: ${JSON.stringify(countByType)}. Breakdown by category: ${JSON.stringify(countByCategory)}`);
           providerDeletionCounts.set(providerId, {
             count: providerTitlesToDelete.length,
             reasons: deletionReasons,
