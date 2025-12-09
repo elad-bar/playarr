@@ -57,7 +57,7 @@ class BaseRouter {
     const paths = this.getBasePath();
     paths.forEach(path => {
       this.app.use(path, this.router);
-      this.logger.info(`Registered routes at ${path}`);
+      this.logger.debug(`Registered routes at ${path}`);
     });
   }
 

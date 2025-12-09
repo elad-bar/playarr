@@ -34,7 +34,7 @@ export class UpdateMetricsJob extends BaseJob {
       // Update all gauge metrics (managers are injected via constructor)
       await this.metricsManager.updateGaugeMetrics();
 
-      this.logger.info('Gauge metrics updated successfully');
+      this.logger.debug('Gauge metrics updated successfully');
 
       // Set status to completed on success
       await this.setJobStatus('completed', {

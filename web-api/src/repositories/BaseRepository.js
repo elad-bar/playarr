@@ -1,4 +1,4 @@
-import { createLogger } from '../utils/this.logger.js';
+import { createLogger } from '../utils/logger.js';
 import { formatNumber } from '../utils/numberFormat.js';
 import { DB_NAME } from '../config/database.js';
 

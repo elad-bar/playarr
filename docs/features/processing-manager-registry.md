@@ -16,7 +16,8 @@ Refactor processing managers from per-execution instances to singleton instances
 
 ### Current State
 
-- Processing managers are created dynamically in `BaseJob._createHandlers()` for each job execution
+- Processing managers are created dynamically in `BaseJobWithSaveCoordinator._createHandlers()` for each job execution
+- A class registry (`PROCESSING_MANAGER_REGISTRY`) exists in `BaseJobWithSaveCoordinator.js` that maps provider types to processing manager classes, but this is **not** an instance registry - it's only used to select which class to instantiate
 - Each processing manager instance stores:
   - `providerData` - Provider configuration (read-only during execution)
   - `_titlesCache` - Execution-scoped cache loaded at start
@@ -24,6 +25,7 @@ Refactor processing managers from per-execution instances to singleton instances
   - `_accumulatedIgnoredTitles` - Execution-scoped accumulation during processing
   - `_progressTracking` - Execution-scoped progress tracking
   - `limiter` - Rate limiter (tied to provider config, should remain in instance)
+- **Note**: TMDB processing manager is already created as a singleton in `index.js` (line 460), but IPTV processing managers (AGTV, Xtream) are still created per execution
 
 ### Problems
 
@@ -31,6 +33,22 @@ Refactor processing managers from per-execution instances to singleton instances
 - State is mixed between instance-level (rate limiter) and execution-level (caches)
 - No reuse of processing manager instances across job executions
 - Inconsistent with provider pattern (providers are singletons)
+- Only TMDB processing manager follows singleton pattern; IPTV processing managers do not
+
+## Implementation Status
+
+### Completed
+
+- ✅ TMDB processing manager is already created as a singleton instance in `index.js` (line 460)
+- ✅ Class registry (`PROCESSING_MANAGER_REGISTRY`) exists in `BaseJobWithSaveCoordinator.js` for mapping provider types to classes
+
+### Pending
+
+- ❌ `ProcessingContext` class - Not yet created
+- ❌ `ProcessingManagerRegistry` service - Not yet created
+- ❌ Processing managers are not yet stateless (still store execution-scoped state)
+- ❌ Jobs still create new processing manager instances per execution
+- ❌ `ProvidersManager` does not maintain registry when providers are created/updated/deleted
 
 ## Proposed Architecture
 
@@ -198,18 +216,19 @@ export class ProcessingContext {
 
 ### Phase 4: Update Jobs
 
-#### 4.1 Update BaseJob
+#### 4.1 Update BaseJobWithSaveCoordinator
 
-**File**: `web-api/src/jobs/BaseJob.js`
+**File**: `web-api/src/jobs/BaseJobWithSaveCoordinator.js`
 
 **Changes**:
 - Add `processingManagerRegistry` parameter to constructor
 - Update `_createHandlers()`:
   - Get TMDB processing manager from registry: `this.tmdbProcessingManager = this.processingManagerRegistry.getTMDBProcessingManager()`
   - Get enabled providers from `providersManager`
-  - Get processing managers from registry instead of creating new instances
+  - Get processing managers from registry instead of creating new instances using `PROCESSING_MANAGER_REGISTRY`
   - Change log message from "Creating" to "Getting" processing managers
-- Remove `_createTMDBProcessingManager()` method
+  - Remove the `new ProcessingManagerClass(...)` instantiation logic
+- Note: The existing `PROCESSING_MANAGER_REGISTRY` class registry can remain for type-to-class mapping, but instance creation should be handled by the registry service
 
 #### 4.2 Update SyncIPTVProviderTitlesJob
 
@@ -251,28 +270,31 @@ export class ProcessingContext {
   ```javascript
   const processingManagerRegistry = new ProcessingManagerRegistry();
   ```
-- After all managers are created, initialize registry:
+- After all managers are created (including TMDB processing manager at line 460), initialize registry:
   ```javascript
   await processingManagerRegistry.initialize(allProviders, {
-    providerTitlesManager,
-    providersManager: null, // Will be set after ProvidersManager is created
-    tmdbManager,
-    titlesManager,
-    providerTitlesManager
+    providerTitlesManager: this.managers.providerTitles,
+    providersManager: this.managers.providers,
+    tmdbManager: this.managers.tmdb,
+    tmdbProcessingManager: this.managers.tmdbProcessing, // Already created as singleton
+    saveCoordinator: this.saveCoordinator
   });
   ```
+- **Note**: The TMDB processing manager is already created as a singleton at line 460. The registry should reference this existing instance via `getTMDBProcessingManager()` rather than creating a new one
 - After ProvidersManager is created, update registry dependencies (if needed)
-- Pass registry to all job constructors that extend BaseJob:
+- Pass registry to all job constructors that extend `BaseJobWithSaveCoordinator`:
   ```javascript
-  jobInstances.set('syncIPTVProviderTitles', new SyncIPTVProviderTitlesJob(
+  new SyncIPTVProviderTitlesJob(
     'syncIPTVProviderTitles',
-    jobHistoryManager,
-    providersManager,
-    tmdbManager,
-    titlesManager,
-    providerTitlesManager,
+    this.managers.jobHistory,
+    this.saveCoordinator,
+    this.managers.providers,
+    this.managers.tmdbProcessing,
+    this.managers.tmdb,
+    this.managers.providerTitles,
+    this.managers.metrics,
     processingManagerRegistry // Add registry
-  ));
+  )
   ```
 
 ### Phase 6: Update ProvidersManager
@@ -300,9 +322,9 @@ export class ProcessingContext {
 4. Refactor `BaseIPTVProcessingManager.js` to use context
 5. Refactor `AGTVProcessingManager.js` and `XtreamProcessingManager.js`
 6. Review and update `TMDBProcessingManager.js` if needed
-7. Update `BaseJob.js` to use registry
+7. Update `BaseJobWithSaveCoordinator.js` to use registry (not `BaseJob.js`)
 8. Update `SyncIPTVProviderTitlesJob.js` and `ProviderTitlesMonitorJob.js` execute methods
-9. Initialize registry in `index.js`
+9. Initialize registry in `index.js` (reference existing TMDB processing manager singleton)
 10. Update `ProvidersManager.js` to maintain registry
 
 ## Key Considerations
@@ -336,7 +358,8 @@ export class ProcessingContext {
 
 - Registry is updated when providers are created/updated/deleted
 - This ensures processing managers always have current provider configuration
-- TMDB processing manager is shared singleton (not per-provider)
+- TMDB processing manager is shared singleton (not per-provider) - already implemented in `index.js`
+- The registry's `getTMDBProcessingManager()` method should return the existing singleton instance created in `index.js`, not create a new one
 
 ### Backward Compatibility
 

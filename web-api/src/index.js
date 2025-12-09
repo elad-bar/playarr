@@ -70,7 +70,7 @@ import { TMDBProcessingManager } from './managers/processing/TMDBProcessingManag
 // Import middleware
 import Middleware from './middleware/Middleware.js';
 import MetricsMiddleware from './middleware/MetricsMiddleware.js';
-import { AppError } from './errors/AppError.js';
+import { AppError, JobAlreadyRunningError } from './errors/AppError.js';
 
 // Import router classes
 import AuthRouter from './routes/AuthRouter.js';
@@ -571,7 +571,12 @@ class Application {
         await this.jobsManager.triggerJob(jobName);
         this.logger.info(`Triggered ${jobName} job`);
       } catch (error) {
-        this.logger.error(`Failed to trigger ${jobName} job: ${error.message}`);
+        // Job already running is not an error, just a debug message
+        if (error instanceof JobAlreadyRunningError) {
+          this.logger.debug(`Job ${jobName} is already running, skipping trigger`);
+        } else {
+          this.logger.error(`Failed to trigger ${jobName} job: ${error.message}`);
+        }
         // Don't throw - allow caller to continue even if job trigger fails
       }
     });
