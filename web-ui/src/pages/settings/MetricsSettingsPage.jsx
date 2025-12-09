@@ -87,12 +87,13 @@ const SettingsMetrics = () => {
 
     const getPrometheusConfig = () => {
         if (!metricsToken) return '';
+        const target = window.location.host || 'localhost:3000';
         return `scrape_configs:
   - job_name: 'playarr'
     scrape_interval: 15s
     metrics_path: '/metrics'
     static_configs:
-      - targets: ['localhost:3000']
+      - targets: ['${target}']
     bearer_token: '${metricsToken}'`;
     };
 
