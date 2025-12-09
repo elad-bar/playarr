@@ -15,12 +15,13 @@ import axiosInstance from '../../config/axios';
 import { API_ENDPOINTS } from '../../config/api';
 
 /**
- * Available log levels (simplified to 3 levels)
+ * Available log levels (simplified to 4 levels)
  */
 const LOG_LEVELS = [
   { value: 'error', label: 'Error' },
   { value: 'warn', label: 'Warn' },
-  { value: 'info', label: 'Info' }
+  { value: 'info', label: 'Info' },
+  { value: 'debug', label: 'Debug' }
 ];
 
 /**
@@ -38,7 +39,7 @@ const SettingsLogger = () => {
   const [changingLevel, setChangingLevel] = useState(false);
   const logContainerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
-  const MAX_LINES = 1000;
+  const MAX_LINES = 100000;
 
   /**
    * Get color for log level
@@ -54,7 +55,7 @@ const SettingsLogger = () => {
     } else if (upperLine.includes('INFO:')) {
       return '#42a5f5'; // Blue
     } else if (upperLine.includes('DEBUG:')) {
-      return '#42a5f5'; // Blue (same as info, since debug maps to info)
+      return '#66bb6a'; // Green for debug messages
     }
     return '#d4d4d4'; // Default light gray
   };

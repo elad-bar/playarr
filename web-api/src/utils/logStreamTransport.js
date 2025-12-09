@@ -1,12 +1,13 @@
 import winston from 'winston';
 
 /**
- * Winston log level hierarchy (simplified to 3 levels)
+ * Winston log level hierarchy (simplified to 4 levels)
  */
 const LOG_LEVELS = {
   error: 0,
   warn: 1,
-  info: 2
+  info: 2,
+  debug: 3
 };
 
 /**
@@ -17,7 +18,7 @@ const LOG_LEVELS = {
 class LogStreamTransport extends winston.Transport {
   constructor(options = {}) {
     super(options);
-    this.maxLines = options.maxLines || 1000;
+    this.maxLines = options.maxLines || 100000;
     this.logBuffer = [];
     
     if (!options.webSocketService) {
@@ -61,7 +62,7 @@ class LogStreamTransport extends winston.Transport {
    * @returns {Array<string>} Array of available log levels
    */
   getAvailableLogLevels() {
-    return ['error', 'warn', 'info'];
+    return ['error', 'warn', 'info', 'debug'];
   }
 
   /**
@@ -76,9 +77,9 @@ class LogStreamTransport extends winston.Transport {
       warn: 'warn',
       info: 'info',
       http: 'info',  // Map http to info
-      verbose: 'info', // Map verbose to info (max level)
-      debug: 'info', // Map debug to info (max level)
-      silly: 'info'  // Map silly to info (max level)
+      verbose: 'debug', // Map verbose to debug (most verbose)
+      debug: 'debug', // Map debug to debug (most verbose)
+      silly: 'debug'  // Map silly to debug (most verbose)
     };
     
     const mappedLevel = levelMap[level] || 'info';
@@ -109,8 +110,7 @@ class LogStreamTransport extends winston.Transport {
       } else if (upperLine.includes('INFO:')) {
         lineLevel = 'info';
       } else if (upperLine.includes('DEBUG:')) {
-        // Map DEBUG to info level (info is the maximum)
-        lineLevel = 'info';
+        lineLevel = 'debug';
       } else {
         // If we can't determine level, include it (shouldn't happen)
         return true;

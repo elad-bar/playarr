@@ -51,6 +51,7 @@ export class Logger {
     );
 
     return winston.createLogger({
+      level: 'silly', // Set to most verbose so all messages reach transports, transports will filter
       format: baseFormat,
       transports: [
         new winston.transports.Console({
@@ -113,3 +114,4 @@ export class Logger {
 // Export singleton instance for backward compatibility
 const loggerInstance = new Logger();
 export const createLogger = (context) => loggerInstance.createLogger(context);
+export { loggerInstance };

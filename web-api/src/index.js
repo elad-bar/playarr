@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Import logger
-import { createLogger, Logger } from './utils/logger.js';
+import { createLogger, loggerInstance } from './utils/logger.js';
 import { LogStreamTransport } from './utils/logStreamTransport.js';
 import { formatNumber } from './utils/numberFormat.js';
 
@@ -138,9 +138,6 @@ class Application {
     
     // API paths collected from routers (populated in initializeRouters)
     this.apiPaths = [];
-    
-    // Logger instance for stream operations
-    this.loggerInstance = new Logger();
 
     // Socket event handlers mapping
     this.socketHandlers = {
@@ -373,7 +370,7 @@ class Application {
 
     // Create LogStreamTransport with WebSocketService (required dependency)
     this.logStreamTransport = new LogStreamTransport({
-      maxLines: 1000,
+      maxLines: 100000,
       level: 'info',
       webSocketService: this.webSocketService
     });
@@ -381,8 +378,11 @@ class Application {
     // Setup log stream level from settings (needed for handlers)
     await this.setupLogStreamLevel();
 
-    // Add transport to logger using Winston's standard API
-    this.loggerInstance.addTransport(this.logStreamTransport);
+    // Add transport to the singleton logger instance (used by all createLogger() calls)
+    // Set transport level to 'silly' (most verbose) so it receives all messages
+    // The transport will filter based on its own currentLevel setting
+    this.logStreamTransport.level = 'silly';
+    loggerInstance.addTransport(this.logStreamTransport);
     this.logStreamTransport.clearBuffer();
 
     // Initialize Socket.IO server (attach to HTTP server)
