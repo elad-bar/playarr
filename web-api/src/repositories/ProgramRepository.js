@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('ProgramRepository');
 
 /**
  * Repository for programs collection
@@ -13,6 +10,7 @@ export class ProgramRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'ProgramRepository',
       mongoClient,
       'programs',
       (doc) => `${doc.provider_id}-${doc.channel_id}-${doc.start?.getTime?.() || doc.start}-${doc.stop?.getTime?.() || doc.stop}`,

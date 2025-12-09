@@ -11,10 +11,10 @@ export class XtreamProvider extends BaseIPTVProvider {
   /**
    * @param {Object<string, Object>} providerConfigs - Map of provider ID to provider configuration
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance (required)
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance (optional)
    */
-  constructor(providerConfigs = {}, cacheDir = null, metricsService) {
-    super('XtreamProvider', providerConfigs, cacheDir, metricsService);
+  constructor(providerConfigs = {}, cacheDir = null, metricsManager) {
+    super('XtreamProvider', providerConfigs, cacheDir, metricsManager);
   }
 
   /**

@@ -19,16 +19,12 @@ class LogStreamTransport extends winston.Transport {
     super(options);
     this.maxLines = options.maxLines || 1000;
     this.logBuffer = [];
-    this.webSocketService = null;
+    
+    if (!options.webSocketService) {
+      throw new Error('webSocketService is required for LogStreamTransport');
+    }
+    this.webSocketService = options.webSocketService;
     this.currentLevel = options.level || 'info'; // Default to 'info'
-  }
-
-  /**
-   * Set the WebSocket service instance
-   * @param {object} webSocketService - WebSocketService instance
-   */
-  setWebSocketService(webSocketService) {
-    this.webSocketService = webSocketService;
   }
 
   /**
@@ -58,6 +54,14 @@ class LogStreamTransport extends winston.Transport {
    */
   getLevel() {
     return this.currentLevel;
+  }
+
+  /**
+   * Get available log levels
+   * @returns {Array<string>} Array of available log levels
+   */
+  getAvailableLogLevels() {
+    return ['error', 'warn', 'info'];
   }
 
   /**

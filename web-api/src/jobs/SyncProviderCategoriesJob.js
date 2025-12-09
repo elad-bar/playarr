@@ -11,14 +11,13 @@ export class SyncProviderCategoriesJob extends BaseJob {
    * @param {string} jobName - Name identifier for this job (used in logging)
    * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
    * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
-   * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager (required by BaseJob)
-   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager (required by BaseJob)
-   * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager (required by BaseJob)
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service for recording counters
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager for recording counters
    * @param {import('../managers/domain/ProviderCategoryManager.js').ProviderCategoryManager} providerCategoryManager - Provider category manager
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService, providerCategoryManager) {
-    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService);
+  constructor(jobName, jobHistoryManager, providersManager, metricsManager, providerCategoryManager) {
+    super(jobName, jobHistoryManager);
+    this.providersManager = providersManager;
+    this.metricsManager = metricsManager;
     this._providerCategoryManager = providerCategoryManager;
   }
 
@@ -123,13 +122,13 @@ export class SyncProviderCategoriesJob extends BaseJob {
           continue;
         }
         if (result.movies !== undefined && result.movies !== null) {
-          this.metricsService.incrementCounter('provider_categories_synced', { 
+          this.metricsManager.incrementCounter('provider_categories_synced', { 
             provider_id: result.providerId, 
             media_type: 'movies' 
           }, result.movies);
         }
         if (result.tvshows !== undefined && result.tvshows !== null) {
-          this.metricsService.incrementCounter('provider_categories_synced', { 
+          this.metricsManager.incrementCounter('provider_categories_synced', { 
             provider_id: result.providerId, 
             media_type: 'tvshows' 
           }, result.tvshows);

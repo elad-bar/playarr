@@ -6,70 +6,100 @@ import { formatNumber } from '../utils/numberFormat.js';
  */
 class JobsRouter extends BaseRouter {
   /**
+   * @param {import('express').Application} app - Express app instance
    * @param {JobsManager} jobsManager - Jobs manager instance
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
    */
-  constructor(jobsManager, middleware) {
-    super(middleware, 'JobsRouter');
+  constructor(app, jobsManager, middleware) {
+    super(app, middleware, 'JobsRouter');
     this._jobsManager = jobsManager;
   }
 
   /**
-   * Initialize routes for this router
+   * Get the base path(s) for this router
+   * @returns {string[]} Base path(s) for this router
    */
-  initialize() {
+  getBasePath() {
+    return ['/api/jobs'];
+  }
+
+  /**
+   * Set up routes for this router
+   */
+  setupRoutes() {
     /**
      * GET /api/jobs
      * List all jobs with details and status (admin only)
      */
-    this.router.get('/', this.middleware.requireAdmin, async (req, res) => {
-      try {
-        this.logger.debug('Calling getAllJobs() from JobsManager');
-        const result = await this._jobsManager.getAllJobs();
-        this.logger.debug(`GET /api/jobs - Returning jobs count: ${formatNumber(result.jobs?.length || 0)}`);
-        return res.status(200).json(result);
-      } catch (error) {
-        return this.handleError(res, error, 'Failed to get jobs');
-      }
-    });
+    this.router.get('/', this.middleware.requireAdmin, this._handleGetJobs.bind(this));
 
     /**
      * POST /api/jobs/:jobName/trigger
      * Trigger a job manually (admin only)
      */
-    this.router.post('/:jobName/trigger', this.middleware.requireAdmin, async (req, res) => {
-      try {
-        const { jobName } = req.params;
-
-        if (!jobName) {
-          return this.returnErrorResponse(res, 400, 'Job name is required');
-        }
-
-        const result = await this._jobsManager.triggerJob(jobName);
-        return res.status(200).json(result);
-      } catch (error) {
-        return this.handleError(res, error, 'Failed to trigger job');
-      }
-    });
+    this.router.post('/:jobName/trigger', this.middleware.requireAdmin, this._handleTriggerJob.bind(this));
 
     /**
      * POST /api/jobs/:jobName/abort
      * Abort a running job (admin only)
      */
-    this.router.post('/:jobName/abort', this.middleware.requireAdmin, async (req, res) => {
-      try {
-        const { jobName } = req.params;
+    this.router.post('/:jobName/abort', this.middleware.requireAdmin, this._handleAbortJob.bind(this));
+  }
 
-        if (!jobName) {
-          return this.returnErrorResponse(res, 400, 'Job name is required');
-        }
+  /**
+   * Handle GET / request
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   */
+  async _handleGetJobs(req, res) {
+    try {
+      this.logger.debug('Calling getAllJobs() from JobsManager');
+      const result = await this._jobsManager.getAllJobs();
+      this.logger.debug(`GET /api/jobs - Returning jobs count: ${formatNumber(result.jobs?.length || 0)}`);
+      return res.status(200).json(result);
+    } catch (error) {
+      return this.handleError(res, error, 'Failed to get jobs');
+    }
+  }
 
-        const result = await this._jobsManager.abortJob(jobName);
-        return res.status(200).json(result);
-      } catch (error) {
-        return this.handleError(res, error, 'Failed to abort job');
+  /**
+   * Handle POST /:jobName/trigger request
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   */
+  async _handleTriggerJob(req, res) {
+    try {
+      const { jobName } = req.params;
+
+      if (!jobName) {
+        return this.returnErrorResponse(res, 400, 'Job name is required');
       }
-    });
+
+      const result = await this._jobsManager.triggerJob(jobName);
+      return res.status(200).json(result);
+    } catch (error) {
+      return this.handleError(res, error, 'Failed to trigger job');
+    }
+  }
+
+  /**
+   * Handle POST /:jobName/abort request
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   */
+  async _handleAbortJob(req, res) {
+    try {
+      const { jobName } = req.params;
+
+      if (!jobName) {
+        return this.returnErrorResponse(res, 400, 'Job name is required');
+      }
+
+      const result = await this._jobsManager.abortJob(jobName);
+      return res.status(200).json(result);
+    } catch (error) {
+      return this.handleError(res, error, 'Failed to abort job');
+    }
   }
 }
 

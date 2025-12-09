@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('ProviderCategoryRepository');
 
 /**
  * Repository for provider_categories collection
@@ -13,6 +10,7 @@ export class ProviderCategoryRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'ProviderCategoryRepository',
       mongoClient,
       'provider_categories',
       (doc) => `${doc.provider_id}-${doc.type}-${doc.category_id}`,

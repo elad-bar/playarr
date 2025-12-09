@@ -36,34 +36,19 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
    * @param {import('../orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
    * @param {import('../domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for matching TMDB IDs (required)
    * @param {import('./TMDBProcessingManager.js').TMDBProcessingManager} tmdbProcessingManager - TMDB processing manager instance (required)
+   * @param {import('../orchestration/JobSaveCoordinatorManager.js').JobSaveCoordinatorManager} jobSaveCoordinatorManager - Job save coordinator manager (required)
    * @param {number} [metadataBatchSize=100] - Batch size for processing metadata (default: 100)
    */
-  constructor(providerData, providerTitlesManager, providersManager, tmdbManager, tmdbProcessingManager, metadataBatchSize = 100) {
+  constructor(providerData, providerTitlesManager, providersManager, tmdbManager, tmdbProcessingManager, jobSaveCoordinatorManager, metadataBatchSize = 100) {
     // Generate loggerContext from providerData if not explicitly provided
     const loggerContext = `${providerData.type?.toUpperCase() || 'PROCESSING'}::${providerData.id || 'default'}`;
     super(providerData, loggerContext);
     
-    if (!providerTitlesManager) {
-      throw new Error('ProviderTitlesManager is required');
-    }
     this.providerTitlesManager = providerTitlesManager;
-    
-    if (!providersManager) {
-      throw new Error('ProvidersManager is required for BaseIPTVProcessingManager');
-    }
     this.providersManager = providersManager;
-    
-    // TMDB manager for matching TMDB IDs (required)
-    if (!tmdbManager) {
-      throw new Error('TMDBManager is required for BaseIPTVProcessingManager');
-    }
     this.tmdbManager = tmdbManager;
-    
-    // TMDB handler for matching TMDB IDs (required)
-    if (!tmdbProcessingManager) {
-      throw new Error('TMDBProcessingManager is required for BaseIPTVProcessingManager');
-    }
     this.tmdbProcessingManager = tmdbProcessingManager;
+    this.jobSaveCoordinatorManager = jobSaveCoordinatorManager;
     
     // In-memory cache for titles and ignored titles
     // Loaded once at the start of job execution and kept in memory
@@ -141,45 +126,11 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
     let totalProcessed = 0;
     let totalRemaining = filteredTitles.length;
     
-    // Accumulate processed titles for periodic saving (not batch-based)
+    // Accumulate processed titles for batching (will be accumulated to coordinator after each batch)
     const processedTitles = [];
     
-    // Save callback for progress tracking (called every 30 seconds and on completion)
-    const saveCallback = async () => {
-      if (processedTitles.length > 0) {
-        try {
-          await this.saveTitles(type, processedTitles);
-          this.logger.debug(`${type}: Saved ${formatNumber(processedTitles.length)} accumulated title(s) via progress callback`);
-          processedTitles.length = 0; // Clear after saving
-        } catch (error) {
-          this.logger.error(`Error saving accumulated titles for ${type}: ${error.message}`);
-        }
-      }
-      
-      // Also save accumulated ignored titles for this type
-      if (this._accumulatedIgnoredTitles[type] && Object.keys(this._accumulatedIgnoredTitles[type]).length > 0) {
-        try {
-          // Convert title_id to title_key format and save directly
-          const ignoredByTitleKey = Object.fromEntries(
-            Object.entries(this._accumulatedIgnoredTitles[type]).map(([titleId, reason]) => [
-              generateTitleKey(type, titleId),
-              reason
-            ])
-          );
-          
-          await this.saveAllIgnoredTitles(ignoredByTitleKey);
-          
-          const count = Object.keys(this._accumulatedIgnoredTitles[type]).length;
-          this.logger.debug(`${type}: Saved ${formatNumber(count)} accumulated ignored title(s) via progress callback`);
-          this._accumulatedIgnoredTitles[type] = {}; // Clear after saving
-        } catch (error) {
-          this.logger.error(`Error saving accumulated ignored titles for ${type}: ${error.message}`);
-        }
-      }
-    };
-
-    // Register this type for progress tracking with save callback
-    this.registerProgress(type, totalRemaining, saveCallback);
+    // Register this type for progress tracking only (no save callback - coordinator handles saves)
+    this.registerProgress(type, totalRemaining, null);
 
     try {
       // Process each batch
@@ -206,19 +157,51 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
           }
         }
 
+        // Accumulate processed titles to coordinator after each batch
+        if (processedTitles.length > 0) {
+          this.jobSaveCoordinatorManager.accumulateProviderTitles(this.providerId, processedTitles);
+          processedTitles.length = 0; // Clear after accumulating
+        }
+        
+        // Accumulate ignored titles to coordinator after each batch
+        if (this._accumulatedIgnoredTitles[type] && Object.keys(this._accumulatedIgnoredTitles[type]).length > 0) {
+          // Convert title_id to title_key format
+          const ignoredByTitleKey = Object.fromEntries(
+            Object.entries(this._accumulatedIgnoredTitles[type]).map(([titleId, reason]) => [
+              generateTitleKey(type, titleId),
+              reason
+            ])
+          );
+          this.jobSaveCoordinatorManager.accumulateIgnoredTitles(this.providerId, ignoredByTitleKey);
+          this._accumulatedIgnoredTitles[type] = {}; // Clear after accumulating
+        }
+
         totalRemaining = filteredTitles.length - totalProcessed;
         
-        // Update progress tracking (triggers save callback every 30 seconds if configured)
+        // Update progress tracking (no save callback - coordinator handles periodic saves)
         this.updateProgress(type, totalRemaining);
 
         // Log progress every batch
         this.logger.info(`${type}: Completed batch ${formatNumber(batchIndex + 1)}/${formatNumber(batches.length)} - ${formatNumber(totalProcessed)} title(s) processed, ${formatNumber(totalRemaining)} remaining`);
       }
     } finally {
-      // Save any remaining accumulated titles before unregistering
-      await saveCallback();
+      // Accumulate any remaining titles before unregistering (coordinator will save on finalSave)
+      if (processedTitles.length > 0) {
+        this.jobSaveCoordinatorManager.accumulateProviderTitles(this.providerId, processedTitles);
+      }
       
-      // Unregister this type from progress tracking (will also call save callback)
+      // Accumulate any remaining ignored titles
+      if (this._accumulatedIgnoredTitles[type] && Object.keys(this._accumulatedIgnoredTitles[type]).length > 0) {
+        const ignoredByTitleKey = Object.fromEntries(
+          Object.entries(this._accumulatedIgnoredTitles[type]).map(([titleId, reason]) => [
+            generateTitleKey(type, titleId),
+            reason
+          ])
+        );
+        this.jobSaveCoordinatorManager.accumulateIgnoredTitles(this.providerId, ignoredByTitleKey);
+      }
+      
+      // Unregister this type from progress tracking
       this.unregisterProgress(type);
     }
 

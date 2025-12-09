@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('TitleRepository');
 
 /**
  * Repository for titles collection
@@ -13,6 +10,7 @@ export class TitleRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'TitleRepository',
       mongoClient,
       'titles',
       (doc) => doc.title_key,
@@ -149,17 +147,17 @@ export class TitleRepository extends BaseRepository {
         const hasTextIndex = indexes.some(idx => idx.textIndexVersion !== undefined);
         if (!hasTextIndex) {
           await collection.createIndex({ title: 'text' });
-          logger.debug('Created text index: title');
+          this.logger.debug('Created text index: title');
         }
       } catch (error) {
         // Text index might fail if there's already a different index on title
         // This is okay, we'll use regex search instead
-        logger.debug('Text index creation skipped (may already exist or conflict)');
+        this.logger.debug('Text index creation skipped (may already exist or conflict)');
       }
 
-      logger.debug('TitleRepository indexes initialized');
+      this.logger.debug('TitleRepository indexes initialized');
     } catch (error) {
-      logger.error(`Error initializing indexes: ${error.message}`);
+      this.logger.error(`Error initializing indexes: ${error.message}`);
       throw error;
     }
   }

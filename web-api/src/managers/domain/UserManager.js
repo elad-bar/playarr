@@ -164,7 +164,6 @@ class UserManager extends BaseDomainManager {
     // Build public user object matching Python's UserPublic fields EXACTLY
     // Python UserPublic: username, first_name, last_name, api_key, status, role, created_at, updated_at
     // NO watchlist field in UserPublic
-    // Also include liveTV if present (for Live TV configuration)
     const publicUser = {
       username: user.username || '',
       first_name: user.first_name || '',
@@ -175,11 +174,6 @@ class UserManager extends BaseDomainManager {
       created_at: convertToISO(user.created_at),
       updated_at: convertToISO(user.updated_at),
     };
-    
-    // Include liveTV if present
-    if (user.liveTV !== undefined) {
-      publicUser.liveTV = user.liveTV;
-    }
     
     return publicUser;
   }
@@ -277,29 +271,6 @@ class UserManager extends BaseDomainManager {
     }
   }
 
-  /**
-   * Get users with Live TV configuration (m3u_url must exist, not be null, and not be empty string)
-   * Used by SyncLiveTVJob to get users that need Live TV syncing
-   * @returns {Promise<Array<Object>>} Array of user objects with liveTV configuration
-   */
-  async getUsersWithLiveTVConfig() {
-    try {
-      const users = await this._repository.findByQuery({
-        $and: [
-          { 'liveTV': { $exists: true } },
-          { 'liveTV.m3u_url': { $exists: true } },
-          { 'liveTV.m3u_url': { $ne: null } },
-          { 'liveTV.m3u_url': { $ne: '' } },
-          { 'liveTV.m3u_url': { $type: 'string' } },
-          { 'liveTV.m3u_url': { $regex: /^.+$/ } } // Ensure at least one non-whitespace character
-        ]
-      });
-      return users || [];
-    } catch (error) {
-      this.logger.error('Error getting users with Live TV config:', error);
-      throw new AppError('Failed to get users with Live TV config', 500);
-    }
-  }
 
   /**
    * Get a specific user by username
@@ -476,10 +447,6 @@ class UserManager extends BaseDomainManager {
         user.role = updates.role;
         updateData.role = updates.role;
       }
-      if (updates.liveTV !== undefined) {
-        user.liveTV = updates.liveTV;
-        updateData.liveTV = updates.liveTV;
-      }
 
       const now = new Date();
       user.updated_at = now;
@@ -649,16 +616,13 @@ class UserManager extends BaseDomainManager {
    */
   async updateProfile(username, updates) {
     try {
-      // Allow first_name, last_name, and liveTV for profile updates
+      // Allow first_name and last_name for profile updates
       const updateData = {};
       if (updates.first_name !== undefined) {
         updateData.first_name = updates.first_name;
       }
       if (updates.last_name !== undefined) {
         updateData.last_name = updates.last_name;
-      }
-      if (updates.liveTV !== undefined) {
-        updateData.liveTV = updates.liveTV;
       }
 
       return await this.updateUser(username, updateData);

@@ -8,9 +8,13 @@ const logger = createLogger('WebSocketService');
  * Provides compatibility with socket.io-client in the UI
  */
 class WebSocketService {
-  constructor() {
+  /**
+   * @param {object} handlers - Map of event names to handler functions (e.g., { 'log:subscribe': handlerFn })
+   */
+  constructor(handlers) {
     this._io = null;
     this._apiNamespace = null;
+    this._handlers = handlers;
   }
 
   /**
@@ -72,6 +76,14 @@ class WebSocketService {
     socket.on('ping', () => {
       socket.emit('pong');
     });
+
+    // Register custom event handlers if provided
+    if (this._handlers && Object.keys(this._handlers).length > 0) {
+      for (const [event, handler] of Object.entries(this._handlers)) {
+        socket.on(event, handler.bind(null, socket));
+      }
+      logger.debug(`Registered ${Object.keys(this._handlers).length} custom event handler(s)`);
+    }
   }
 
   /**
@@ -126,6 +138,7 @@ class WebSocketService {
       });
       this._io = null;
       this._apiNamespace = null;
+      this._handlers = null;
     }
   }
 

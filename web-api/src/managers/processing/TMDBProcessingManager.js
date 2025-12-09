@@ -10,25 +10,27 @@ import { extractYearFromTitle, extractBaseTitle, extractYearFromReleaseDate, gen
 export class TMDBProcessingManager extends BaseProcessingManager {
   /**
    * Constructor
-   * @param {Object} providerData - Provider configuration data
    * @param {import('../domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager (for saving and reading titles)
    * @param {import('../domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
    * @param {import('../domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager (for fetching all provider titles)
+   * @param {import('../orchestration/JobSaveCoordinatorManager.js').JobSaveCoordinatorManager} jobSaveCoordinatorManager - Job save coordinator manager (required)
    */
-  constructor(providerData, titlesManager, tmdbManager, providerTitlesManager) {
+  constructor(titlesManager, tmdbManager, providerTitlesManager, jobSaveCoordinatorManager) {
+    // Create providerData internally since it's always the same
+    const providerData = {
+      id: 'tmdb',
+      type: 'tmdb',
+      api_rate: {
+        concurrent: 45,
+        duration_seconds: 1
+      }
+    };
+    
     super(providerData, 'TMDB');
-    if (!titlesManager) {
-      throw new Error('TitlesManager is required');
-    }
-    if (!tmdbManager) {
-      throw new Error('TMDBManager is required');
-    }
-    if (!providerTitlesManager) {
-      throw new Error('ProviderTitlesManager is required');
-    }
     this.titlesManager = titlesManager;
     this.tmdbManager = tmdbManager;
     this.providerTitlesManager = providerTitlesManager;
+    this.jobSaveCoordinatorManager = jobSaveCoordinatorManager;
     
     // In-memory cache for main titles
     // Loaded once at the start of job execution and kept in memory
@@ -341,23 +343,10 @@ export class TMDBProcessingManager extends BaseProcessingManager {
       allMainTitles.map(t => [t.title_key || generateTitleKey(t.type, t.title_id), t])
     );
 
-    // Save callback for progress tracking
-    const saveCallback = async () => {
-      if (updatedTitles.length > 0) {
-        try {
-          await this._saveMainTitles(updatedTitles, existingMainTitleMap);
-          this.logger.debug(`Saved ${formatNumber(updatedTitles.length)} accumulated titles with similar titles via progress callback`);
-          updatedTitles.length = 0; // Clear after saving
-        } catch (error) {
-          this.logger.error(`Error saving accumulated titles: ${error.message}`);
-        }
-      }
-    };
-
-    // Register for progress tracking
+    // Register for progress tracking only (no save callback - coordinator handles saves)
     const progressKey = 'similar_titles';
     let totalRemaining = titlesToProcess.length;
-    this.registerProgress(progressKey, totalRemaining, saveCallback);
+    this.registerProgress(progressKey, totalRemaining, null);
 
     try {
       // Process in batches
@@ -390,7 +379,8 @@ export class TMDBProcessingManager extends BaseProcessingManager {
               lastUpdated: new Date().toISOString() // Update lastUpdated to mark as processed
             };
 
-            updatedTitles.push(updatedTitle);
+            // Accumulate to coordinator instead of local array
+            this.jobSaveCoordinatorManager.accumulateMainTitles([updatedTitle], existingMainTitleMap);
             processedCount++;
           } catch (error) {
             const titleKey = mainTitle.title_key || generateTitleKey(mainTitle.type, mainTitle.title_id);
@@ -402,7 +392,8 @@ export class TMDBProcessingManager extends BaseProcessingManager {
             }
             // Update lastUpdated even on error to prevent reprocessing
             existingTitle.lastUpdated = new Date().toISOString();
-            updatedTitles.push(existingTitle);
+            // Accumulate to coordinator
+            this.jobSaveCoordinatorManager.accumulateMainTitles([existingTitle], existingMainTitleMap);
           }
         }));
 
@@ -417,16 +408,8 @@ export class TMDBProcessingManager extends BaseProcessingManager {
         }
       }
     } finally {
-      // Save any remaining accumulated titles
-      await saveCallback();
-      
-      // Unregister from progress tracking
+      // Unregister from progress tracking (coordinator handles final save)
       this.unregisterProgress(progressKey);
-    }
-
-    // Final save to ensure all titles are saved
-    if (updatedTitles.length > 0) {
-      await this._saveMainTitles(updatedTitles, existingMainTitleMap);
     }
 
     this.logger.info(`Similar titles enrichment completed for ${processedCount} titles`);
@@ -746,10 +729,6 @@ export class TMDBProcessingManager extends BaseProcessingManager {
     const totalTitles = titlesToProcess.length;
     const failedTitles = []; // Track titles that failed to get TMDB details
 
-    // Track time for periodic saves and progress logging
-    let lastSaveTime = Date.now();
-    const SAVE_INTERVAL_MS = 30000; // 30 seconds
-
     try {
       // Process in batches
       for (let i = 0; i < titlesToProcess.length; i += batchSize) {
@@ -807,23 +786,15 @@ export class TMDBProcessingManager extends BaseProcessingManager {
           }
         }));
 
-        // Check if 30 seconds have passed since last save
-        const now = Date.now();
-        const timeSinceLastSave = now - lastSaveTime;
+        // Accumulate main titles to coordinator after each batch (coordinator handles periodic saves)
+        if (mainTitles.length > 0) {
+          this.jobSaveCoordinatorManager.accumulateMainTitles(mainTitles, existingMainTitleMap);
+          mainTitles.length = 0; // Clear after accumulating
+        }
 
-        if (timeSinceLastSave >= SAVE_INTERVAL_MS) {
-          // Save accumulated data
-          if (mainTitles.length > 0) {
-            await this._saveMainTitles(mainTitles, existingMainTitleMap);
-            this.logger.debug(`Saved ${formatNumber(mainTitles.length)} main titles (periodic save)`);
-            mainTitles.length = 0;
-          }
-
-          // Log progress
+        // Log progress
+        if ((i + batchSize) % 100 === 0 || i + batchSize >= titlesToProcess.length) {
           this.logger.info(`Progress: ${processedCount} out of ${totalTitles} titles processed`);
-
-          // Update last save time
-          lastSaveTime = now;
         }
       }
 
@@ -832,10 +803,9 @@ export class TMDBProcessingManager extends BaseProcessingManager {
         await this._markProviderTitlesAsIgnored(failedTitles);
       }
 
-      // Final save for any remaining data
+      // Accumulate any remaining main titles (coordinator will save on finalSave)
       if (mainTitles.length > 0) {
-        await this._saveMainTitles(mainTitles, existingMainTitleMap);
-        this.logger.debug(`Saved ${formatNumber(mainTitles.length)} main titles (final save)`);
+        this.jobSaveCoordinatorManager.accumulateMainTitles(mainTitles, existingMainTitleMap);
       }
 
       // Final progress log
@@ -1115,24 +1085,9 @@ export class TMDBProcessingManager extends BaseProcessingManager {
     // Track remaining titles for progress
     let totalRemaining = titlesToProcess.length;
 
-    // Save callback for progress tracking
-    const saveCallback = async () => {
-      // Save main titles
-      if (mainTitles.length > 0) {
-        try {
-          await this._saveMainTitles(mainTitles, existingMainTitleMap);
-          this.logger.debug(`Saved ${formatNumber(mainTitles.length)} accumulated main titles via progress callback`);
-          mainTitles.length = 0; // Clear after saving
-        } catch (error) {
-          this.logger.error(`Error saving accumulated main titles: ${error.message}`);
-        }
-      }
-      
-    };
-
-    // Register for progress tracking
+    // Register for progress tracking only (no save callback - coordinator handles saves)
     const progressKey = 'main_titles';
-    this.registerProgress(progressKey, totalRemaining, saveCallback);
+    this.registerProgress(progressKey, totalRemaining, null);
 
     try {
       // Process in batches
@@ -1161,7 +1116,8 @@ export class TMDBProcessingManager extends BaseProcessingManager {
               mainTitle.createdAt = existing.createdAt;
             }
             
-            mainTitles.push(mainTitle);
+            // Accumulate to coordinator instead of local array
+            this.jobSaveCoordinatorManager.accumulateMainTitles([mainTitle], existingMainTitleMap);
             
             processedCount++;
             
@@ -1182,16 +1138,8 @@ export class TMDBProcessingManager extends BaseProcessingManager {
         }
       }
     } finally {
-      // Save any remaining accumulated titles
-      await saveCallback();
-      
-      // Unregister from progress tracking
+      // Unregister from progress tracking (coordinator handles final save)
       this.unregisterProgress(progressKey);
-    }
-
-    // Final save to ensure all titles are saved
-    if (mainTitles.length > 0) {
-      await this._saveMainTitles(mainTitles, existingMainTitleMap);
     }
 
     return processedCountByType;

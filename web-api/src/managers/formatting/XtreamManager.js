@@ -12,10 +12,10 @@ class XtreamManager extends BaseWatchlistFormattingManager {
    * @param {import('../domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance
    * @param {import('../domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance
    * @param {import('../domain/ProgramManager.js').ProgramManager} programManager - Program manager instance
-   * @param {import('../../services/metrics.js').default} metricsService - Metrics service instance
+   * @param {import('../../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance
    */
-  constructor(titlesManager, iptvProviderManager, channelManager, programManager, metricsService) {
-    super('XtreamManager', titlesManager, iptvProviderManager, channelManager, programManager, metricsService);
+  constructor(titlesManager, iptvProviderManager, channelManager, programManager, metricsManager) {
+    super('XtreamManager', titlesManager, iptvProviderManager, channelManager, programManager, metricsManager);
     this._titlesCollection = toCollectionName(DatabaseCollections.TITLES);
   }
 

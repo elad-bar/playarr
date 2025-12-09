@@ -254,7 +254,6 @@ Level 2: Business Logic
 - Extends `BaseRouter`
 - Exposes `GET /metrics` endpoint (Bearer token authentication)
 - Exposes `GET /metrics/json` endpoint (JWT authentication via cookie)
-- Exposes `GET /metrics/test` endpoint (for testing routing)
 - Returns Prometheus format (`text/plain; version=0.0.4`) for `/metrics`
 - Returns JSON format for `/metrics/json`
 

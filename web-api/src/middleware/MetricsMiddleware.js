@@ -1,17 +1,13 @@
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('MetricsMiddleware');
-
 /**
  * Middleware to track HTTP request metrics
  * Should be added early in the middleware chain (after body parsing, before routes)
  */
 class MetricsMiddleware {
   /**
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance
    */
-  constructor(metricsService) {
-    this.metricsService = metricsService;
+  constructor(metricsManager) {
+    this.metricsManager = metricsManager;
     this.trackRequest = this.trackRequest.bind(this);
   }
 
@@ -78,14 +74,14 @@ class MetricsMiddleware {
       const username = this._getUsername(req);
 
       // Track request count
-      this.metricsService.incrementCounter('http_requests', {
+      this.metricsManager.incrementCounter('http_requests', {
         endpoint,
         status_code: statusCode.toString(),
         username
       });
 
       // Track request duration
-      this.metricsService.observeHistogram('http_request_duration', {
+      this.metricsManager.observeHistogram('http_request_duration', {
         endpoint,
         username
       }, duration);
@@ -106,7 +102,7 @@ class MetricsMiddleware {
     const username = this._getUsername(req);
     const errorType = error.constructor.name || 'AppError';
 
-    this.metricsService.incrementCounter('managed_errors', {
+    this.metricsManager.incrementCounter('managed_errors', {
       endpoint,
       error_type: errorType,
       username
@@ -123,7 +119,7 @@ class MetricsMiddleware {
     const endpointPath = endpoint || req._metricsEndpoint || this._getEndpoint(req);
     const username = req.body?.username || req.query?.username || req.params?.username || 'unknown';
 
-    this.metricsService.incrementCounter('authentication_failures', {
+    this.metricsManager.incrementCounter('authentication_failures', {
       endpoint: endpointPath,
       username
     });

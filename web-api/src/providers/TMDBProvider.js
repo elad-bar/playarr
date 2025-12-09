@@ -18,14 +18,15 @@ const TMDB_RATE_CONFIG = {
  */
 export class TMDBProvider extends BaseProvider {
   /**
-   * @param {string} [apiKey] - Optional TMDB API key (can be set later via updateApiKey)
+   * @param {import('../managers/domain/SettingsManager.js').SettingsManager} settingsManager - Settings manager instance
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance (required)
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance (optional)
    */
-  constructor(apiKey = null, cacheDir = null, metricsService) {
-    super('TMDBProvider', cacheDir, metricsService);
-    this._apiKey = apiKey;
-    this._headers = this._buildHeaders(apiKey);
+  constructor(settingsManager, cacheDir = null, metricsManager) {
+    super('TMDBProvider', cacheDir, metricsManager);
+    this._settingsManager = settingsManager;
+    this._apiKey = null;
+    this._headers = null;
     
     // Create rate limiter
     this.limiter = this._createLimiter(TMDB_RATE_CONFIG);
@@ -74,15 +75,25 @@ export class TMDBProvider extends BaseProvider {
   }
 
   /**
-   * Update the API key and rebuild headers
-   * @param {string} apiKey - New TMDB API key
+   * Initialize TMDB provider by loading API key from settings
+   * @returns {Promise<void>}
    */
-  updateApiKey(apiKey) {
-    this._apiKey = apiKey;
-    this._headers = this._buildHeaders(apiKey);
-    this.logger.debug('TMDB API key updated');
+  async initialize() {
+    try {
+      const tmdbTokenKey = 'tmdb_token';
+      const apiKeyResult = await this._settingsManager.getSetting(tmdbTokenKey);
+      if (apiKeyResult.value) { 
+        this._apiKey = apiKeyResult.value;
+        this._headers = this._buildHeaders(this._apiKey);
+        this.logger.debug('TMDB API key loaded from settings');
+      } else {
+        this.logger.warn('TMDB API key not found in settings');
+      }
+    } catch (error) {
+      this.logger.warn(`Could not load TMDB API key from settings: ${error.message}`);
+    }
   }
-
+  
   /**
    * Verify a TMDB API key
    * Note: This method uses the provided apiKey parameter (not stored key) for verification

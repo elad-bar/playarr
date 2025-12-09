@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('ProviderTitleRepository');
 
 /**
  * Repository for provider_titles collection
@@ -13,6 +10,7 @@ export class ProviderTitleRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'ProviderTitleRepository',
       mongoClient,
       'provider_titles',
       (doc) => `${doc.provider_id}|${doc.title_key}`,

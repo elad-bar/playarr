@@ -24,13 +24,13 @@ class BaseFormattingManager extends BaseManager {
    * @param {string} managerName - Manager name for logging
    * @param {import('../domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager instance
    * @param {import('../domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance
-   * @param {import('../../services/metrics.js').default} metricsService - Metrics service instance
+   * @param {import('../../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance
    */
-  constructor(managerName, titlesManager, iptvProviderManager, metricsService) {
+  constructor(managerName, titlesManager, iptvProviderManager, metricsManager) {
     super(managerName);
     this._titlesManager = titlesManager;
     this._iptvProviderManager = iptvProviderManager;
-    this._metricsService = metricsService;
+    this._metricsManager = metricsManager;
     this._timeout = 7500; // 7.5 seconds timeout for URL checks
     
     // Load balancing state
@@ -251,10 +251,10 @@ class BaseFormattingManager extends BaseManager {
       const cached = this._getCachedSelection(cacheKey);
       if (cached) {
         this.logger.info(`Using cached provider selection for ${titleKey} (user: ${username}, provider: ${cached.provider_id})`);
-        this._metricsService.incrementCounter('cache_operations', { operation: 'hit' });
+        this._metricsManager.incrementCounter('cache_operations', { operation: 'hit' });
         return cached.url;
       }
-      this._metricsService.incrementCounter('cache_operations', { operation: 'miss' });
+      this._metricsManager.incrementCounter('cache_operations', { operation: 'miss' });
 
       // Get sources and apply load balancing
       const sources = await this._getSources(titleId, mediaType, seasonNumber, episodeNumber);
@@ -310,8 +310,8 @@ class BaseFormattingManager extends BaseManager {
         this._cacheSelection(cacheKey, winner.provider_id, winner.url);
         
         // Track metrics
-        this._metricsService.incrementCounter('best_source_selections', { provider_id: winner.provider_id });
-        this._metricsService.observeHistogram('best_source_selection_duration', { media_type: mediaType }, raceResults.duration / 1000);
+        this._metricsManager.incrementCounter('best_source_selections', { provider_id: winner.provider_id });
+        this._metricsManager.observeHistogram('best_source_selection_duration', { media_type: mediaType }, raceResults.duration / 1000);
         
         this.logger.info(
           `Best source for ${titleKey} selected: ${winner.url} ` +
@@ -334,9 +334,9 @@ class BaseFormattingManager extends BaseManager {
           this._cacheSelection(cacheKey, source.provider_id, sourceUrl);
           
           // Track metrics
-          this._metricsService.incrementCounter('best_source_selections', { provider_id: source.provider_id });
+          this._metricsManager.incrementCounter('best_source_selections', { provider_id: source.provider_id });
           const totalDuration = (Date.now() - raceResults.startTime) / 1000;
-          this._metricsService.observeHistogram('best_source_selection_duration', { media_type: mediaType }, totalDuration);
+          this._metricsManager.observeHistogram('best_source_selection_duration', { media_type: mediaType }, totalDuration);
           
           this.logger.info(`Best source for ${titleKey} is valid: ${sourceUrl} (user: ${username}, provider: ${source.provider_id}, cached for 30s)`);
           return sourceUrl;

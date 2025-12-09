@@ -1,8 +1,6 @@
-import { createLogger } from '../utils/logger.js';
+import { createLogger } from '../utils/this.logger.js';
 import { formatNumber } from '../utils/numberFormat.js';
 import { DB_NAME } from '../config/database.js';
-
-const logger = createLogger('BaseRepository');
 
 /**
  * Base repository with common patterns for entity-specific repositories
@@ -11,6 +9,7 @@ const logger = createLogger('BaseRepository');
  */
 export class BaseRepository {
   /**
+   * @param {string} repositoryName - Repository name for logging (required)
    * @param {import('mongodb').MongoClient} mongoClient - MongoDB client instance
    * @param {string} collectionName - Collection name for this repository
    * @param {Function} keyBuilder - Function to build unique key from document: (doc) => string
@@ -18,7 +17,8 @@ export class BaseRepository {
    * @param {string} [schemaVersion='v1'] - Schema version (e.g., 'v1', 'v2')
    * @param {number} [defaultBatchSize=1000] - Default batch size for bulk operations
    */
-  constructor(mongoClient, collectionName, keyBuilder, collectionType = 'data', schemaVersion = 'v1', defaultBatchSize = 1000) {
+  constructor(repositoryName, mongoClient, collectionName, keyBuilder, collectionType = 'data', schemaVersion = 'v1', defaultBatchSize = 1000) {
+    this.logger = createLogger(repositoryName);
     this.client = mongoClient;
     this.db = mongoClient.db(DB_NAME);
     this.defaultBatchSize = defaultBatchSize;
@@ -71,7 +71,7 @@ export class BaseRepository {
 
       return await cursor.limit(1).next() || null;
     } catch (error) {
-      logger.error(`Error finding one in ${this.collectionName}:`, error);
+      this.logger.error(`Error finding one in ${this.collectionName}:`, error);
       return null;
     }
   }
@@ -108,7 +108,7 @@ export class BaseRepository {
 
       return await cursor.toArray();
     } catch (error) {
-      logger.error(`Error finding many in ${this.collectionName}:`, error);
+      this.logger.error(`Error finding many in ${this.collectionName}:`, error);
       return [];
     }
   }
@@ -134,7 +134,7 @@ export class BaseRepository {
       
       return map;
     } catch (error) {
-      logger.error(`Error finding many as map in ${this.collectionName}:`, error);
+      this.logger.error(`Error finding many as map in ${this.collectionName}:`, error);
       return new Map();
     }
   }
@@ -150,7 +150,7 @@ export class BaseRepository {
       const collection = this.db.collection(this.collectionName);
       return await collection.countDocuments(query);
     } catch (error) {
-      logger.error(`Error counting in ${this.collectionName}:`, error);
+      this.logger.error(`Error counting in ${this.collectionName}:`, error);
       return 0;
     }
   }
@@ -166,7 +166,7 @@ export class BaseRepository {
       const collection = this.db.collection(this.collectionName);
       return await collection.aggregate(pipeline).toArray();
     } catch (error) {
-      logger.error(`Error aggregating in ${this.collectionName}:`, error);
+      this.logger.error(`Error aggregating in ${this.collectionName}:`, error);
       return [];
     }
   }
@@ -184,7 +184,7 @@ export class BaseRepository {
       const collection = this.db.collection(this.collectionName);
       return await collection.insertOne(document, options);
     } catch (error) {
-      logger.error(`Error inserting one in ${this.collectionName}:`, error);
+      this.logger.error(`Error inserting one in ${this.collectionName}:`, error);
       throw error;
     }
   }
@@ -224,7 +224,7 @@ export class BaseRepository {
         return { insertedCount: result.insertedCount };
       }
     } catch (error) {
-      logger.error(`Error inserting many in ${this.collectionName}:`, error);
+      this.logger.error(`Error inserting many in ${this.collectionName}:`, error);
       throw error;
     }
   }
@@ -244,7 +244,7 @@ export class BaseRepository {
       const collection = this.db.collection(this.collectionName);
       return await collection.updateOne(filter, update, options);
     } catch (error) {
-      logger.error(`Error updating one in ${this.collectionName}:`, error);
+      this.logger.error(`Error updating one in ${this.collectionName}:`, error);
       throw error;
     }
   }
@@ -263,7 +263,7 @@ export class BaseRepository {
       const collection = this.db.collection(this.collectionName);
       return await collection.updateMany(filter, update, options);
     } catch (error) {
-      logger.error(`Error updating many in ${this.collectionName}:`, error);
+      this.logger.error(`Error updating many in ${this.collectionName}:`, error);
       throw error;
     }
   }
@@ -317,7 +317,7 @@ export class BaseRepository {
         };
       }
     } catch (error) {
-      logger.error(`Error bulk writing in ${this.collectionName}:`, error);
+      this.logger.error(`Error bulk writing in ${this.collectionName}:`, error);
       throw error;
     }
   }
@@ -334,7 +334,7 @@ export class BaseRepository {
       const collection = this.db.collection(this.collectionName);
       return await collection.deleteOne(filter, options);
     } catch (error) {
-      logger.error(`Error deleting one in ${this.collectionName}:`, error);
+      this.logger.error(`Error deleting one in ${this.collectionName}:`, error);
       throw error;
     }
   }
@@ -351,7 +351,7 @@ export class BaseRepository {
       const collection = this.db.collection(this.collectionName);
       return await collection.deleteMany(filter, options);
     } catch (error) {
-      logger.error(`Error deleting many in ${this.collectionName}:`, error);
+      this.logger.error(`Error deleting many in ${this.collectionName}:`, error);
       throw error;
     }
   }
@@ -443,7 +443,7 @@ export class BaseRepository {
             } catch (dropError) {
               // If drop fails, try to continue - might be a race condition
               // The createIndex call below will handle the conflict
-              logger.debug(`Failed to drop existing index ${index.name}: ${dropError.message}`);
+              this.logger.debug(`Failed to drop existing index ${index.name}: ${dropError.message}`);
             }
             break; // Exit loop and create new index
           }
@@ -460,7 +460,7 @@ export class BaseRepository {
       )) {
         // Index conflict - likely a race condition or the drop didn't work
         // Return false to indicate we couldn't create it, but don't throw
-        logger.warn(`Index creation skipped due to conflict: ${error.message}`);
+        this.logger.warn(`Index creation skipped due to conflict: ${error.message}`);
         return false;
       }
       throw error;
@@ -581,7 +581,7 @@ export class BaseRepository {
       return 0;
     }
 
-    logger.info(`Found ${formatNumber(duplicateGroups.length)} duplicate key groups in ${this.collectionName}, removing duplicates...`);
+    this.logger.info(`Found ${formatNumber(duplicateGroups.length)} duplicate key groups in ${this.collectionName}, removing duplicates...`);
     let totalRemoved = 0;
 
     // Now fetch only minimal fields for groups that have duplicates
@@ -603,11 +603,11 @@ export class BaseRepository {
         const idsToRemove = toRemove.map(d => d._id);
         const result = await collection.deleteMany({ _id: { $in: idsToRemove } });
         totalRemoved += result.deletedCount;
-        logger.debug(`Removed ${formatNumber(result.deletedCount)} duplicate(s) for key: ${JSON.stringify(dupGroup._id)}`);
+        this.logger.debug(`Removed ${formatNumber(result.deletedCount)} duplicate(s) for key: ${JSON.stringify(dupGroup._id)}`);
       }
     }
 
-    logger.info(`Removed ${totalRemoved} duplicate document(s) from ${this.collectionName}`);
+    this.logger.info(`Removed ${totalRemoved} duplicate document(s) from ${this.collectionName}`);
     return totalRemoved;
   }
 
@@ -632,7 +632,7 @@ export class BaseRepository {
         .findOne({ _id: this.collectionName });
       return metadata?.version || null; // null = v1 (default)
     } catch (error) {
-      logger.error(`Error getting stored version for ${this.collectionName}: ${error.message}`);
+      this.logger.error(`Error getting stored version for ${this.collectionName}: ${error.message}`);
       return null; // On error, assume v1
     }
   }
@@ -658,7 +658,7 @@ export class BaseRepository {
         { upsert: true }
       );
     } catch (error) {
-      logger.error(`Error updating metadata for ${this.collectionName}: ${error.message}`);
+      this.logger.error(`Error updating metadata for ${this.collectionName}: ${error.message}`);
       throw error;
     }
   }
@@ -677,7 +677,7 @@ export class BaseRepository {
       }).toArray();
       return collections.length > 0;
     } catch (error) {
-      logger.error(`Error checking backup existence for ${this.collectionName} ${version}: ${error.message}`);
+      this.logger.error(`Error checking backup existence for ${this.collectionName} ${version}: ${error.message}`);
       return false;
     }
   }
@@ -697,7 +697,7 @@ export class BaseRepository {
       }).toArray();
       
       if (existingBackups.length > 0) {
-        logger.info(`Backup already exists for ${this.collectionName} ${version}, skipping backup creation`);
+        this.logger.info(`Backup already exists for ${this.collectionName} ${version}, skipping backup creation`);
         return existingBackups[0].name;
       }
       
@@ -711,17 +711,17 @@ export class BaseRepository {
       await collection.rename(backupName);
       
       // Log backup creation
-      logger.warn('═══════════════════════════════════════════════════════════════');
-      logger.warn(`⚠️  COLLECTION BACKUP CREATED: ${this.collectionName}`);
-      logger.warn(`   Backup name: ${backupName}`);
-      logger.warn(`   Version backed up: ${version}`);
-      logger.warn(`   Documents backed up: ${docCount}`);
-      logger.warn(`   Reason: Schema version mismatch (${version} → ${this.schemaVersion})`);
-      logger.warn('═══════════════════════════════════════════════════════════════');
+      this.logger.warn('═══════════════════════════════════════════════════════════════');
+      this.logger.warn(`⚠️  COLLECTION BACKUP CREATED: ${this.collectionName}`);
+      this.logger.warn(`   Backup name: ${backupName}`);
+      this.logger.warn(`   Version backed up: ${version}`);
+      this.logger.warn(`   Documents backed up: ${docCount}`);
+      this.logger.warn(`   Reason: Schema version mismatch (${version} → ${this.schemaVersion})`);
+      this.logger.warn('═══════════════════════════════════════════════════════════════');
       
       return backupName;
     } catch (error) {
-      logger.error(`Error backing up collection ${this.collectionName}: ${error.message}`);
+      this.logger.error(`Error backing up collection ${this.collectionName}: ${error.message}`);
       throw error;
     }
   }
@@ -828,7 +828,7 @@ export class BaseRepository {
       const indexDefinitions = this.getIndexDefinitions();
       
       if (indexDefinitions.length === 0) {
-        logger.debug(`No index definitions found for ${this.collectionName}`);
+        this.logger.debug(`No index definitions found for ${this.collectionName}`);
         return;
       }
 
@@ -851,34 +851,34 @@ export class BaseRepository {
             const transformedCount = await this._migrateCollectionSequentially(storedVersion, expectedVersion);
             if (transformedCount !== null) {
               // Transformation successful
-              logger.info(`✅ Successfully migrated ${this.collectionName} from ${storedVersion} to ${expectedVersion} (${transformedCount} documents)`);
+              this.logger.info(`✅ Successfully migrated ${this.collectionName} from ${storedVersion} to ${expectedVersion} (${transformedCount} documents)`);
               // Continue with index creation
             } else {
               // No transformation available - fall back to error
-              logger.error('═══════════════════════════════════════════════════════════════');
-              logger.error(`❌ CONFIGURATION COLLECTION SCHEMA MISMATCH: ${this.collectionName}`);
-              logger.error(`   Version mismatch: ${versionToBackup} → ${expectedVersion}`);
-              logger.error(`   Backup created: ${this.collectionName}_${versionToBackup}_backup_*`);
-              logger.error(`   No transformation available for this version jump`);
-              logger.error(`   ACTION REQUIRED: Collection not migrated. Please restore from backup manually.`);
-              logger.error('═══════════════════════════════════════════════════════════════');
+              this.logger.error('═══════════════════════════════════════════════════════════════');
+              this.logger.error(`❌ CONFIGURATION COLLECTION SCHEMA MISMATCH: ${this.collectionName}`);
+              this.logger.error(`   Version mismatch: ${versionToBackup} → ${expectedVersion}`);
+              this.logger.error(`   Backup created: ${this.collectionName}_${versionToBackup}_backup_*`);
+              this.logger.error(`   No transformation available for this version jump`);
+              this.logger.error(`   ACTION REQUIRED: Collection not migrated. Please restore from backup manually.`);
+              this.logger.error('═══════════════════════════════════════════════════════════════');
               return; // Stop initialization for this collection
             }
           } catch (error) {
             // Transformation failed
-            logger.error('═══════════════════════════════════════════════════════════════');
-            logger.error(`❌ CONFIGURATION COLLECTION MIGRATION FAILED: ${this.collectionName}`);
-            logger.error(`   Version: ${versionToBackup} → ${expectedVersion}`);
-            logger.error(`   Error: ${error.message}`);
-            logger.error(`   Backup available: ${this.collectionName}_${versionToBackup}_backup_*`);
-            logger.error(`   Migration stopped. Collection remains at previous version.`);
-            logger.error(`   ACTION REQUIRED: Check logs and restore from backup if needed.`);
-            logger.error('═══════════════════════════════════════════════════════════════');
+            this.logger.error('═══════════════════════════════════════════════════════════════');
+            this.logger.error(`❌ CONFIGURATION COLLECTION MIGRATION FAILED: ${this.collectionName}`);
+            this.logger.error(`   Version: ${versionToBackup} → ${expectedVersion}`);
+            this.logger.error(`   Error: ${error.message}`);
+            this.logger.error(`   Backup available: ${this.collectionName}_${versionToBackup}_backup_*`);
+            this.logger.error(`   Migration stopped. Collection remains at previous version.`);
+            this.logger.error(`   ACTION REQUIRED: Check logs and restore from backup if needed.`);
+            this.logger.error('═══════════════════════════════════════════════════════════════');
             return; // Stop initialization for this collection
           }
         } else {
           // Data collection - recreate with new schema
-          logger.warn(`Data collection ${this.collectionName} will be recreated with schema ${expectedVersion}`);
+          this.logger.warn(`Data collection ${this.collectionName} will be recreated with schema ${expectedVersion}`);
           // Collection already renamed to backup, will be recreated when indexes are created
         }
       }
@@ -930,20 +930,20 @@ export class BaseRepository {
           
           await collection.createIndex(key, options);
           const indexDesc = description || JSON.stringify(key);
-          logger.debug(`Created index in ${this.collectionName}: ${indexDesc}`);
+          this.logger.debug(`Created index in ${this.collectionName}: ${indexDesc}`);
         } catch (error) {
           // Handle duplicate key errors by backing up and retrying
           if (error.code === 11000 || error.message?.includes('duplicate key')) {
             const storedVersion = await this._getStoredVersion() || 'v1';
-            logger.warn(`Duplicate key error creating index ${keySpecStr} in ${this.collectionName}, backing up collection...`);
+            this.logger.warn(`Duplicate key error creating index ${keySpecStr} in ${this.collectionName}, backing up collection...`);
             try {
               // Backup the collection
               await this._backupCollection(storedVersion);
               // Retry creating the index (on new empty collection)
               await collection.createIndex(key, options);
-              logger.debug(`Recreated index in ${this.collectionName} after backup: ${description || JSON.stringify(key)}`);
+              this.logger.debug(`Recreated index in ${this.collectionName} after backup: ${description || JSON.stringify(key)}`);
             } catch (retryError) {
-              logger.error(`Failed to recreate index after backup: ${retryError.message}`);
+              this.logger.error(`Failed to recreate index after backup: ${retryError.message}`);
               throw retryError;
             }
           } else if (error.message && (
@@ -965,9 +965,9 @@ export class BaseRepository {
         collectionType: collectionType
       });
 
-      logger.debug(`${this.collectionName} indexes initialized`);
+      this.logger.debug(`${this.collectionName} indexes initialized`);
     } catch (error) {
-      logger.error(`Error initializing indexes for ${this.collectionName}: ${error.message}`);
+      this.logger.error(`Error initializing indexes for ${this.collectionName}: ${error.message}`);
       throw error;
     }
   }

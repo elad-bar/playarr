@@ -5,6 +5,7 @@
       "jobHistoryName": "SyncIPTVProviderTitlesJob",
       "interval": "6h",
       "delay": "1m",
+      "runOnStartup": true,
       "description": "Fetch metadata from IPTV providers and match TMDB IDs",
       "schedule": "1 minute after startup and Every 6 hours",
       "postExecute": ["providerTitlesMonitor", "updateMetrics"]
@@ -12,6 +13,7 @@
     {
       "name": "providerTitlesMonitor",
       "jobHistoryName": "ProviderTitlesMonitorJob",
+      "runOnStartup": false,
       "description": "Monitor provider titles for changes and process main titles (triggered by syncIPTVProviderTitles)",
       "schedule": "Manually triggered",
       "postExecute": ["updateMetrics"]
@@ -20,6 +22,7 @@
       "name": "syncLiveTV",
       "jobHistoryName": "SyncLiveTVJob",
       "interval": "12h",
+      "runOnStartup": true,
       "description": "Sync Live TV channels and EPG from user-configured M3U and EPG URLs",
       "schedule": "On startup and Every 12 hours",
       "postExecute": ["updateMetrics"]
@@ -28,6 +31,7 @@
       "name": "syncProviderDetails",
       "jobHistoryName": "SyncProviderDetailsJob",
       "interval": "1m",
+      "runOnStartup": true,
       "description": "Sync provider account details (expiration, connections) from authentication endpoints",
       "schedule": "On startup and Every 1 minute",
       "postExecute": ["updateMetrics"]
@@ -35,6 +39,7 @@
     {
       "name": "cleanupUnwantedProviderTitles",
       "jobHistoryName": "CleanupUnwantedProviderTitlesJob",
+      "runOnStartup": false,
       "description": "Cleanup unwanted provider titles (disabled providers, disabled media types, disabled categories)",
       "schedule": "Manually triggered",
       "postExecute": ["syncIPTVProviderTitles", "syncLiveTV", "updateMetrics"]
@@ -43,14 +48,16 @@
       "name": "syncProviderCategories",
       "jobHistoryName": "SyncProviderCategoriesJob",
       "interval": "12h",
+      "runOnStartup": true,
       "description": "Sync provider categories (movies and TV shows) from IPTV providers",
       "schedule": "On startup and Every 12 hours"
     },
     {
       "name": "updateMetrics",
       "jobHistoryName": "UpdateMetricsJob",
+      "runOnStartup": true,
       "description": "Update all gauge metrics from database (provider titles, main titles, channels, watchlists, users, provider connections)",
-      "schedule": "Manually triggered"
+      "schedule": "On startup and Manually triggered"
     }
   ]
 }

@@ -143,13 +143,14 @@ function buildServerInfo(req) {
  */
 class XtreamRouter extends BaseRouter {
   /**
+   * @param {import('express').Application} app - Express app instance
    * @param {import('../managers/formatting/XtreamManager.js').XtreamManager} xtreamManager - Xtream manager instance (extends BaseFormattingManager, has getBestSource method)
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
    * @param {import('../managers/domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance (for LiveTV)
    * @param {import('../managers/domain/ProgramManager.js').ProgramManager} programManager - Program manager instance (for LiveTV)
    */
-  constructor(xtreamManager, middleware, channelManager, programManager) {
-    super(middleware, 'XtreamRouter');
+  constructor(app, xtreamManager, middleware, channelManager, programManager) {
+    super(app, middleware, 'XtreamRouter');
     this._xtreamManager = xtreamManager;
     this._channelManager = channelManager;
     this._programManager = programManager;
@@ -177,73 +178,23 @@ class XtreamRouter extends BaseRouter {
   }
 
   /**
-   * Initialize routes for this router
+   * Get the base path(s) for this router
+   * @returns {string[]} Base path(s) for this router
    */
-  initialize() {
+  getBasePath() {
+    return ['/player_api.php', '/movie', '/series', '/live'];
+  }
+
+  /**
+   * Set up routes for this router
+   */
+  setupRoutes() {
     /**
      * GET /
      * Xtream Code API endpoint (mounted at /player_api.php)
      * Query parameters: username, password (API key), action
      */
-    this.router.get('/', this.middleware.requireXtreamAuth, async (req, res) => {
-      try {
-        // Set UTF-8 charset header for all JSON responses
-        res.setHeader('Content-Type', 'application/json; charset=UTF-8');
-        
-        const { username, password, action } = req.query;
-
-        // Get base URL for stream endpoints
-        const baseUrl = getBaseUrl(req);
-
-        // Handle action using config map
-        const handler = action ? this._actionHandlers[action] : null;
-        
-        if (handler) {
-          try {
-            const response = await handler(req, baseUrl);
-            return res.status(200).json(response);
-          } catch (error) {
-            // Handle specific errors from handlers
-            if (error.message === 'vod_id parameter required' || error.message === 'series_id parameter required') {
-              return this.returnErrorResponse(res, 400, error.message);
-            }
-            if (error.message === 'Movie not found' || error.message === 'Series not found') {
-              return this.returnErrorResponse(res, 404, error.message);
-            }
-            throw error; // Re-throw to be caught by outer catch
-          }
-        }
-
-        // Default: return user info if no action or unknown action
-        const nowSeconds = Math.floor(Date.now() / 1000);
-        const createdAtSeconds = toUnixSeconds(req.user?.created_at || req.user?.createdAt, nowSeconds);
-        // Use far-future timestamp (2099-12-31 23:59:59 UTC) for unlimited accounts instead of 0
-        const UNLIMITED_EXPIRY_SECONDS = 4102444799; // 2099-12-31 23:59:59 UTC
-        const expDateSeconds =
-          req.user?.expires_at || req.user?.exp_date
-            ? toUnixSeconds(req.user.expires_at || req.user.exp_date, 0)
-            : UNLIMITED_EXPIRY_SECONDS;
-
-        return res.status(200).json({
-          user_info: {
-            username: username,
-            password: password,
-            message: 'Active',
-            auth: '1',
-            status: 'Active',
-            exp_date: expDateSeconds.toString(),
-            is_trial: (req.user?.is_trial ? '1' : '0'),
-            active_cons: (req.user?.active_cons ?? 0).toString(),
-            created_at: createdAtSeconds.toString(),
-            max_connections: (req.user?.max_connections ?? 1).toString(),
-            allowed_output_formats: ['m3u8', 'ts']
-          },
-          server_info: buildServerInfo(req)
-        });
-      } catch (error) {
-        return this.returnErrorResponse(res, 500, 'Internal server error', `Xtream API error: ${error.message}`);
-      }
-    });
+    this.router.get('/', this.middleware.requireXtreamAuth, this._handleGetXtreamApi.bind(this));
 
     /**
      * GET /:username/:password/:streamId
@@ -252,22 +203,94 @@ class XtreamRouter extends BaseRouter {
      * Format: /{username}/{password}/tvshows-{title_id}-{season}-{episode}.mp4 or /{username}/{password}/{title_id}-{season}-{episode}.mp4 for series
      * Format: /{username}/{password}/{channel_id}.m3u8 for Live TV channels
      */
-    this.router.get('/:username/:password/:streamId', this.middleware.requireXtreamAuth, async (req, res) => {
-      try {
-        const { streamId } = req.params;
+    this.router.get('/:username/:password/:streamId', this.middleware.requireXtreamAuth, this._handleGetStream.bind(this));
+  }
 
-        // Get handler based on mount path (req.baseUrl)
-        const handler = this._streamTypeHandlers[req.baseUrl];
-        if (!handler) {
-          return this.returnErrorResponse(res, 404, 'Invalid stream type');
+  /**
+   * Handle GET / request
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   */
+  async _handleGetXtreamApi(req, res) {
+    try {
+      // Set UTF-8 charset header for all JSON responses
+      res.setHeader('Content-Type', 'application/json; charset=UTF-8');
+      
+      const { username, password, action } = req.query;
+
+      // Get base URL for stream endpoints
+      const baseUrl = getBaseUrl(req);
+
+      // Handle action using config map
+      const handler = action ? this._actionHandlers[action] : null;
+      
+      if (handler) {
+        try {
+          const response = await handler(req, baseUrl);
+          return res.status(200).json(response);
+        } catch (error) {
+          // Handle specific errors from handlers
+          if (error.message === 'vod_id parameter required' || error.message === 'series_id parameter required') {
+            return this.returnErrorResponse(res, 400, error.message);
+          }
+          if (error.message === 'Movie not found' || error.message === 'Series not found') {
+            return this.returnErrorResponse(res, 404, error.message);
+          }
+          throw error; // Re-throw to be caught by outer catch
         }
-
-        // Call the appropriate handler
-        return await handler(req, res, streamId);
-      } catch (error) {
-        return this.returnErrorResponse(res, 500, 'Failed to get stream', `Stream error: ${error.message}`);
       }
-    });
+
+      // Default: return user info if no action or unknown action
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const createdAtSeconds = toUnixSeconds(req.user?.created_at || req.user?.createdAt, nowSeconds);
+      // Use far-future timestamp (2099-12-31 23:59:59 UTC) for unlimited accounts instead of 0
+      const UNLIMITED_EXPIRY_SECONDS = 4102444799; // 2099-12-31 23:59:59 UTC
+      const expDateSeconds =
+        req.user?.expires_at || req.user?.exp_date
+          ? toUnixSeconds(req.user.expires_at || req.user.exp_date, 0)
+          : UNLIMITED_EXPIRY_SECONDS;
+
+      return res.status(200).json({
+        user_info: {
+          username: username,
+          password: password,
+          message: 'Active',
+          auth: '1',
+          status: 'Active',
+          exp_date: expDateSeconds.toString(),
+          is_trial: (req.user?.is_trial ? '1' : '0'),
+          active_cons: (req.user?.active_cons ?? 0).toString(),
+          created_at: createdAtSeconds.toString(),
+          max_connections: (req.user?.max_connections ?? 1).toString(),
+          allowed_output_formats: ['m3u8', 'ts']
+        },
+        server_info: buildServerInfo(req)
+      });
+    } catch (error) {
+      return this.returnErrorResponse(res, 500, 'Internal server error', `Xtream API error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Handle GET /:username/:password/:streamId request
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   */
+  async _handleGetStream(req, res) {
+    try {
+      const { streamId } = req.params;
+
+      // Get handler based on mount path (req.baseUrl)
+      const handler = this._streamTypeHandlers[req.baseUrl];
+      if (!handler) {
+        return this.returnErrorResponse(res, 404, 'Invalid stream type');
+      }
+
+      // Call the appropriate handler
+      return await handler(req, res, streamId);
+    } catch (error) {
+      return this.returnErrorResponse(res, 500, 'Failed to get stream', `Stream error: ${error.message}`);
+    }
   }
 
   /**
@@ -478,12 +501,6 @@ class XtreamRouter extends BaseRouter {
    */
   async _handleLiveStream(req, res, streamId) {
     const { username } = req.params;
-
-    // Check if Live TV is configured for this user
-    if (!this._channelManager || !req.user?.liveTV?.m3u_url) {
-      this.logger.warn(`Live TV not configured for user: username=${username}`);
-      return this.returnErrorResponse(res, 404, 'Live TV not configured');
-    }
 
     // Try to parse as Live TV channel
     let channelId = streamId;

@@ -1,24 +1,28 @@
-import { BaseJob } from './BaseJob.js';
+import { BaseJobWithSaveCoordinator } from './BaseJobWithSaveCoordinator.js';
 import { formatNumber } from '../utils/numberFormat.js';
 
 /**
  * Job for processing provider titles (fetching metadata from IPTV providers)
  * Handles fetching metadata from all configured IPTV providers,
  * and matching TMDB IDs for provider titles
- * @extends {BaseJob}
+ * @extends {BaseJobWithSaveCoordinator}
  */
-export class SyncIPTVProviderTitlesJob extends BaseJob {
+export class SyncIPTVProviderTitlesJob extends BaseJobWithSaveCoordinator {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
    * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
+   * @param {import('../managers/orchestration/JobSaveCoordinatorManager.js').JobSaveCoordinatorManager} saveCoordinator - Save coordinator instance
    * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
+   * @param {import('../managers/processing/TMDBProcessingManager.js').TMDBProcessingManager} tmdbProcessingManager - TMDB processing manager instance
    * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
-   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
    * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service for recording counters
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager for recording counters
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService) {
-    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService);
+  constructor(jobName, jobHistoryManager, saveCoordinator, providersManager, tmdbProcessingManager, tmdbManager, providerTitlesManager, metricsManager) {
+    super(jobName, jobHistoryManager, saveCoordinator, providersManager, tmdbProcessingManager);
+    this.tmdbManager = tmdbManager;
+    this.providerTitlesManager = providerTitlesManager;
+    this.metricsManager = metricsManager;
   }
 
   /**
@@ -39,11 +43,15 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
       // Set status to "running" at start (after reading last_execution)
       await this.setJobStatus('running');
       
+      // Create handlers
+      const { handlers } = await this._createHandlers();
+      this.handlers = handlers;
+      
+      // Start save coordinator for periodic saves
+      this._startSaveCoordinator();
+      
       // Check for cancellation after setting status
       this._checkCancellation(abortSignal);
-
-      // Create handler instances for all providers
-      this.handlers = await this._createHandlers();
       
       if (this.handlers.size === 0) {
         this.logger.warn('No handlers created. No providers configured or all failed to initialize.');
@@ -157,10 +165,10 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
           continue;
         }
         if (result.movies !== undefined && result.movies !== null) {
-          this.metricsService.incrementCounter('provider_titles_processed', { provider_id: result.providerId, media_type: 'movies' }, result.movies);
+          this.metricsManager.incrementCounter('provider_titles_processed', { provider_id: result.providerId, media_type: 'movies' }, result.movies);
         }
         if (result.tvShows !== undefined && result.tvShows !== null) {
-          this.metricsService.incrementCounter('provider_titles_processed', { provider_id: result.providerId, media_type: 'tvshows' }, result.tvShows);
+          this.metricsManager.incrementCounter('provider_titles_processed', { provider_id: result.providerId, media_type: 'tvshows' }, result.tvShows);
         }
       }
 
@@ -192,6 +200,13 @@ export class SyncIPTVProviderTitlesJob extends BaseJob {
       }
       throw error;
     } finally {
+      // Stop save coordinator and perform final save
+      try {
+        await this._stopSaveCoordinator();
+      } catch (error) {
+        this.logger.error(`Error stopping save coordinator: ${error.message}`);
+      }
+      
       // Unload titles from memory to free resources
       // Note: fetchMetadata() updates _titlesCache via saveTitles(), so cleanup is needed
       try {

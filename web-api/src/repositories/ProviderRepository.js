@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('ProviderRepository');
 
 /**
  * Repository for iptv_providers collection
@@ -13,6 +10,7 @@ export class ProviderRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'ProviderRepository',
       mongoClient,
       'iptv_providers',
       (doc) => doc.id,

@@ -16,10 +16,10 @@ export class LiveTVFormattingManager extends BaseFormattingManager {
    * @param {import('../domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance
    * @param {import('../domain/ProgramManager.js').ProgramManager} programManager - Program manager instance
    * @param {import('../domain/UserManager.js').UserManager} userManager - User manager instance
-   * @param {import('../../services/metrics.js').default} metricsService - Metrics service instance
+   * @param {import('../../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance
    */
-  constructor(titlesManager, iptvProviderManager, channelManager, programManager, userManager, metricsService) {
-    super('LiveTVFormattingManager', titlesManager, iptvProviderManager, metricsService);
+  constructor(titlesManager, iptvProviderManager, channelManager, programManager, userManager, metricsManager) {
+    super('LiveTVFormattingManager', titlesManager, iptvProviderManager, metricsManager);
     this._channelManager = channelManager;
     this._programManager = programManager;
     this._userManager = userManager;

@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('SettingsRepository');
 
 /**
  * Repository for settings collection
@@ -13,6 +10,7 @@ export class SettingsRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'SettingsRepository',
       mongoClient,
       'settings',
       (doc) => doc._id,
@@ -36,7 +34,7 @@ export class SettingsRepository extends BaseRepository {
       }
       return result;
     } catch (error) {
-      logger.error(`Error getting settings as object: ${error.message}`);
+      this.logger.error(`Error getting settings as object: ${error.message}`);
       return {};
     }
   }
@@ -64,7 +62,7 @@ export class SettingsRepository extends BaseRepository {
     try {
       return await this.findByQuery({ lastUpdated: { $gt: since } });
     } catch (error) {
-      logger.error(`Error getting settings changed since ${since}: ${error.message}`);
+      this.logger.error(`Error getting settings changed since ${since}: ${error.message}`);
       return [];
     }
   }

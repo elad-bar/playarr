@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('ChannelRepository');
 
 /**
  * Repository for channels collection
@@ -13,6 +10,7 @@ export class ChannelRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'ChannelRepository',
       mongoClient,
       'channels',
       (doc) => `${doc.provider_id}-${doc.channel_id}`,
@@ -95,7 +93,7 @@ export class ChannelRepository extends BaseRepository {
       const collection = this.db.collection(this.collectionName);
       return await collection.distinct(field, query);
     } catch (error) {
-      logger.error(`Error getting distinct ${field} in ${this.collectionName}:`, error);
+      this.logger.error(`Error getting distinct ${field} in ${this.collectionName}:`, error);
       throw error;
     }
   }

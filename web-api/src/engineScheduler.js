@@ -17,17 +17,18 @@ export class EngineScheduler {
   /**
    * @param {Map<string, import('./jobs/BaseJob.js').BaseJob>} jobInstances - Map of jobName -> job instance
    * @param {import('./managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager (for resetInProgress)
-   * @param {import('./services/metrics.js').default} metricsService - Metrics service instance
+   * @param {import('./managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance
    */
-  constructor(jobInstances, jobHistoryManager, metricsService) {
+  constructor(jobInstances, jobHistoryManager, metricsManager) {
     this._jobInstances = jobInstances; // Map<jobName, BaseJob>
     this._jobHistoryManager = jobHistoryManager;
-    this._metricsService = metricsService;
+    this._metricsManager = metricsManager;
     this._jobsManager = null;
     this._intervalIds = new Map(); // Map of jobName -> intervalId
     this._runningJobs = new Map();
     this._abortControllers = new Map(); // Map<jobName, AbortController>
     this._scheduledJobs = []; // Store scheduled jobs for later starting
+    this._startupJobs = []; // Store jobs that should run on startup
     this.logger = createLogger('EngineScheduler');
   }
 
@@ -49,21 +50,30 @@ export class EngineScheduler {
       // Continue initialization even if reset fails
     }
 
-    const scheduledJobs = jobsConfig.jobs.filter(job => job.interval);
     // JobsManager will be initialized later with scheduler reference in index.js
     this._jobsManager = new JobsManager(jobsConfig, this._jobHistoryManager, null);
 
-    // Store scheduled jobs configuration for later starting
-    this._scheduledJobs = scheduledJobs.map(job => ({
+    // Store jobs with intervals for recurring execution (delay removed, only applies to startup)
+    const jobsWithInterval = jobsConfig.jobs.filter(job => job.interval);
+    this._scheduledJobs = jobsWithInterval.map(job => ({
       name: job.name,
       interval: job.interval,
+      intervalMs: this._parseTime(job.interval)
+    }));
+
+    // Store jobs that should run on startup (separate from interval jobs, include delay)
+    const jobsOnStartup = jobsConfig.jobs.filter(job => job.runOnStartup === true);
+    this._startupJobs = jobsOnStartup.map(job => ({
+      name: job.name,
       delay: job.delay || '0',
-      intervalMs: this._parseTime(job.interval),
       delayMs: this._parseTime(job.delay || '0')
     }));
 
-    if (scheduledJobs.length > 0) {
-      this.logger.info(`Scheduler initialized with ${formatNumber(scheduledJobs.length)} job(s) (not started yet)`);
+    if (this._scheduledJobs.length > 0) {
+      this.logger.info(`Scheduler initialized with ${formatNumber(this._scheduledJobs.length)} recurring job(s) (not started yet)`);
+    }
+    if (this._startupJobs.length > 0) {
+      this.logger.info(`Scheduler initialized with ${formatNumber(this._startupJobs.length)} startup job(s) (not started yet)`);
     }
 
     this.logger.info('EngineScheduler initialized');
@@ -74,53 +84,87 @@ export class EngineScheduler {
    * @returns {Promise<void>}
    */
   async start() {
-    if (this._scheduledJobs.length === 0) {
-      this.logger.info('No scheduled jobs to start');
-      return;
-    }
-
     this.logger.info('Starting job scheduler...');
 
-    // Set up individual intervals for each scheduled job
-    this._scheduledJobs.forEach(job => {
-      // Function to run the job
-      const runJobAsync = async () => {
-        try {
-          await this.runJob(job.name);
-        } catch (error) {
-          if (error.code === 'JOB_ALREADY_RUNNING' || error.isAlreadyRunning) {
-            this.logger.info(`Skipping scheduled job '${job.name}': ${error.message}`);
-          } else {
-            this.logger.error(`Error running scheduled job '${job.name}': ${error.message}`);
+    // Set up recurring intervals for jobs with interval (but don't run them yet if they also have runOnStartup)
+    if (this._scheduledJobs.length > 0) {
+      this._scheduledJobs.forEach(job => {
+        // Function to run the job
+        const runJobAsync = async () => {
+          try {
+            await this.runJob(job.name);
+          } catch (error) {
+            if (error.code === 'JOB_ALREADY_RUNNING' || error.isAlreadyRunning) {
+              this.logger.info(`Skipping scheduled job '${job.name}': ${error.message}`);
+            } else {
+              this.logger.error(`Error running scheduled job '${job.name}': ${error.message}`);
+            }
           }
+        };
+        
+        // Check if this job also runs on startup
+        const hasStartup = this._startupJobs.some(sj => sj.name === job.name);
+        
+        if (!hasStartup) {
+          // Job has interval but NO runOnStartup: Start interval timer immediately
+          const intervalId = setInterval(runJobAsync, job.intervalMs);
+          this._intervalIds.set(job.name, intervalId);
+          this.logger.debug(`Scheduled job '${job.name}' to run every ${job.interval} (starting immediately)`);
+        } else {
+          // Job has BOTH interval AND runOnStartup: Store interval config temporarily
+          // Interval will be started after startup execution completes
+          this._intervalIds.set(job.name, { runJobAsync, intervalMs: job.intervalMs, name: job.name });
+          this.logger.debug(`Scheduled job '${job.name}' to run every ${job.interval} (will start after startup execution)`);
         }
-      };
-      
-      // Set up interval for recurring execution
-      const intervalId = setInterval(runJobAsync, job.intervalMs);
-      this._intervalIds.set(job.name, intervalId);
-      this.logger.debug(`Scheduled job '${job.name}' to run every ${job.interval}`);
-      
-      // Run job on startup (with optional delay)
-      // This ensures jobs run right away instead of waiting for the first interval
-      (async () => {
-        if (job.delayMs > 0) {
-          await new Promise(resolve => setTimeout(resolve, job.delayMs));
-        }
-        try {
-          this.logger.info(`Running job '${job.name}' on startup${job.delayMs > 0 ? ` (after ${job.delay} delay)` : ''}`);
-          await runJobAsync();
-        } catch (error) {
-          if (error.code === 'JOB_ALREADY_RUNNING' || error.isAlreadyRunning) {
-            this.logger.info(`Skipping job '${job.name}' on startup: ${error.message}`);
-          } else {
-            this.logger.error(`Error running job '${job.name}' on startup: ${error.message}`);
-          }
-        }
-      })();
-    });
+      });
 
-    this.logger.info(`Scheduler started with ${formatNumber(this._scheduledJobs.length)} job(s) at their configured intervals`);
+      this.logger.info(`Scheduled ${formatNumber(this._scheduledJobs.length)} recurring job(s)`);
+    }
+
+    // Run jobs that should execute on startup (with optional delay)
+    if (this._startupJobs.length > 0) {
+      this._startupJobs.forEach(job => {
+        (async () => {
+          // Apply delay if specified
+          if (job.delayMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, job.delayMs));
+          }
+          
+          try {
+            this.logger.info(`Running job '${job.name}' on startup${job.delayMs > 0 ? ` (after ${job.delay} delay)` : ''}`);
+            await this.runJob(job.name);
+            
+            // If this job has an interval, start the interval timer NOW (after completion)
+            const intervalConfig = this._intervalIds.get(job.name);
+            if (intervalConfig && intervalConfig.runJobAsync) {
+              const intervalId = setInterval(intervalConfig.runJobAsync, intervalConfig.intervalMs);
+              this._intervalIds.set(job.name, intervalId);
+              this.logger.debug(`Started interval for job '${job.name}' after startup execution completed`);
+            }
+          } catch (error) {
+            if (error.code === 'JOB_ALREADY_RUNNING' || error.isAlreadyRunning) {
+              this.logger.info(`Skipping job '${job.name}' on startup: ${error.message}`);
+            } else {
+              this.logger.error(`Error running job '${job.name}' on startup: ${error.message}`);
+            }
+            
+            // Even if startup fails, start interval if configured
+            const intervalConfig = this._intervalIds.get(job.name);
+            if (intervalConfig && intervalConfig.runJobAsync) {
+              const intervalId = setInterval(intervalConfig.runJobAsync, intervalConfig.intervalMs);
+              this._intervalIds.set(job.name, intervalId);
+              this.logger.debug(`Started interval for job '${job.name}' after startup execution (even though it failed)`);
+            }
+          }
+        })();
+      });
+
+      this.logger.info(`Started ${formatNumber(this._startupJobs.length)} job(s) on startup`);
+    }
+
+    if (this._scheduledJobs.length === 0 && this._startupJobs.length === 0) {
+      this.logger.info('No scheduled or startup jobs to start');
+    }
   }
 
   /**
@@ -130,9 +174,12 @@ export class EngineScheduler {
   async stop() {
     // Clear all individual job intervals
     if (this._intervalIds && this._intervalIds.size > 0) {
-      this._intervalIds.forEach((intervalId, jobName) => {
-        clearInterval(intervalId);
-        this.logger.debug(`Stopped interval for job '${jobName}'`);
+      this._intervalIds.forEach((intervalValue, jobName) => {
+        // Only clear if it's an actual interval ID (number), not a config object
+        if (typeof intervalValue === 'number') {
+          clearInterval(intervalValue);
+          this.logger.debug(`Stopped interval for job '${jobName}'`);
+        }
       });
       this._intervalIds.clear();
     }
@@ -244,8 +291,8 @@ export class EngineScheduler {
       if (result !== undefined && !abortSignal?.aborted) {
         // Track metrics - success
         const duration = (Date.now() - startTime) / 1000;
-        this._metricsService.incrementCounter('job_executions', { job_type: name, status: 'success' });
-        this._metricsService.observeHistogram('job_duration', { job_type: name }, duration);
+        this._metricsManager.incrementCounter('job_executions', { job_type: name, status: 'success' });
+        this._metricsManager.observeHistogram('job_duration', { job_type: name }, duration);
         
         this.logger.info(`Job '${name}' completed successfully`);
         await this._handlePostExecute(name, workerData);
@@ -256,8 +303,8 @@ export class EngineScheduler {
       // Track metrics - failure or cancellation
       const duration = (Date.now() - startTime) / 1000;
       const status = abortSignal?.aborted ? 'cancelled' : 'failure';
-      this._metricsService.incrementCounter('job_executions', { job_type: name, status });
-      this._metricsService.observeHistogram('job_duration', { job_type: name }, duration);
+      this._metricsManager.incrementCounter('job_executions', { job_type: name, status });
+      this._metricsManager.observeHistogram('job_duration', { job_type: name }, duration);
       
       if (abortSignal?.aborted) {
         this.logger.info(`Job '${name}' was cancelled`);

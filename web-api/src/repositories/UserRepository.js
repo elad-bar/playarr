@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('UserRepository');
 
 /**
  * Repository for users collection
@@ -13,6 +10,7 @@ export class UserRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'UserRepository',
       mongoClient,
       'users',
       (doc) => doc.username,

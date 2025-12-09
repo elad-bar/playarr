@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('JobHistoryRepository');
 
 /**
  * Repository for job_history collection
@@ -13,6 +10,7 @@ export class JobHistoryRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'JobHistoryRepository',
       mongoClient,
       'job_history',
       (doc) => `${doc.job_name}|${doc.provider_id || ''}`,

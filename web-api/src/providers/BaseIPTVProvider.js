@@ -14,10 +14,10 @@ export class BaseIPTVProvider extends BaseProvider {
    * @param {string} loggerName - Logger name (required)
    * @param {Object<string, Object>} providerConfigs - Map of provider ID to provider configuration
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance (required)
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance (optional)
    */
-  constructor(loggerName, providerConfigs = {}, cacheDir = null, metricsService) {
-    super(loggerName, cacheDir, metricsService);
+  constructor(loggerName, providerConfigs = {}, cacheDir = null, metricsManager) {
+    super(loggerName, cacheDir, metricsManager);
     
     // Store provider configs as Map<providerId, config>
     // Filter out deleted providers

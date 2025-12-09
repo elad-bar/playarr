@@ -1,23 +1,27 @@
-import { BaseJob } from './BaseJob.js';
+import { BaseJobWithSaveCoordinator } from './BaseJobWithSaveCoordinator.js';
 import { generateTitleKey } from '../utils/titleUtils.js';
 
 /**
  * Job for monitoring provider titles changes
  * Monitors provider titles for changes and processes them incrementally
- * @extends {BaseJob}
+ * @extends {BaseJobWithSaveCoordinator}
  */
-export class ProviderTitlesMonitorJob extends BaseJob {
+export class ProviderTitlesMonitorJob extends BaseJobWithSaveCoordinator {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
    * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
+   * @param {import('../managers/orchestration/JobSaveCoordinatorManager.js').JobSaveCoordinatorManager} saveCoordinator - Save coordinator instance
    * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
+   * @param {import('../managers/processing/TMDBProcessingManager.js').TMDBProcessingManager} tmdbProcessingManager - TMDB processing manager instance
    * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
-   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
    * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service for recording counters
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager for recording counters
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService) {
-    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService);
+  constructor(jobName, jobHistoryManager, saveCoordinator, providersManager, tmdbProcessingManager, tmdbManager, providerTitlesManager, metricsManager) {
+    super(jobName, jobHistoryManager, saveCoordinator, providersManager, tmdbProcessingManager);
+    this.tmdbManager = tmdbManager;
+    this.providerTitlesManager = providerTitlesManager;
+    this.metricsManager = metricsManager;
   }
 
   /**
@@ -37,12 +41,16 @@ export class ProviderTitlesMonitorJob extends BaseJob {
       // Set status to "running" at start (after reading last_execution)
       await this.setJobStatus('running');
       
+      // Create handlers
+      const { handlers } = await this._createHandlers();
+      
+      this.handlers = handlers;
+      
+      // Start save coordinator for periodic saves
+      this._startSaveCoordinator();
+      
       // Check for cancellation after setting status
       this._checkCancellation(abortSignal);
-
-      // Create handler instances for all providers
-      this.handlers = await this._createHandlers();
-      this.tmdbProcessingManager = this._createTMDBProcessingManager();
       
       if (this.handlers.size === 0) {
         this.logger.warn('No handlers created. No providers configured or all failed to initialize.');
@@ -110,10 +118,10 @@ export class ProviderTitlesMonitorJob extends BaseJob {
       if (result.byProvider) {
         for (const [providerId, counts] of result.byProvider) {
           if (counts.movies !== undefined && counts.movies !== null && counts.movies > 0) {
-            this.metricsService.incrementCounter('main_titles_processed', { provider_id: providerId, media_type: 'movies' }, counts.movies);
+            this.metricsManager.incrementCounter('main_titles_processed', { provider_id: providerId, media_type: 'movies' }, counts.movies);
           }
           if (counts.tvShows !== undefined && counts.tvShows !== null && counts.tvShows > 0) {
-            this.metricsService.incrementCounter('main_titles_processed', { provider_id: providerId, media_type: 'tvshows' }, counts.tvShows);
+            this.metricsManager.incrementCounter('main_titles_processed', { provider_id: providerId, media_type: 'tvshows' }, counts.tvShows);
           }
         }
       }
@@ -158,6 +166,13 @@ export class ProviderTitlesMonitorJob extends BaseJob {
       }
       throw error;
     } finally {
+      // Stop save coordinator and perform final save
+      try {
+        await this._stopSaveCoordinator();
+      } catch (error) {
+        this.logger.error(`Error stopping save coordinator: ${error.message}`);
+      }
+      
       // Unload titles from memory to free resources
       try {
         this.logger.debug('Unloading titles from memory cache...');

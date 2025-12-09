@@ -1,7 +1,4 @@
 import { BaseRepository } from './BaseRepository.js';
-import { createLogger } from '../utils/logger.js';
-
-const logger = createLogger('StatsRepository');
 
 /**
  * Repository for stats collection
@@ -13,6 +10,7 @@ export class StatsRepository extends BaseRepository {
    */
   constructor(mongoClient) {
     super(
+      'StatsRepository',
       mongoClient,
       'stats',
       (doc) => doc._id,
@@ -36,7 +34,7 @@ export class StatsRepository extends BaseRepository {
       }
       return result;
     } catch (error) {
-      logger.error(`Error getting stats as object: ${error.message}`);
+      this.logger.error(`Error getting stats as object: ${error.message}`);
       return {};
     }
   }

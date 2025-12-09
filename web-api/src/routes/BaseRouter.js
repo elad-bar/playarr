@@ -10,23 +10,55 @@ import { AppError } from '../errors/AppError.js';
  */
 class BaseRouter {
   /**
+   * @param {import('express').Application} app - Express app instance
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
    * @param {string} className - Name of the extending class (used for logger)
    */
-  constructor(middleware, className) {
+  constructor(app, middleware, className) {
+    this.app = app;
     this.middleware = middleware;
     this.router = express.Router();
     this.logger = createLogger(className);
   }
 
   /**
-   * Initialize routes for this router
-   * Must be implemented by extending classes
-   * Should be called explicitly after router instantiation
-   * @abstract
+   * Initialize routes for this router and automatically register them with the app
+   * Template method: calls setupRoutes() (implemented by subclasses) then registers routes
    */
   initialize() {
-    throw new Error('initialize() must be implemented by extending class');
+    this.setupRoutes();
+    this.registerRoutes();
+  }
+
+  /**
+   * Set up routes for this router
+   * Must be implemented by extending classes
+   * @abstract
+   */
+  setupRoutes() {
+    throw new Error('setupRoutes() must be implemented by extending class');
+  }
+
+  /**
+   * Get the base path(s) for this router
+   * Must be implemented by extending classes
+   * @abstract
+   * @returns {string[]} Base path(s) for this router (always returns an array)
+   */
+  getBasePath() {
+    throw new Error('getBasePath() must be implemented by extending class');
+  }
+
+  /**
+   * Register this router to the app at the specified base path(s)
+   * Called automatically by initialize()
+   */
+  registerRoutes() {
+    const paths = this.getBasePath();
+    paths.forEach(path => {
+      this.app.use(path, this.router);
+      this.logger.info(`Registered routes at ${path}`);
+    });
   }
 
   /**

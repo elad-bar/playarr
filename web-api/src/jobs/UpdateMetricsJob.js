@@ -9,20 +9,11 @@ export class UpdateMetricsJob extends BaseJob {
   /**
    * @param {string} jobName - Name identifier for this job (used in logging)
    * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
-   * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
-   * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
-   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
-   * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance
-   * @param {import('../managers/domain/ChannelManager.js').ChannelManager} channelManager - Channel manager
-   * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager
-   * @param {import('../managers/domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService, channelManager, userManager, iptvProviderManager) {
-    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService);
-    this._channelManager = channelManager;
-    this._userManager = userManager;
-    this._iptvProviderManager = iptvProviderManager;
+  constructor(jobName, jobHistoryManager, metricsManager) {
+    super(jobName, jobHistoryManager);
+    this.metricsManager = metricsManager;
   }
 
   /**
@@ -40,14 +31,8 @@ export class UpdateMetricsJob extends BaseJob {
 
       this.logger.info('Updating all gauge metrics from database...');
 
-      // Update all gauge metrics
-      await this.metricsService.updateGaugeMetrics({
-        providerTitlesManager: this.providerTitlesManager,
-        titlesManager: this.titlesManager,
-        channelManager: this._channelManager,
-        userManager: this._userManager,
-        iptvProviderManager: this._iptvProviderManager
-      });
+      // Update all gauge metrics (managers are injected via constructor)
+      await this.metricsManager.updateGaugeMetrics();
 
       this.logger.info('Gauge metrics updated successfully');
 

@@ -24,6 +24,7 @@ class Middleware {
     this.requireApiKey = this.requireApiKey.bind(this);
     this.requireApplicationToken = this.requireApplicationToken.bind(this);
     this.requireXtreamAuth = this.requireXtreamAuth.bind(this);
+    this.validateStremioType = this.validateStremioType.bind(this);
   }
 
   /**
@@ -338,6 +339,26 @@ class Middleware {
         }
       });
     }
+  }
+
+  /**
+   * Middleware to validate Stremio media type parameter
+   * Validates that req.params.type is one of: 'movie', 'series', or 'tv'
+   * 
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   * @param {import('express').NextFunction} next - Express next function
+   */
+  validateStremioType(req, res, next) {
+    const { type } = req.params;
+    
+    if (type !== 'movie' && type !== 'series' && type !== 'tv') {
+      return res.status(400).json({ 
+        error: 'Invalid media type. Must be "movie", "series", or "tv"' 
+      });
+    }
+    
+    next();
   }
 }
 

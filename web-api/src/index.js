@@ -5,22 +5,22 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
 import dotenv from 'dotenv';
-import fsExtra from 'fs-extra';
+import { readFileSync } from 'fs';
 
 // Load environment variables
 dotenv.config();
 
-// Rotate log file on startup using the log file's creation date (before logger is created)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Import logger
-import { createLogger } from './utils/logger.js';
+import { createLogger, Logger } from './utils/logger.js';
+import { LogStreamTransport } from './utils/logStreamTransport.js';
 import { formatNumber } from './utils/numberFormat.js';
 
 // Import service classes
 import { WebSocketService } from './services/websocket.js';
-import MetricsService from './services/metrics.js';
+import MetricsManager from './managers/orchestration/MetricsManager.js';
 import { MongoClient } from 'mongodb';
 
 // Import repositories
@@ -35,8 +35,6 @@ import { ChannelRepository } from './repositories/ChannelRepository.js';
 import { ProgramRepository } from './repositories/ProgramRepository.js';
 import { ProviderCategoryRepository } from './repositories/ProviderCategoryRepository.js';
 import { EngineScheduler } from './engineScheduler.js';
-import { readFileSync } from 'fs';
-const jobsConfig = JSON.parse(readFileSync(path.join(__dirname, 'jobs.json'), 'utf-8'));
 
 // Import job classes
 import { SyncIPTVProviderTitlesJob } from './jobs/SyncIPTVProviderTitlesJob.js';
@@ -66,6 +64,8 @@ import { ChannelManager } from './managers/domain/ChannelManager.js';
 import { ProgramManager } from './managers/domain/ProgramManager.js';
 import { LiveTVProcessingManager } from './managers/processing/LiveTVProcessingManager.js';
 import { LiveTVFormattingManager } from './managers/formatting/LiveTVFormattingManager.js';
+import { JobSaveCoordinatorManager } from './managers/orchestration/JobSaveCoordinatorManager.js';
+import { TMDBProcessingManager } from './managers/processing/TMDBProcessingManager.js';
 
 // Import middleware
 import Middleware from './middleware/Middleware.js';
@@ -95,397 +95,553 @@ import { AGTVProvider } from './providers/AGTVProvider.js';
 import { TMDBProvider } from './providers/TMDBProvider.js';
 import { DataProvider } from './config/collections.js';
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const logger = createLogger('Main');
+/**
+ * Main Application class
+ * Handles initialization, configuration, and lifecycle of the Express server
+ */
+class Application {
+  /**
+   * @param {number} port - Server port (defaults to 3000 or from env)
+   */
+  constructor(port = process.env.PORT || 3000) {
+    this.port = port;
+    this.logger = createLogger('Main');
+    
+    // Express app and server
+    this.app = express();
+    this.server = http.createServer(this.app);
+    
+    // Core services (initialized during setup)
+    this.mongoClient = null;
+    this.webSocketService = null;
+    this.logStreamTransport = null;
+    this.jobScheduler = null;
+    this.jobsManager = null;
+    this.saveCoordinator = null;
+    
+    // Repositories (initialized during setup)
+    this.repositories = {};
+    
+    // Managers (initialized during setup)
+    this.managers = {};
+    
+    // Providers (initialized during setup)
+    this.providers = {};
+    
+    // Jobs config
+    this.jobsConfig = JSON.parse(
+      readFileSync(path.join(__dirname, 'jobs.json'), 'utf-8')
+    );
+    
+    // Static path
+    this.staticPath = path.join(__dirname, '../../web-ui/build');
+    
+    // API paths collected from routers (populated in initializeRouters)
+    this.apiPaths = [];
+    
+    // Logger instance for stream operations
+    this.loggerInstance = new Logger();
 
-// Create HTTP server for WebSocket support
-const server = http.createServer(app);
+    // Socket event handlers mapping
+    this.socketHandlers = {
+      'log:subscribe': this.handleLogSubscribe.bind(this),
+      'log:set_level': this.handleLogSetLevel.bind(this)
+    };
+  }
 
-// Module-level variables for graceful shutdown
-let webSocketService = null;
-let mongoClient = null;
-let jobScheduler = null;
+  /**
+   * Initialize the application
+   */
+  async initialize() {
+    try {
+      this.logger.info('──────────────────────────────────────────────');
+      this.logger.info(`🟢 Application started at ${new Date().toISOString()}`);
+      this.logger.info('──────────────────────────────────────────────');
 
-// Middleware
-app.use(cors({
-  origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : true,
-  credentials: true,
-}));
-app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+      this.logger.debug('Initializing application...');
 
-// Error handling middleware will be added after routes are registered
+      this.setupMiddleware();
+      await this.initializeDatabase();
+      await this.initializeRepositories();
+      await this.initializeManagers();
+      await this.initializeProviders();
+      await this.initializeSocket();
+      await this.initializeProcessingManagers();
+      await this.initializeJobs();
+      this.setupRoutes();
+      await this.start();
+    } catch (error) {
+      this.logger.error('Failed to initialize application:', error);
+      process.exit(1);
+    }
+  }
 
-// Initialize application
-async function initialize() {
-  try {
-    logger.info('──────────────────────────────────────────────');
-    logger.info(`🟢 Application started at ${new Date().toISOString()}`);
-    logger.info('──────────────────────────────────────────────');
+  /**
+   * Setup Express middleware
+   */
+  setupMiddleware() {
+    this.app.use(cors({
+      origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : true,
+      credentials: true,
+    }));
+    this.app.use(cookieParser());
+    this.app.use(express.json());
+    this.app.use(express.urlencoded({ extended: true }));
+  }
 
-    logger.debug('Initializing application...');
-
-    // Step 1: Initialize services (bottom-up)
-    // 1. Initialize MongoDB connection
+  /**
+   * Initialize MongoDB connection
+   */
+  async initializeDatabase() {
     const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
     const dbName = process.env.MONGODB_DB_NAME || 'playarr';
-    
+
     try {
-      logger.debug(`Connecting to MongoDB: ${mongoUri}`);
-      mongoClient = new MongoClient(mongoUri, {
+      this.logger.debug(`Connecting to MongoDB: ${mongoUri}`);
+      this.mongoClient = new MongoClient(mongoUri, {
         serverSelectionTimeoutMS: 5000,
       });
-      await mongoClient.connect();
-      logger.info(`Connected to MongoDB database: ${dbName}`);
+      await this.mongoClient.connect();
+      this.logger.info(`Connected to MongoDB database: ${dbName}`);
     } catch (error) {
-      logger.error(`Failed to connect to MongoDB: ${error.message}`);
-      logger.error('MongoDB is required. Please ensure MongoDB is running and MONGODB_URI is configured correctly.');
+      this.logger.error(`Failed to connect to MongoDB: ${error.message}. MongoDB is required. Please ensure MongoDB is running and MONGODB_URI is configured correctly.`);
       throw new Error(`MongoDB connection failed: ${error.message}`);
     }
 
-    // 2. Create all repository instances
-    const providerTitleRepo = new ProviderTitleRepository(mongoClient);
-    const titleRepo = new TitleRepository(mongoClient);
-    const providerRepo = new ProviderRepository(mongoClient);
-    const jobHistoryRepo = new JobHistoryRepository(mongoClient);
-    const settingsRepo = new SettingsRepository(mongoClient);
-    const userRepo = new UserRepository(mongoClient);
-    const statsRepo = new StatsRepository(mongoClient);
-    const channelRepo = new ChannelRepository(mongoClient);
-    const programRepo = new ProgramRepository(mongoClient);
-    const providerCategoryRepo = new ProviderCategoryRepository(mongoClient);
-    logger.info('All repositories created');
+    // Initialize metadata collection
+    await this.initializeMetadataCollection(dbName);
+  }
 
-    // Create domain managers that depend on repositories
-    const jobHistoryManager = new JobHistoryManager(jobHistoryRepo);
-
-    // 2.1. Initialize metadata collection (for schema versioning)
-    logger.debug('Initializing metadata collection...');
+  /**
+   * Initialize metadata collection for schema versioning
+   * @param {string} dbName - Database name
+   */
+  async initializeMetadataCollection(dbName) {
     try {
-      const metadataCollection = mongoClient.db(dbName).collection('_collection_metadata');
+      this.logger.debug('Initializing metadata collection...');
+      const metadataCollection = this.mongoClient.db(dbName).collection('_collection_metadata');
       await metadataCollection.createIndex({ _id: 1 });
-      logger.debug('Metadata collection initialized');
+      this.logger.debug('Metadata collection initialized');
     } catch (error) {
-      logger.warn(`Error initializing metadata collection: ${error.message}`);
+      this.logger.warn(`Error initializing metadata collection: ${error.message}`);
       // Continue - metadata collection will be created on first use
     }
+  }
 
-    // 2.2. Initialize database indexes for all repositories
-    logger.debug('Initializing database indexes...');
+  /**
+   * Initialize all repositories
+   */
+  async initializeRepositories() {
+    this.repositories.providerTitle = new ProviderTitleRepository(this.mongoClient);
+    this.repositories.title = new TitleRepository(this.mongoClient);
+    this.repositories.provider = new ProviderRepository(this.mongoClient);
+    this.repositories.jobHistory = new JobHistoryRepository(this.mongoClient);
+    this.repositories.settings = new SettingsRepository(this.mongoClient);
+    this.repositories.user = new UserRepository(this.mongoClient);
+    this.repositories.stats = new StatsRepository(this.mongoClient);
+    this.repositories.channel = new ChannelRepository(this.mongoClient);
+    this.repositories.program = new ProgramRepository(this.mongoClient);
+    this.repositories.providerCategory = new ProviderCategoryRepository(this.mongoClient);
+    this.logger.info('All repositories created');
+
+    // Initialize database indexes
+    await this.initializeDatabaseIndexes();
+  }
+
+  /**
+   * Initialize database indexes for all repositories
+   */
+  async initializeDatabaseIndexes() {
+    this.logger.debug('Initializing database indexes...');
     try {
-      await Promise.all([
-        titleRepo.initializeIndexes(),
-        providerTitleRepo.initializeIndexes(),
-        userRepo.initializeIndexes(),
-        providerRepo.initializeIndexes(),
-        jobHistoryRepo.initializeIndexes(),
-        settingsRepo.initializeIndexes(),
-        channelRepo.initializeIndexes(),
-        programRepo.initializeIndexes(),
-        providerCategoryRepo.initializeIndexes(),
-        // statsRepo doesn't need indexes (single document collection)
-      ]);
-      logger.info('All database indexes initialized');
-    } catch (error) {
-      logger.error(`Error initializing database indexes: ${error.message}`);
-      // Don't throw - allow app to start even if index creation fails
-      // Indexes will be created on next startup or can be created manually
-    }
-
-    webSocketService = new WebSocketService();
-
-    // Get cache directory for providers
-    const cacheDir = process.env.CACHE_DIR || '/app/cache';
-
-    // Load all provider configurations from database
-    const allProviders = await providerRepo.findByQuery({}) || [];
-    logger.info(`Loaded ${formatNumber(allProviders.length)} provider(s) from database`);
-
-    // Step 2: Initialize services (before providers to allow dependency injection)
-    const metricsService = new MetricsService();
-    const metricsMiddleware = new MetricsMiddleware(metricsService);
-
-    // Group providers by type for each provider type
-    const xtreamConfigs = {};
-    const agtvConfigs = {};
-    
-    for (const provider of allProviders) {
-      if (provider.deleted) continue; // Skip deleted providers
+      const indexPromises = Object.values(this.repositories).map(repo => repo.initializeIndexes());
       
-      if (provider.type === DataProvider.XTREAM) {
-        xtreamConfigs[provider.id] = provider;
-      } else if (provider.type === DataProvider.AGTV) {
-        agtvConfigs[provider.id] = provider;
-      }
-    }
-
-    // Initialize provider instances with their configs (singletons)
-    const xtreamProvider = new XtreamProvider(xtreamConfigs, cacheDir, metricsService);
-    const agtvProvider = new AGTVProvider(agtvConfigs, cacheDir, metricsService);
-    const providerTypeMap = {
-      [DataProvider.XTREAM]: xtreamProvider,
-      [DataProvider.AGTV]: agtvProvider
-    };
-
-    // Step 3: Initialize managers (dependency order)
-    const userManager = new UserManager(userRepo);
-    const settingsManager = new SettingsManager(settingsRepo);
-    
-    // Auto-generate metrics token if not exists
-    try {
-      const metricsToken = await settingsManager.getSetting('metrics_token');
-      if (!metricsToken.value) {
-        const crypto = await import('crypto');
-        const newToken = crypto.randomBytes(32).toString('hex');
-        await settingsManager.setSetting('metrics_token', newToken);
-        logger.info('Generated new metrics token');
-      }
+      await Promise.all(indexPromises);
+      this.logger.info('All database indexes initialized');
     } catch (error) {
-      logger.warn('Could not check/generate metrics token on startup:', error.message);
+      this.logger.error(`Error initializing database indexes: ${error.message}`);
     }
-    
-    // Load TMDB API key from settings and initialize TMDB provider
-    const tmdbTokenKey = 'tmdb_token';
-    let tmdbApiKey = null;
-    try {
-      const apiKeyResult = await settingsManager.getSetting(tmdbTokenKey);
-      if (apiKeyResult.value) {
-        tmdbApiKey = apiKeyResult.value;
-      }
-    } catch (error) {
-      logger.warn('Could not load TMDB API key on startup:', error.message);
-    }
-    const tmdbProvider = new TMDBProvider(tmdbApiKey, cacheDir, metricsService);
-    const statsManager = new StatsManager(statsRepo);
-    const titlesManager = new TitlesManager(titleRepo);
-    const providerTitlesManager = new ProviderTitlesManager(providerTitleRepo);
-    const iptvProviderManager = new IPTVProviderManager(providerRepo);
-    const providerCategoryManager = new ProviderCategoryManager(providerCategoryRepo);
-    
-    // Declare jobsManager early for closure
-    let jobsManager;
-    
-    // Create generic triggerJob function (closure will capture jobsManager when assigned)
-    // Fire-and-forget: executes asynchronously in background without blocking
-    const triggerJob = (jobName) => {
-      if (!jobsManager) {
-        logger.error('JobsManager not initialized, cannot trigger job:', jobName);
-        return;
-      }
+  }
 
-      // Fire job asynchronously without blocking
-      setImmediate(async () => {
-        try {
-          await jobsManager.triggerJob(jobName);
-          logger.info(`Triggered ${jobName} job`);
-        } catch (error) {
-          logger.error(`Failed to trigger ${jobName} job: ${error.message}`);
-          // Don't throw - allow caller to continue even if job trigger fails
-        }
-      });
-    };
-    
-    // Create Live TV managers (before ProvidersManager so they can be passed as dependencies)
-    const channelManager = new ChannelManager(channelRepo);
-    const programManager = new ProgramManager(programRepo);
-        
-    const liveTVProcessingManager = new LiveTVProcessingManager(
-      channelManager,
-      programManager,
-      iptvProviderManager,
-      xtreamProvider,
-      agtvProvider
+  /**
+   * Initialize all managers
+   */
+  async initializeManagers() {
+    // Domain managers
+    this.managers.jobHistory = new JobHistoryManager(this.repositories.jobHistory);
+    this.managers.user = new UserManager(this.repositories.user);
+    this.managers.settings = new SettingsManager(this.repositories.settings);
+    this.managers.stats = new StatsManager(this.repositories.stats);
+    this.managers.titles = new TitlesManager(this.repositories.title);
+    this.managers.providerTitles = new ProviderTitlesManager(this.repositories.providerTitle);
+    this.managers.iptvProvider = new IPTVProviderManager(this.repositories.provider);
+    this.managers.providerCategory = new ProviderCategoryManager(this.repositories.providerCategory);
+    this.managers.channel = new ChannelManager(this.repositories.channel);
+    this.managers.program = new ProgramManager(this.repositories.program);
+
+    // Create MetricsManager after domain managers
+    this.managers.metrics = new MetricsManager(
+      this.managers.providerTitles,
+      this.managers.titles,
+      this.managers.channel,
+      this.managers.user,
+      this.managers.iptvProvider,
+      this.managers.settings
     );
-    
-    const providersManager = new ProvidersManager(
-      webSocketService,
-      providerTypeMap,
-      iptvProviderManager,
-      providerTitlesManager,
-      providerTitleRepo,
-      titleRepo,
-      triggerJob,
-      channelManager,
-      programManager,
-      userManager,
-      providerCategoryManager
-    );
-    const liveTVFormattingManager = new LiveTVFormattingManager(titlesManager, iptvProviderManager, channelManager, programManager, userManager, metricsService);
-    
-    const playlistManager = new PlaylistManager(titlesManager, iptvProviderManager, channelManager, programManager, metricsService);
-    const tmdbManager = new TMDBManager(tmdbProvider);
-    const xtreamManager = new XtreamManager(titlesManager, iptvProviderManager, channelManager, programManager, metricsService);
-    const stremioManager = new StremioManager(titlesManager, iptvProviderManager, channelManager, programManager, metricsService);
-    
-    // Create job instances with all dependencies
-    const jobInstances = new Map();
-    jobInstances.set('syncIPTVProviderTitles', new SyncIPTVProviderTitlesJob(
-      'syncIPTVProviderTitles',
-      jobHistoryManager,
-      providersManager,
-      tmdbManager,
-      titlesManager,
-      providerTitlesManager,
-      metricsService
-    ));
-    jobInstances.set('providerTitlesMonitor', new ProviderTitlesMonitorJob(
-      'providerTitlesMonitor',
-      jobHistoryManager,
-      providersManager,
-      tmdbManager,
-      titlesManager,
-      providerTitlesManager,
-      metricsService
-    ));
-    jobInstances.set('syncLiveTV', new SyncLiveTVJob(iptvProviderManager, liveTVProcessingManager, jobHistoryManager));
-    
-    jobInstances.set('syncProviderDetails', new SyncProviderDetailsJob(
-      'syncProviderDetails',
-      jobHistoryManager,
-      providersManager,
-      tmdbManager,
-      titlesManager,
-      providerTitlesManager,
-      metricsService
-    ));
-    
-    jobInstances.set('cleanupUnwantedProviderTitles', new CleanupUnwantedProviderTitlesJob(
-      'cleanupUnwantedProviderTitles',
-      jobHistoryManager,
-      providersManager,
-      tmdbManager,
-      titlesManager,
-      providerTitlesManager,
-      metricsService,
-      channelManager,
-      programManager,
-      userManager,
-      providerCategoryManager
-    ));
-    
-    jobInstances.set('syncProviderCategories', new SyncProviderCategoriesJob(
-      'syncProviderCategories',
-      jobHistoryManager,
-      providersManager,
-      tmdbManager,
-      titlesManager,
-      providerTitlesManager,
-      metricsService,
-      providerCategoryManager
-    ));
-    
-    jobInstances.set('updateMetrics', new UpdateMetricsJob(
-      'updateMetrics',
-      jobHistoryManager,
-      providersManager,
-      tmdbManager,
-      titlesManager,
-      providerTitlesManager,
-      metricsService,
-      channelManager,
-      userManager,
-      iptvProviderManager
-    ));
-    
-    // Initialize EngineScheduler with job instances
-    jobScheduler = new EngineScheduler(jobInstances, jobHistoryManager, metricsService);
-    await jobScheduler.initialize();
-    
-    // Initialize JobsManager with scheduler reference
-    jobsManager = new JobsManager(jobsConfig, jobHistoryManager, jobScheduler);
+    await this.managers.metrics.initialize();
+
+    // Initialize metrics middleware
+    this.managers.metricsMiddleware = new MetricsMiddleware(this.managers.metrics);
+    this.app.use(this.managers.metricsMiddleware.trackRequest);
 
     // Initialize user manager (creates default admin user)
-    await userManager.initialize();
-    
-    // Metrics are updated via UpdateMetricsJob (triggered on startup after scheduler starts)
-    
-    // Step 3: Initialize middleware (after UserManager is initialized)
-    const middleware = new Middleware(userManager, metricsMiddleware);
-    logger.info('Middleware initialized');
+    await this.managers.user.initialize();
 
-    // Add metrics middleware to app (before routes are registered)
-    app.use(metricsMiddleware.trackRequest);
+    // Initialize main middleware
+    this.managers.middleware = new Middleware(
+      this.managers.user,
+      this.managers.metricsMiddleware
+    );
+    this.logger.info('Middleware initialized');
+  }
 
-    // Step 4: Initialize routers (with dependencies)
-    const authRouter = new AuthRouter(userManager, middleware);
-    const usersRouter = new UsersRouter(userManager, middleware, metricsService);
-    const profileRouter = new ProfileRouter(userManager, middleware, jobsManager);
-    const settingsRouter = new SettingsRouter(settingsManager, middleware);
-    const statsRouter = new StatsRouter(statsManager, middleware);
-    const titlesRouter = new TitlesRouter(titlesManager, providersManager, userManager, middleware, metricsService);
-    const providersRouter = new ProvidersRouter(providersManager, middleware, metricsService, providerCategoryManager);
-    const streamRouter = new StreamRouter(stremioManager, middleware, metricsService);
-    const playlistRouter = new PlaylistRouter(playlistManager, middleware);
-    const tmdbRouter = new TMDBRouter(tmdbManager, settingsManager, middleware);
-    const healthcheckRouter = new HealthcheckRouter(settingsManager, middleware);
-    const xtreamRouter = new XtreamRouter(xtreamManager, middleware, channelManager, programManager);
-    const jobsRouter = new JobsRouter(jobsManager, middleware);
-    const stremioRouter = new StremioRouter(stremioManager, middleware);
-    const liveTVRouter = new LiveTVRouter(channelManager, programManager, liveTVFormattingManager, userManager, iptvProviderManager, middleware, metricsService);
-    const metricsRouter = new MetricsRouter(settingsManager, middleware, metricsService);
-    const providerTitlesRouter = new ProviderTitlesRouter(providerTitlesManager, tmdbManager, providerRepo, middleware);
+  /**
+   * Initialize provider instances
+   */
+  async initializeProviders() {
+    // Load provider configurations from database
+    const allProviders = await this.repositories.provider.findByQuery({}) || [];
+    this.logger.info(`Loaded ${formatNumber(allProviders.length)} provider(s) from database`);
+
+    // Group providers by type
+    const providerConfigs = this.groupProvidersByType(allProviders);
+
+    // Get cache directory
+    const cacheDir = process.env.CACHE_DIR || '/app/cache';
+
+    // Initialize provider instances
+    this.providers.xtream = new XtreamProvider(
+      providerConfigs.xtream,
+      cacheDir,
+      this.managers.metrics
+    );
+    this.providers.agtv = new AGTVProvider(
+      providerConfigs.agtv,
+      cacheDir,
+      this.managers.metrics
+    );
+    this.providers.tmdb = new TMDBProvider(
+      this.managers.settings,
+      cacheDir,
+      this.managers.metrics
+    );
+    await this.providers.tmdb.initialize();
+
+    // Create provider type map
+    this.providers.typeMap = {
+      [DataProvider.XTREAM]: this.providers.xtream,
+      [DataProvider.AGTV]: this.providers.agtv
+    };
+  }
+
+  /**
+   * Group providers by type
+   * @param {Array} allProviders - All providers from database
+   * @returns {Object} Grouped provider configurations
+   */
+  groupProvidersByType(allProviders) {
+    const configs = {
+      xtream: {},
+      agtv: {}
+    };
+
+    for (const provider of allProviders) {
+      if (provider.deleted || ![DataProvider.AGTV, DataProvider.XTREAM].includes(provider.type)) continue;
+
+      configs[provider.type][provider.id] = provider;
+    }
+
+    return configs;
+  }
+
+  /**
+   * Initialize WebSocket service and log stream transport
+   */
+  async initializeSocket() {
+    // Create WebSocket service with handlers (needed for ProvidersManager and log streaming)
+    this.webSocketService = new WebSocketService(this.socketHandlers);
+
+    // Create LogStreamTransport with WebSocketService (required dependency)
+    this.logStreamTransport = new LogStreamTransport({
+      maxLines: 1000,
+      level: 'info',
+      webSocketService: this.webSocketService
+    });
+
+    // Setup log stream level from settings (needed for handlers)
+    await this.setupLogStreamLevel();
+
+    // Add transport to logger using Winston's standard API
+    this.loggerInstance.addTransport(this.logStreamTransport);
+    this.logStreamTransport.clearBuffer();
+
+    // Initialize Socket.IO server (attach to HTTP server)
+    this.webSocketService.initialize(this.server);
+    this.logger.info('Socket.IO server initialized');
+  }
+
+  /**
+   * Initialize processing and formatting managers
+   */
+  async initializeProcessingManagers() {
+    // Create formatting and processing managers
+    this.managers.providers = new ProvidersManager(
+      this.webSocketService,
+      this.providers.typeMap,
+      this.managers.iptvProvider,
+      this.managers.providerTitles,
+      this.repositories.providerTitle,
+      this.repositories.title,
+      this.triggerJob.bind(this),
+      this.managers.channel,
+      this.managers.program,
+      this.managers.user,
+      this.managers.providerCategory
+    );
+
+    this.managers.liveTVProcessing = new LiveTVProcessingManager(
+      this.managers.channel,
+      this.managers.program,
+      this.managers.iptvProvider,
+      this.providers.typeMap
+    );
+
+    this.managers.liveTVFormatting = new LiveTVFormattingManager(
+      this.managers.titles,
+      this.managers.iptvProvider,
+      this.managers.channel,
+      this.managers.program,
+      this.managers.user,
+      this.managers.metrics
+    );
+
+    this.managers.playlist = new PlaylistManager(
+      this.managers.titles,
+      this.managers.iptvProvider,
+      this.managers.channel,
+      this.managers.program,
+      this.managers.metrics
+    );
+
+    this.managers.tmdb = new TMDBManager(this.providers.tmdb);
+    this.managers.xtream = new XtreamManager(
+      this.managers.titles,
+      this.managers.iptvProvider,
+      this.managers.channel,
+      this.managers.program,
+      this.managers.metrics
+    );
+    this.managers.stremio = new StremioManager(
+      this.managers.titles,
+      this.managers.iptvProvider,
+      this.managers.channel,
+      this.managers.program,
+      this.managers.metrics
+    );
+
+    // Create save coordinator for jobs that need it
+    this.saveCoordinator = new JobSaveCoordinatorManager(
+      this.managers.providerTitles,
+      this.managers.titles,
+      this.triggerJob.bind(this)
+    );
+
+    // Create TMDB processing manager (singleton instance, needed by jobs)
+    this.managers.tmdbProcessing = new TMDBProcessingManager(
+      this.managers.titles,
+      this.managers.tmdb,
+      this.managers.providerTitles,
+      this.saveCoordinator
+    );
+  }
+
+  /**
+   * Initialize jobs and scheduler
+   */
+  async initializeJobs() {
+    // Create job instances
+    const jobs = this.createJobInstances();
+
+    // Initialize scheduler
+    const jobInstances = new Map();
+    jobs.forEach(job => jobInstances.set(job.jobName, job));
+
+    this.jobScheduler = new EngineScheduler(
+      jobInstances,
+      this.managers.jobHistory,
+      this.managers.metrics
+    );
+    await this.jobScheduler.initialize();
+
+    // Initialize JobsManager
+    this.jobsManager = new JobsManager(
+      this.jobsConfig,
+      this.managers.jobHistory,
+      this.jobScheduler
+    );
+  }
+
+  /**
+   * Create all job instances
+   * @returns {Array} Array of job instances
+   */
+  createJobInstances() {
+    return [
+      new SyncIPTVProviderTitlesJob(
+        'syncIPTVProviderTitles',
+        this.managers.jobHistory,
+        this.saveCoordinator,
+        this.managers.providers,
+        this.managers.tmdbProcessing,
+        this.managers.tmdb,
+        this.managers.providerTitles,
+        this.managers.metrics
+      ),
+      new ProviderTitlesMonitorJob(
+        'providerTitlesMonitor',
+        this.managers.jobHistory,
+        this.saveCoordinator,
+        this.managers.providers,
+        this.managers.tmdbProcessing,
+        this.managers.tmdb,
+        this.managers.providerTitles,
+        this.managers.metrics
+      ),
+      new SyncLiveTVJob(
+        'syncLiveTV',
+        this.managers.jobHistory,
+        this.managers.iptvProvider,
+        this.managers.liveTVProcessing
+      ),
+      new SyncProviderDetailsJob(
+        'syncProviderDetails',
+        this.managers.jobHistory,
+        this.managers.providers,
+        this.managers.metrics
+      ),
+      new CleanupUnwantedProviderTitlesJob(
+        'cleanupUnwantedProviderTitles',
+        this.managers.jobHistory,
+        this.managers.providers,
+        this.managers.titles,
+        this.managers.providerTitles,
+        this.managers.channel,
+        this.managers.program,
+        this.managers.user,
+        this.managers.providerCategory
+      ),
+      new SyncProviderCategoriesJob(
+        'syncProviderCategories',
+        this.managers.jobHistory,
+        this.managers.providers,
+        this.managers.metrics,
+        this.managers.providerCategory
+      ),
+      new UpdateMetricsJob(
+        'updateMetrics',
+        this.managers.jobHistory,
+        this.managers.metrics
+      )
+    ];
+  }
+
+  /**
+   * Trigger a job asynchronously
+   * @param {string} jobName - Name of the job to trigger
+   */
+  triggerJob(jobName) {
+    if (!this.jobsManager) {
+      this.logger.error('JobsManager not initialized, cannot trigger job:', jobName);
+      return;
+    }
+
+    // Fire job asynchronously without blocking
+    setImmediate(async () => {
+      try {
+        await this.jobsManager.triggerJob(jobName);
+        this.logger.info(`Triggered ${jobName} job`);
+      } catch (error) {
+        this.logger.error(`Failed to trigger ${jobName} job: ${error.message}`);
+        // Don't throw - allow caller to continue even if job trigger fails
+      }
+    });
+  }
+
+  /**
+   * Setup all routes
+   */
+  setupRoutes() {
+    // Initialize routers
+    this.initializeRouters();
+
+    // Setup unmanaged endpoint logging
+    this.setupUnmanagedEndpointLogging();
+
+    // Setup static file serving
+    this.setupStaticFiles();
+
+    // Setup React Router fallback
+    this.setupReactRouterFallback();
+
+    // Setup error handling middleware
+    this.setupErrorHandling();
+  }
+
+  /**
+   * Initialize all routers
+   */
+  initializeRouters() {
+    const routers = [
+      new AuthRouter(this.app, this.managers.user, this.managers.middleware),
+      new UsersRouter(this.app, this.managers.user, this.managers.middleware, this.managers.metrics),
+      new ProfileRouter(this.app, this.managers.user, this.managers.middleware),
+      new SettingsRouter(this.app, this.managers.settings, this.managers.middleware, this.logStreamTransport),
+      new StatsRouter(this.app, this.managers.stats, this.managers.middleware),
+      new TitlesRouter(this.app, this.managers.titles, this.managers.providers, this.managers.user, this.managers.middleware, this.managers.metrics),
+      new ProvidersRouter(this.app, this.managers.providers, this.managers.middleware, this.managers.metrics, this.managers.providerCategory),
+      new StreamRouter(this.app, this.managers.stremio, this.managers.middleware, this.managers.metrics),
+      new PlaylistRouter(this.app, this.managers.playlist, this.managers.middleware),
+      new TMDBRouter(this.app, this.managers.tmdb, this.managers.settings, this.managers.middleware),
+      new HealthcheckRouter(this.app, this.managers.settings, this.managers.middleware),
+      new XtreamRouter(this.app, this.managers.xtream, this.managers.middleware, this.managers.channel, this.managers.program),
+      new JobsRouter(this.app, this.jobsManager, this.managers.middleware),
+      new StremioRouter(this.app, this.managers.stremio, this.managers.middleware),
+      new LiveTVRouter(this.app, this.managers.channel, this.managers.program, this.managers.liveTVFormatting, this.managers.user, this.managers.iptvProvider, this.managers.middleware, this.managers.metrics),
+      new MetricsRouter(this.app, this.managers.middleware, this.managers.metrics),
+      new ProviderTitlesRouter(this.app, this.managers.providerTitles, this.managers.tmdb, this.repositories.provider, this.managers.middleware)
+    ];
+
+    // Collect all base paths from routers
+    this.apiPaths = [];
+    routers.forEach(router => {
+      const paths = router.getBasePath();
+      this.apiPaths.push(...paths);
+    });
 
     // Initialize all routers
-    authRouter.initialize();
-    usersRouter.initialize();
-    profileRouter.initialize();
-    settingsRouter.initialize();
-    statsRouter.initialize();
-    titlesRouter.initialize();
-    providersRouter.initialize();
-    streamRouter.initialize();
-    playlistRouter.initialize();
-    tmdbRouter.initialize();
-    healthcheckRouter.initialize();
-    xtreamRouter.initialize();
-    jobsRouter.initialize();
-    stremioRouter.initialize();
-    liveTVRouter.initialize();
-    metricsRouter.initialize();
-    providerTitlesRouter.initialize();
+    routers.forEach(router => router.initialize());
+  }
 
-    // Step 5: Register routes
-    app.use('/api/auth', authRouter.router);
-    app.use('/api/users', usersRouter.router);
-    app.use('/api/profile', profileRouter.router);
-    app.use('/api/settings', settingsRouter.router);
-    app.use('/api/stats', statsRouter.router);
-    app.use('/api/titles', titlesRouter.router);
-    app.use('/api/jobs', jobsRouter.router);
-    app.use('/api/iptv/providers', providersRouter.router);
-    app.use('/api/stream', streamRouter.router);
-    app.use('/api/playlist', playlistRouter.router);
-    app.use('/api/tmdb', tmdbRouter.router);
-    app.use('/api/healthcheck', healthcheckRouter.router);
-    app.use('/api/livetv', liveTVRouter.router);
-    app.use('/api/provider-titles', providerTitlesRouter.router);
-    app.use('/player_api.php', xtreamRouter.router); // Xtream Code API at specific path
-    
-    // Prometheus metrics endpoint (before React Router fallback)
-    app.use('/metrics', metricsRouter.router);
-    
-    // Add direct stream routes (Xtream Code API standard format)
-    // These must come before the React Router fallback
-    app.use('/movie', xtreamRouter.router);
-    app.use('/series', xtreamRouter.router);
-    app.use('/live', xtreamRouter.router); // Live TV streams
-    app.use('/stremio', stremioRouter.router);
-
-    // Catch-all middleware for unmanaged API endpoints (only when setting is enabled)
-    app.use(async (req, res, next) => {
-      // Only check API/Xtream routes, skip static files and React routes
-      if (req.path.startsWith('/api') || 
-          req.path.startsWith('/player_api.php') ||
-          req.path.startsWith('/movie') ||
-          req.path.startsWith('/series') ||
-          req.path.startsWith('/live')) {
-        
+  /**
+   * Setup unmanaged endpoint logging middleware
+   */
+  setupUnmanagedEndpointLogging() {
+    this.app.use(async (req, res, next) => {
+      if (this.apiPaths.some(apiPath => req.path.startsWith(apiPath))) {
         try {
-          const logUnmanagedResult = await settingsManager.getSetting('log_unmanaged_endpoints');
+          const logUnmanagedResult = await this.managers.settings.getSetting('log_unmanaged_endpoints');
           const isEnabled = logUnmanagedResult.response?.value === true;
-          
+
           if (isEnabled) {
             const unmanagedLogger = createLogger('UnmanagedEndpointLogger');
             unmanagedLogger.info('Unmanaged endpoint called', {
@@ -498,214 +654,189 @@ async function initialize() {
             });
           }
         } catch (error) {
-          // Don't break the request if setting check fails
-          logger.error('Error checking log_unmanaged_endpoints setting:', error);
+          this.logger.error('Error checking log_unmanaged_endpoints setting:', error);
         }
       }
-      
-      // Continue to next middleware
+
       next();
     });
+  }
 
-    // Static file serving for React app
-    // Serve static files from React build directory
-    // Exclude API routes and other non-static paths
-    const staticPath = path.join(__dirname, '../../web-ui/build');
-    const staticMiddleware = express.static(staticPath);
-    app.use((req, res, next) => {
-      // Skip static file serving for API routes, stream routes, etc.
-      if (req.path.startsWith('/api') || 
-          req.path.startsWith('/movie') || 
-          req.path.startsWith('/series') ||
-          req.path.startsWith('/live') ||
-          req.path.startsWith('/player_api.php') ||
-          req.path.startsWith('/stremio') ||
-          req.path.startsWith('/metrics')) {
+  /**
+   * Setup static file serving
+   */
+  setupStaticFiles() {
+    const staticMiddleware = express.static(this.staticPath);
+    this.app.use((req, res, next) => {
+      if (this.apiPaths.some(apiPath => req.path.startsWith(apiPath))) {
         return next();
       }
-      // Use static middleware for other paths
       return staticMiddleware(req, res, next);
     });
+  }
 
-    // React Router fallback - serve index.html for non-API routes
-    // Handle all HTTP methods for the fallback
-    app.all('*', (req, res, next) => {
-      // Skip API routes, stream routes, Stremio routes, and metrics routes (let their routers handle them)
-      if (req.path.startsWith('/api') || 
-          req.path.startsWith('/movie') || 
-          req.path.startsWith('/series') ||
-          req.path.startsWith('/live') ||
-          req.path.startsWith('/player_api.php') ||
-          req.path.startsWith('/stremio') ||
-          req.path.startsWith('/metrics')) {
-        return next(); // Let the router handle it or return 404 if not matched
+  /**
+   * Setup React Router fallback
+   */
+  setupReactRouterFallback() {
+    this.app.all('*', (req, res, next) => {
+      if (this.apiPaths.some(apiPath => req.path.startsWith(apiPath))) {
+        return next();
       }
-      
-      // Only serve index.html for GET requests (React Router)
+
       if (req.method === 'GET') {
-        return res.sendFile(path.join(staticPath, 'index.html'));
+        return res.sendFile(path.join(this.staticPath, 'index.html'));
       }
-      
-      // For non-GET requests to non-API routes, return 404
+
       return res.status(404).json({ error: 'Not found' });
     });
+  }
 
-    // Error handling middleware (MUST be after all routes)
-    app.use((err, req, res, next) => {
+  /**
+   * Setup error handling middleware
+   */
+  setupErrorHandling() {
+    this.app.use((err, req, res, next) => {
       // Track managed errors
       if (err instanceof AppError) {
-        metricsMiddleware.trackManagedError(req, err);
+        this.managers.metricsMiddleware.trackManagedError(req, err);
       }
-      
-      logger.error('Error:', err);
+
+      this.logger.error('Error:', err);
       res.status(err.status || 500).json({
         error: err.message || 'Internal server error',
       });
     });
+  }
 
-    // Initialize Socket.IO server
-    webSocketService.initialize(server);
-    logger.info('Socket.IO server initialized');
-
-    // Initialize log stream transport
-    const { setLogStreamWebSocketService, setLogStreamLevel, getLogBuffer, getLogStreamLevel } = await import('./utils/logger.js');
-    setLogStreamWebSocketService(webSocketService);
-
-    // Load log stream level from settings (default to 'info')
+  /**
+   * Setup log stream level from settings
+   */
+  async setupLogStreamLevel() {
     try {
-      const logLevelResult = await settingsManager.getSetting('log_stream_level');
+      const logLevelResult = await this.managers.settings.getSetting('log_stream_level');
       let logLevel = logLevelResult.response?.value || 'info';
-      // Convert 'debug' to 'info' if it exists (debug is no longer supported)
       if (logLevel === 'debug') {
         logLevel = 'info';
-        await settingsManager.setSetting('log_stream_level', 'info');
-        logger.info('Converted log_stream_level from "debug" to "info" (debug is no longer supported)');
+        await this.managers.settings.setSetting('log_stream_level', 'info');
+        this.logger.info('Converted log_stream_level from "debug" to "info" (debug is no longer supported)');
       }
-      setLogStreamLevel(logLevel);
-      logger.info(`Log stream level initialized to: ${logLevel}`);
+      this.logStreamTransport.setLevel(logLevel);
+      this.logger.info(`Log stream level initialized to: ${logLevel}`);
     } catch (error) {
-      logger.warn(`Failed to load log stream level from settings, using default 'info': ${error.message}`);
-      setLogStreamLevel('info');
+      this.logger.warn(`Failed to load log stream level from settings, using default 'info': ${error.message}`);
+      this.logStreamTransport.setLevel('info');
     }
+  }
 
-    // Add WebSocket event handlers for log streaming
-    const defaultNamespace = webSocketService.getDefaultNamespace();
-    if (defaultNamespace) {
-      defaultNamespace.on('connection', async (socket) => {
-        // Handle log subscription - send current buffer and level
-        socket.on('log:subscribe', async () => {
-          try {
-            const { getLogStreamLevel } = await import('./utils/logger.js');
-            const level = getLogStreamLevel();
-            // Get filtered buffer based on current level
-            const buffer = getLogBuffer(level);
-            socket.emit('log:buffer', {
-              lines: buffer,
-              totalLines: buffer.length,
-              level: level
-            });
-          } catch (error) {
-            logger.error('Error sending log buffer:', error);
-            socket.emit('log:error', { message: 'Failed to retrieve log buffer' });
-          }
-        });
-
-        // Handle log level change
-        socket.on('log:set_level', async (data) => {
-          try {
-            const { level } = data;
-            const { getAvailableLogLevels } = await import('./utils/logger.js');
-            const availableLevels = getAvailableLogLevels();
-
-            if (!availableLevels.includes(level)) {
-              socket.emit('log:error', { message: `Invalid log level: ${level}. Must be one of: ${availableLevels.join(', ')}` });
-              return;
-            }
-
-            setLogStreamLevel(level);
-
-            // Save to settings for persistence
-            await settingsManager.setSetting('log_stream_level', level);
-            
-            // Send updated filtered buffer with new level
-            const { getLogStreamLevel } = await import('./utils/logger.js');
-            const filteredBuffer = getLogBuffer(level);
-            socket.emit('log:level_changed', { 
-              level,
-              lines: filteredBuffer,
-              totalLines: filteredBuffer.length
-            });
-          } catch (error) {
-            logger.error('Error setting log level:', error);
-            socket.emit('log:error', { message: `Failed to set log level: ${error.message}` });
-          }
-        });
+  /**
+   * Handle log subscription request from WebSocket client
+   * @param {object} socket - Socket.IO socket instance
+   */
+  async handleLogSubscribe(socket) {
+    try {
+      const level = this.logStreamTransport.getLevel();
+      const buffer = this.logStreamTransport.getLogBuffer(level);
+      socket.emit('log:buffer', {
+        lines: buffer,
+        totalLines: buffer.length,
+        level: level
       });
+    } catch (error) {
+      this.logger.error('Error sending log buffer:', error);
+      socket.emit('log:error', { message: 'Failed to retrieve log buffer' });
     }
+  }
 
-    // Start HTTP server
-    server.listen(PORT, async () => {
-      logger.info(`Server running on port ${PORT}`);
-      logger.info(`API available at http://localhost:${PORT}/api`);
-      logger.info(`Socket.IO available at ws://localhost:${PORT}/socket.io`);
-      
+  /**
+   * Handle log level change request from WebSocket client
+   * @param {object} socket - Socket.IO socket instance
+   * @param {object} data - Event data containing the new log level
+   */
+  async handleLogSetLevel(socket, data) {
+    try {
+      const { level } = data;
+      const availableLevels = this.logStreamTransport.getAvailableLogLevels();
+
+      if (!availableLevels.includes(level)) {
+        socket.emit('log:error', { message: `Invalid log level: ${level}. Must be one of: ${availableLevels.join(', ')}` });
+        return;
+      }
+
+      this.logStreamTransport.setLevel(level);
+      await this.managers.settings.setSetting('log_stream_level', level);
+
+      const filteredBuffer = this.logStreamTransport.getLogBuffer(level);
+      socket.emit('log:level_changed', {
+        level,
+        lines: filteredBuffer,
+        totalLines: filteredBuffer.length
+      });
+    } catch (error) {
+      this.logger.error('Error setting log level:', error);
+      socket.emit('log:error', { message: `Failed to set log level: ${error.message}` });
+    }
+  }
+
+  /**
+   * Start the HTTP server
+   */
+  async start() {
+    this.server.listen(this.port, async () => {
+      this.logger.info(`Server running on port ${this.port}`);
+      this.logger.info(`API available at http://localhost:${this.port}/api`);
+      this.logger.info(`Socket.IO available at ws://localhost:${this.port}/socket.io`);
+
       // Start job scheduler after server is ready
-      await jobScheduler.start();
-      
-      // Trigger metrics update job on startup (after scheduler is ready)
-      setImmediate(async () => {
-        try {
-          await jobsManager.triggerJob('updateMetrics');
-          logger.info('Triggered updateMetrics job on startup');
-        } catch (error) {
-          logger.error(`Failed to trigger updateMetrics job on startup: ${error.message}`);
-        }
-      });
+      await this.jobScheduler.start();
     });
-  } catch (error) {
-    logger.error('Failed to initialize application:', error);
-    process.exit(1);
+  }
+
+  /**
+   * Graceful shutdown
+   */
+  async shutdown() {
+    this.logger.info('Shutting down gracefully...');
+
+    // Stop job scheduler
+    if (this.jobScheduler) {
+      await this.jobScheduler.stop();
+      this.logger.info('Job scheduler stopped');
+    }
+
+    // Close HTTP server
+    this.server.close(() => {
+      this.logger.info('HTTP server closed');
+    });
+
+    // Close WebSocket service
+    if (this.webSocketService) {
+      this.webSocketService.close();
+    }
+
+    // Close MongoDB connection
+    if (this.mongoClient) {
+      await this.mongoClient.close();
+      this.logger.info('MongoDB connection closed');
+    }
+
+    process.exit(0);
   }
 }
 
-// Graceful shutdown
-async function shutdown() {
-  logger.info('Shutting down gracefully...');
-  
-  // Stop job scheduler
-  if (jobScheduler) {
-    await jobScheduler.stop();
-    logger.info('Job scheduler stopped');
-  }
-  
-  // Close HTTP server
-  server.close(() => {
-    logger.info('HTTP server closed');
-  });
-  
-  // Close WebSocket service
-  if (webSocketService) {
-    webSocketService.close();
-  }
-  
-  // Close MongoDB connection
-  if (mongoClient) {
-    await mongoClient.close();
-    logger.info('MongoDB connection closed');
-  }
-  
-  process.exit(0);
-}
+// Create application instance
+const app = new Application();
 
+// Setup graceful shutdown handlers
 process.on('SIGTERM', () => {
-  logger.info('SIGTERM received');
-  shutdown();
+  app.logger.info('SIGTERM received');
+  app.shutdown();
 });
 
 process.on('SIGINT', () => {
-  logger.info('SIGINT received');
-  shutdown();
+  app.logger.info('SIGINT received');
+  app.shutdown();
 });
 
 // Start the application
-initialize();
+app.initialize();

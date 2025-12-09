@@ -10,124 +10,140 @@ const START_TIME = Date.now() / 1000; // Unix timestamp in seconds
  */
 class HealthcheckRouter extends BaseRouter {
   /**
+   * @param {import('express').Application} app - Express app instance
    * @param {SettingsManager} settingsManager - Settings manager instance
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
    */
-  constructor(settingsManager, middleware) {
-    super(middleware, 'HealthcheckRouter');
+  constructor(app, settingsManager, middleware) {
+    super(app, middleware, 'HealthcheckRouter');
     this._settingsManager = settingsManager;
   }
 
   /**
-   * Initialize routes for this router
+   * Get the base path(s) for this router
+   * @returns {string[]} Base path(s) for this router
    */
-  initialize() {
+  getBasePath() {
+    return ['/api/healthcheck'];
+  }
+
+  /**
+   * Set up routes for this router
+   */
+  setupRoutes() {
     /**
      * GET /api/healthcheck
      * System health check endpoint matching Python's healthcheck format
      */
-    this.router.get('/', async (req, res) => {
+    this.router.get('/', this._handleGetHealthcheck.bind(this));
+  }
+
+  /**
+   * Handle GET / request
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   */
+  async _handleGetHealthcheck(req, res) {
+    try {
+      // Check MongoDB connectivity
+      let dbStatus = false;
+      let dbMessage = 'Not connected';
       try {
-        // Check MongoDB connectivity
-        let dbStatus = false;
-        let dbMessage = 'Not connected';
-        try {
-          // Test MongoDB connection using SettingsManager
-          await this._settingsManager.testConnection();
-          dbStatus = true;
-          dbMessage = 'Connected';
-        } catch (error) {
-          dbMessage = error.message || 'Connection failed';
-        }
-
-        // Check TMDB service - check if tmdb_token exists in settings
-        let tmdbStatus = false;
-        let tmdbMessage = 'Not configured';
-        try {
-          const tmdbResult = await this._settingsManager.getSetting('tmdb_token');
-          if (tmdbResult.statusCode === 200 && tmdbResult.response.value) {
-            tmdbStatus = true;
-            tmdbMessage = 'Configured';
-          }
-        } catch (error) {
-          tmdbMessage = error.message || 'Check failed';
-        }
-
-        // Get system metrics using Node.js os module
-        const totalMemory = os.totalmem();
-        const freeMemory = os.freemem();
-        const usedMemory = totalMemory - freeMemory;
-        const memoryPercent = (usedMemory / totalMemory) * 100;
-
-        // Get disk usage using check-disk-space package
-        let diskTotal = 0;
-        let diskFree = 0;
-        let diskUsed = 0;
-        let diskPercent = 0;
-        try {
-          // On Windows, use C:\ or root path
-          const diskInfo = await checkDiskSpace(process.platform === 'win32' ? 'C:\\' : '/');
-          diskTotal = diskInfo.size;
-          diskFree = diskInfo.free;
-          diskUsed = diskTotal - diskFree;
-          diskPercent = (diskUsed / diskTotal) * 100;
-        } catch (error) {
-          this.logger.warn('Failed to get disk usage:', error);
-          // Fallback to memory values if disk check fails
-          diskTotal = totalMemory;
-          diskFree = freeMemory;
-          diskUsed = usedMemory;
-          diskPercent = memoryPercent;
-        }
-
-        // Calculate uptime
-        const uptimeSeconds = Math.floor(Date.now() / 1000 - START_TIME);
-        const uptimeDays = Math.floor(uptimeSeconds / 86400);
-        const uptimeHours = Math.floor((uptimeSeconds % 86400) / 3600);
-        const uptimeMinutes = Math.floor((uptimeSeconds % 3600) / 60);
-        const uptimeSecs = uptimeSeconds % 60;
-        const uptimeFormatted = `${uptimeDays} days, ${uptimeHours}:${String(uptimeMinutes).padStart(2, '0')}:${String(uptimeSecs).padStart(2, '0')}`;
-
-        // Format timestamp to match Python's datetime.now(UTC).isoformat() (no Z suffix)
-        const timestamp = new Date().toISOString().replace('Z', '');
-        
-        const response = {
-          status: dbStatus && tmdbStatus ? 'healthy' : 'degraded',
-          timestamp: timestamp,
-          uptime: {
-            seconds: uptimeSeconds,
-            formatted: uptimeFormatted,
-          },
-          memory: {
-            total: totalMemory,
-            available: freeMemory,
-            percent: parseFloat(memoryPercent.toFixed(1)),
-            used: usedMemory,
-          },
-          disk: {
-            total: diskTotal,
-            free: diskFree,
-            used: diskUsed,
-            percent: parseFloat(diskPercent.toFixed(1)),
-          },
-          services: {
-            database: {
-              status: dbStatus ? 'healthy' : 'unhealthy',
-              message: dbMessage,
-            },
-            tmdb: {
-              status: tmdbStatus ? 'healthy' : 'unhealthy',
-              message: tmdbMessage,
-            },
-          },
-        };
-
-        const statusCode = dbStatus && tmdbStatus ? 200 : 503;
-        return res.status(statusCode).json(response);
+        // Test MongoDB connection using SettingsManager
+        await this._settingsManager.testConnection();
+        dbStatus = true;
+        dbMessage = 'Connected';
       } catch (error) {
-        return this.returnErrorResponse(res, 500, `Health check failed: ${error.message}`, `Health check error: ${error.message}`);
+        dbMessage = error.message || 'Connection failed';
       }
-    });
+
+      // Check TMDB service - check if tmdb_token exists in settings
+      let tmdbStatus = false;
+      let tmdbMessage = 'Not configured';
+      try {
+        const tmdbResult = await this._settingsManager.getSetting('tmdb_token');
+        if (tmdbResult.statusCode === 200 && tmdbResult.response.value) {
+          tmdbStatus = true;
+          tmdbMessage = 'Configured';
+        }
+      } catch (error) {
+        tmdbMessage = error.message || 'Check failed';
+      }
+
+      // Get system metrics using Node.js os module
+      const totalMemory = os.totalmem();
+      const freeMemory = os.freemem();
+      const usedMemory = totalMemory - freeMemory;
+      const memoryPercent = (usedMemory / totalMemory) * 100;
+
+      // Get disk usage using check-disk-space package
+      let diskTotal = 0;
+      let diskFree = 0;
+      let diskUsed = 0;
+      let diskPercent = 0;
+      try {
+        // On Windows, use C:\ or root path
+        const diskInfo = await checkDiskSpace(process.platform === 'win32' ? 'C:\\' : '/');
+        diskTotal = diskInfo.size;
+        diskFree = diskInfo.free;
+        diskUsed = diskTotal - diskFree;
+        diskPercent = (diskUsed / diskTotal) * 100;
+      } catch (error) {
+        this.logger.warn('Failed to get disk usage:', error);
+        // Fallback to memory values if disk check fails
+        diskTotal = totalMemory;
+        diskFree = freeMemory;
+        diskUsed = usedMemory;
+        diskPercent = memoryPercent;
+      }
+
+      // Calculate uptime
+      const uptimeSeconds = Math.floor(Date.now() / 1000 - START_TIME);
+      const uptimeDays = Math.floor(uptimeSeconds / 86400);
+      const uptimeHours = Math.floor((uptimeSeconds % 86400) / 3600);
+      const uptimeMinutes = Math.floor((uptimeSeconds % 3600) / 60);
+      const uptimeSecs = uptimeSeconds % 60;
+      const uptimeFormatted = `${uptimeDays} days, ${uptimeHours}:${String(uptimeMinutes).padStart(2, '0')}:${String(uptimeSecs).padStart(2, '0')}`;
+
+      // Format timestamp to match Python's datetime.now(UTC).isoformat() (no Z suffix)
+      const timestamp = new Date().toISOString().replace('Z', '');
+      
+      const response = {
+        status: dbStatus && tmdbStatus ? 'healthy' : 'degraded',
+        timestamp: timestamp,
+        uptime: {
+          seconds: uptimeSeconds,
+          formatted: uptimeFormatted,
+        },
+        memory: {
+          total: totalMemory,
+          available: freeMemory,
+          percent: parseFloat(memoryPercent.toFixed(1)),
+          used: usedMemory,
+        },
+        disk: {
+          total: diskTotal,
+          free: diskFree,
+          used: diskUsed,
+          percent: parseFloat(diskPercent.toFixed(1)),
+        },
+        services: {
+          database: {
+            status: dbStatus ? 'healthy' : 'unhealthy',
+            message: dbMessage,
+          },
+          tmdb: {
+            status: tmdbStatus ? 'healthy' : 'unhealthy',
+            message: tmdbMessage,
+          },
+        },
+      };
+
+      const statusCode = dbStatus && tmdbStatus ? 200 : 503;
+      return res.status(statusCode).json(response);
+    } catch (error) {
+      return this.returnErrorResponse(res, 500, `Health check failed: ${error.message}`, `Health check error: ${error.message}`);
+    }
   }
 }
 

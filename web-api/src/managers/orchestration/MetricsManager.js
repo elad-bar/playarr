@@ -1,22 +1,40 @@
+import { BaseManager } from '../BaseManager.js';
 import { Registry, Counter, Gauge, Histogram } from 'prom-client';
-import { createLogger } from '../utils/logger.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
-const logger = createLogger('MetricsService');
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const metricsConfig = JSON.parse(readFileSync(join(__dirname, '../metrics.json'), 'utf-8'));
+const metricsConfig = JSON.parse(readFileSync(join(__dirname, '../../metrics.json'), 'utf-8'));
 
 /**
- * Metrics service for Prometheus metrics collection
+ * Metrics Manager (Type D: Orchestration Manager)
+ * Coordinates metrics collection across multiple domains
+ * Provides Prometheus metrics collection and reporting
  */
-class MetricsService {
-  constructor() {
+export class MetricsManager extends BaseManager {
+  /**
+   * @param {import('../domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
+   * @param {import('../domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
+   * @param {import('../domain/ChannelManager.js').ChannelManager} channelManager - Channel manager
+   * @param {import('../domain/UserManager.js').UserManager} userManager - User manager
+   * @param {import('../domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager
+   * @param {import('../domain/SettingsManager.js').SettingsManager} settingsManager - Settings manager
+   */
+  constructor(providerTitlesManager, titlesManager, channelManager, userManager, iptvProviderManager, settingsManager) {
+    super('MetricsManager');
+    
+    this.providerTitlesManager = providerTitlesManager;
+    this.titlesManager = titlesManager;
+    this.channelManager = channelManager;
+    this.userManager = userManager;
+    this.iptvProviderManager = iptvProviderManager;
+    this._settingsManager = settingsManager;
+    
     this.register = new Registry();
     this._metrics = new Map(); // Store all metric instances
+    this._metricsToken = null; // Store metrics token for validation
     
     // Metric type mapping
     this._metricTypes = {
@@ -26,6 +44,41 @@ class MetricsService {
     };
     
     this._initializeMetrics();
+  }
+
+  /**
+   * Initialize MetricsManager by generating/loading metrics token
+   * @returns {Promise<void>}
+   */
+  async initialize() {
+    try {
+      const metricsToken = await this._settingsManager.getSetting('metrics_token');
+      if (!metricsToken.value) {
+        // Generate new token if it doesn't exist
+        const crypto = await import('crypto');
+        const newToken = crypto.randomBytes(32).toString('hex');
+        await this._settingsManager.setSetting('metrics_token', newToken);
+        this._metricsToken = newToken;
+        this.logger.info('Generated new metrics token');
+      } else {
+        this._metricsToken = metricsToken.value;
+        this.logger.debug('Loaded existing metrics token from settings');
+      }
+    } catch (error) {
+      this.logger.warn(`Could not check/generate metrics token: ${error.message}`);
+    }
+  }
+
+  /**
+   * Validate a metrics token
+   * @param {string} token - Token to validate
+   * @returns {boolean} True if token is valid
+   */
+  validateToken(token) {
+    if (!this._metricsToken) {
+      return false;
+    }
+    return token === this._metricsToken;
   }
 
   /**
@@ -39,7 +92,7 @@ class MetricsService {
       const MetricClass = this._metricTypes[config.type];
       
       if (!MetricClass) {
-        logger.warn(`Unknown metric type: ${config.type} for ${key}`);
+        this.logger.warn(`Unknown metric type: ${config.type} for ${key}`);
         continue;
       }
 
@@ -60,7 +113,7 @@ class MetricsService {
       this._metrics.set(key, metric);
     }
 
-    logger.info(`Metrics service initialized with ${this._metrics.size} metrics`);
+    this.logger.info(`Metrics manager initialized with ${this._metrics.size} metrics`);
   }
 
   /**
@@ -90,7 +143,7 @@ class MetricsService {
     if (metric && metric instanceof Counter) {
       metric.inc(labels, value);
     } else {
-      logger.warn(`Counter metric '${metricName}' not found`);
+      this.logger.warn(`Counter metric '${metricName}' not found`);
     }
   }
 
@@ -105,7 +158,7 @@ class MetricsService {
     if (metric && metric instanceof Histogram) {
       metric.observe(labels, value);
     } else {
-      logger.warn(`Histogram metric '${metricName}' not found`);
+      this.logger.warn(`Histogram metric '${metricName}' not found`);
     }
   }
 
@@ -120,7 +173,7 @@ class MetricsService {
     if (metric && metric instanceof Gauge) {
       metric.set(labels, value);
     } else {
-      logger.warn(`Gauge metric '${metricName}' not found`);
+      this.logger.warn(`Gauge metric '${metricName}' not found`);
     }
   }
 
@@ -133,22 +186,17 @@ class MetricsService {
     if (metric && metric instanceof Gauge) {
       metric.reset();
     } else {
-      logger.warn(`Gauge metric '${metricName}' not found`);
+      this.logger.warn(`Gauge metric '${metricName}' not found`);
     }
   }
 
   /**
    * Update all gauge metrics with current database counts
-   * @param {Object} managers - Object containing manager instances
-   * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} managers.providerTitlesManager
-   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} managers.titlesManager
-   * @param {import('../managers/domain/ChannelManager.js').ChannelManager} managers.channelManager
-   * @param {import('../managers/domain/UserManager.js').UserManager} managers.userManager
-   * @param {import('../managers/domain/IPTVProviderManager.js').IPTVProviderManager} managers.iptvProviderManager
+   * Uses managers injected via constructor
    */
-  async updateGaugeMetrics({ providerTitlesManager, titlesManager, channelManager, userManager, iptvProviderManager }) {
+  async updateGaugeMetrics() {
     try {
-      logger.debug('Updating gauge metrics...');
+      this.logger.debug('Updating gauge metrics...');
 
       // Reset all gauges to 0 first
       const metrics = metricsConfig.metrics || {};
@@ -159,7 +207,7 @@ class MetricsService {
       }
 
       // 1. Provider titles count per provider, per media type
-      const providerTitlesCounts = await providerTitlesManager.getCountByProviderAndType();
+      const providerTitlesCounts = await this.providerTitlesManager.getCountByProviderAndType();
       for (const item of providerTitlesCounts) {
         this.setGauge('provider_titles_count', {
           provider_id: item.provider_id,
@@ -168,7 +216,7 @@ class MetricsService {
       }
 
       // 1a. Ignored provider titles count per provider, per media type
-      const ignoredTitlesCounts = await providerTitlesManager.getIgnoredCountByProviderAndType();
+      const ignoredTitlesCounts = await this.providerTitlesManager.getIgnoredCountByProviderAndType();
       for (const item of ignoredTitlesCounts) {
         this.setGauge('ignored_provider_titles_count', {
           provider_id: item.provider_id,
@@ -177,7 +225,7 @@ class MetricsService {
       }
 
       // 2. Main titles count per media type
-      const mainTitlesCounts = await titlesManager.getCountByType();
+      const mainTitlesCounts = await this.titlesManager.getCountByType();
       for (const item of mainTitlesCounts) {
         this.setGauge('main_titles_count', {
           media_type: item.media_type
@@ -185,7 +233,7 @@ class MetricsService {
       }
 
       // 3. Episodes count per source
-      const episodesCounts = await titlesManager.getEpisodesCountBySource();
+      const episodesCounts = await this.titlesManager.getEpisodesCountBySource();
       for (const item of episodesCounts) {
         this.setGauge('episodes_count', {
           source: item.source
@@ -193,7 +241,7 @@ class MetricsService {
       }
 
       // 4. Channels count per provider, per category
-      const channelsCounts = await channelManager.getCountByProviderAndCategory();
+      const channelsCounts = await this.channelManager.getCountByProviderAndCategory();
       for (const item of channelsCounts) {
         this.setGauge('channels_count', {
           provider_id: item.provider_id,
@@ -202,7 +250,7 @@ class MetricsService {
       }
 
       // 5. Watchlist titles count per user, per media type
-      const watchlistTitlesCounts = await userManager.getWatchlistTitlesCountByUserAndType();
+      const watchlistTitlesCounts = await this.userManager.getWatchlistTitlesCountByUserAndType();
       for (const item of watchlistTitlesCounts) {
         this.setGauge('watchlist_titles_count', {
           user: item.user,
@@ -211,7 +259,7 @@ class MetricsService {
       }
 
       // 6. Watchlist channels count per user
-      const watchlistChannelsCounts = await userManager.getWatchlistChannelsCountByUser();
+      const watchlistChannelsCounts = await this.userManager.getWatchlistChannelsCountByUser();
       for (const item of watchlistChannelsCounts) {
         this.setGauge('watchlist_channels_count', {
           user: item.user
@@ -219,44 +267,42 @@ class MetricsService {
       }
 
       // 7. Active users (users with API key)
-      const activeUsersCount = await userManager.getActiveUsersCount();
+      const activeUsersCount = await this.userManager.getActiveUsersCount();
       this.setGauge('active_users', {}, activeUsersCount);
 
       // 8. Provider connection metrics (active_connections, max_connections, active status, expiration_days)
-      if (iptvProviderManager) {
-        const providerConnectionMetrics = await iptvProviderManager.getProviderConnectionMetrics();
-        const now = Date.now();
-        for (const item of providerConnectionMetrics) {
-          const providerId = item.provider_id || 'unknown';
-          
-          if (item.active_connections !== undefined && item.active_connections !== null) {
-            this.setGauge('provider_active_connections', { provider_id: providerId }, item.active_connections);
-          }
-          
-          if (item.max_connections !== undefined && item.max_connections !== null) {
-            this.setGauge('provider_max_connections', { provider_id: providerId }, item.max_connections);
-          }
-          
-          if (item.active !== undefined && item.active !== null) {
-            this.setGauge('provider_active', { provider_id: providerId }, item.active ? 1 : 0);
-          }
-          
-          // Calculate and update expiration days
-          const expirationDate = item.expiration_date;
-          if (expirationDate !== null && expirationDate !== undefined) {
-            const expirationTimestamp = expirationDate * 1000; // Convert to milliseconds
-            const daysUntilExpiration = Math.floor((expirationTimestamp - now) / (1000 * 60 * 60 * 24));
-            this.setGauge('provider_expiration_days', { provider_id: providerId }, daysUntilExpiration);
-          } else {
-            // Set to sentinel value to indicate no expiration date
-            this.setGauge('provider_expiration_days', { provider_id: providerId }, -999999);
-          }
+      const providerConnectionMetrics = await this.iptvProviderManager.getProviderConnectionMetrics();
+      const now = Date.now();
+      for (const item of providerConnectionMetrics) {
+        const providerId = item.provider_id || 'unknown';
+        
+        if (item.active_connections !== undefined && item.active_connections !== null) {
+          this.setGauge('provider_active_connections', { provider_id: providerId }, item.active_connections);
+        }
+        
+        if (item.max_connections !== undefined && item.max_connections !== null) {
+          this.setGauge('provider_max_connections', { provider_id: providerId }, item.max_connections);
+        }
+        
+        if (item.active !== undefined && item.active !== null) {
+          this.setGauge('provider_active', { provider_id: providerId }, item.active ? 1 : 0);
+        }
+        
+        // Calculate and update expiration days
+        const expirationDate = item.expiration_date;
+        if (expirationDate !== null && expirationDate !== undefined) {
+          const expirationTimestamp = expirationDate * 1000; // Convert to milliseconds
+          const daysUntilExpiration = Math.floor((expirationTimestamp - now) / (1000 * 60 * 60 * 24));
+          this.setGauge('provider_expiration_days', { provider_id: providerId }, daysUntilExpiration);
+        } else {
+          // Set to sentinel value to indicate no expiration date
+          this.setGauge('provider_expiration_days', { provider_id: providerId }, -999999);
         }
       }
 
-      logger.info('Gauge metrics updated successfully');
+      this.logger.info('Gauge metrics updated successfully');
     } catch (error) {
-      logger.error('Error updating gauge metrics:', error);
+      this.logger.error('Error updating gauge metrics:', error);
       // Don't throw - metrics update failure shouldn't break the app
     }
   }
@@ -304,7 +350,7 @@ class MetricsService {
 
       return counts;
     } catch (error) {
-      logger.error(`Error getting provider counts for ${providerId}:`, error);
+      this.logger.error(`Error getting provider counts for ${providerId}:`, error);
       // Return zero counts on error
       return {
         movies: 0,
@@ -323,6 +369,5 @@ class MetricsService {
   }
 }
 
-// Export the class for dependency injection
-export default MetricsService;
+export default MetricsManager;
 

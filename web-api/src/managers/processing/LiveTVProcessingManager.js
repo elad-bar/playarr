@@ -20,10 +20,9 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
    * @param {import('../domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance
    * @param {import('../domain/ProgramManager.js').ProgramManager} programManager - Program manager instance
    * @param {import('../domain/IPTVProviderManager.js').IPTVProviderManager} iptvProviderManager - IPTV Provider manager instance
-   * @param {import('../../providers/XtreamProvider.js').XtreamProvider} xtreamProvider - Xtream provider instance
-   * @param {import('../../providers/AGTVProvider.js').AGTVProvider} agtvProvider - AGTV provider instance
+   * @param {Object<string, import('../../providers/BaseIPTVProvider.js').BaseIPTVProvider>} providerTypeMap - Map of provider type to provider instance
    */
-  constructor(channelManager, programManager, iptvProviderManager, xtreamProvider, agtvProvider) {
+  constructor(channelManager, programManager, iptvProviderManager, providerTypeMap) {
     // BaseProcessingManager expects providerData and loggerContext
     // For LiveTV, we use a minimal providerData object and pass loggerContext
     const providerData = { id: 'livetv', type: 'livetv' };
@@ -31,15 +30,10 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
     this._channelManager = channelManager;
     this._programManager = programManager;
     this._iptvProviderManager = iptvProviderManager;
-    this._xtreamProvider = xtreamProvider;
-    this._agtvProvider = agtvProvider;
     this._cacheDir = process.env.CACHE_DIR || '/app/cache';
     
-    // Provider instance mapping - initialized once in constructor
-    this._providerInstanceMap = {
-      'xtream': this._xtreamProvider,
-      'agtv': this._agtvProvider
-    };
+    // Use providerTypeMap directly (same as ProvidersManager)
+    this._providerInstanceMap = providerTypeMap;
   }
 
   /**

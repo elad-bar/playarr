@@ -13,9 +13,9 @@ export class BaseProvider {
   /**
    * @param {string} loggerName - Logger name (required)
    * @param {string} [cacheDir] - Optional cache directory path (defaults to CACHE_DIR env var or '/app/cache')
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service instance (required)
+   * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager instance (optional)
    */
-  constructor(loggerName, cacheDir = null, metricsService) {
+  constructor(loggerName, cacheDir = null, metricsManager) {
     this.logger = createLogger(loggerName);
     
     // Rate limiters per providerId: Map<providerId, Bottleneck>
@@ -47,7 +47,7 @@ export class BaseProvider {
     };
     
     // Metrics service for tracking API request metrics
-    this.metricsService = metricsService;
+    this.metricsManager = metricsManager;
   }
 
   /**
@@ -508,7 +508,7 @@ export class BaseProvider {
       this._setCache(providerId, type, endpoint, finalData, cacheParams);
 
       // Track metrics for successful requests
-      if (this.metricsService && responseStatus) {
+      if (this.metricsManager && responseStatus) {
         try {
           const statusCode = String(responseStatus);
           const providerIdLabel = providerId || 'unknown';
@@ -540,7 +540,7 @@ export class BaseProvider {
       // Handle AbortError (timeout)
       if (error.name === 'AbortError') {
         // Track timeout metrics
-        if (this.metricsService) {
+        if (this.metricsManager) {
           try {
             const providerIdLabel = providerId || 'unknown';
             const endpointLabel = endpoint || 'unknown';
@@ -565,7 +565,7 @@ export class BaseProvider {
         this.logger.error(`Error ${finalFetchOptions.method} ${url}: ${error.message}`);
         
         // Track error metrics
-        if (this.metricsService) {
+        if (this.metricsManager) {
           try {
             let errorStatusCode = 'error';
             

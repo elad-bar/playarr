@@ -24,10 +24,9 @@ class TMDBManager extends BaseManager {
 
   /**
    * Update provider API key when API key is set
-   * @param {string} apiKey - TMDB API key
    */
-  updateProviderApiKey(apiKey) {
-    this._tmdbProvider.updateApiKey(apiKey);
+  updateProviderApiKey() {
+    this._tmdbProvider.initialize();
   }
 
   /**

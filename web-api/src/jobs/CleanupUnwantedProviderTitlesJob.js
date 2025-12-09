@@ -13,16 +13,18 @@ export class CleanupUnwantedProviderTitlesJob extends BaseJob {
    * @param {string} jobName - Name identifier for this job (used in logging)
    * @param {import('../managers/domain/JobHistoryManager.js').JobHistoryManager} jobHistoryManager - Job history manager
    * @param {import('../managers/orchestration/ProvidersManager.js').ProvidersManager} providersManager - Providers manager for direct API calls
-   * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
    * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager
    * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
-   * @param {import('../services/metrics.js').default} metricsService - Metrics service for recording counters
    * @param {import('../managers/domain/ChannelManager.js').ChannelManager} channelManager - Channel manager for Live TV cleanup
    * @param {import('../managers/domain/ProgramManager.js').ProgramManager} programManager - Program manager for Live TV cleanup
    * @param {import('../managers/domain/UserManager.js').UserManager} userManager - User manager for watchlist cleanup
+   * @param {import('../managers/domain/ProviderCategoryManager.js').ProviderCategoryManager} providerCategoryManager - Provider category manager
    */
-  constructor(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService, channelManager, programManager, userManager, providerCategoryManager) {
-    super(jobName, jobHistoryManager, providersManager, tmdbManager, titlesManager, providerTitlesManager, metricsService);
+  constructor(jobName, jobHistoryManager, providersManager, titlesManager, providerTitlesManager, channelManager, programManager, userManager, providerCategoryManager) {
+    super(jobName, jobHistoryManager);
+    this.providersManager = providersManager;
+    this.titlesManager = titlesManager;
+    this.providerTitlesManager = providerTitlesManager;
     this._channelManager = channelManager;
     this._programManager = programManager;
     this._userManager = userManager;
