@@ -292,14 +292,6 @@ const JobCard = ({ job, onTrigger, engineReachable }) => {
             </Box>
 
             <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <Box>
-                    <Typography variant="body2" color="text.secondary">
-                        <span style={{ fontWeight: 500, textTransform: 'capitalize', color: 'inherit' }}>{job.status || 'unknown'}</span> {formatDate(job.lastExecution)}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                        Next Execution: <span style={{ fontWeight: 500, color: 'inherit' }}>{formatNextExecution(job.lastExecution, job.interval)}</span>
-                    </Typography>
-                </Box>
                 {job.lastResult && (
                     <Box sx={{ mt: 2, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                     <Typography variant="body2" color="text.secondary">
@@ -334,6 +326,16 @@ const JobCard = ({ job, onTrigger, engineReachable }) => {
                         </Typography>
                     </Alert>
                 )}
+            </Box>
+
+            {/* Footer with execution details */}
+            <Box sx={{ mt: 'auto', pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+                <Typography variant="body2" color="text.secondary">
+                    <span style={{ fontWeight: 500, textTransform: 'capitalize', color: 'inherit' }}>{job.status || 'unknown'}</span> {formatDate(job.lastExecution)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Next Execution: <span style={{ fontWeight: 500, color: 'inherit' }}>{formatNextExecution(job.lastExecution, job.interval)}</span>
+                </Typography>
             </Box>
         </Paper>
     );
