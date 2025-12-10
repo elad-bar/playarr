@@ -134,6 +134,7 @@ class XtreamManager extends BaseWatchlistFormattingManager {
       const watchlistTitles = await this._getWatchlistTitles(user, 'tvshows');
       const series = [];
 
+      let index = 0;
       for (const [titleKey, title] of watchlistTitles.entries()) {
         // Check if TV show has available media (at least one episode)
         const media = title.media || [];
@@ -150,23 +151,35 @@ class XtreamManager extends BaseWatchlistFormattingManager {
           if (!hasCategory) continue;
         }
 
+        // Get category ID and convert to array
+        const categoryIdStr = this._getCategoryId(title.genres);
+        const categoryIdNum = parseInt(categoryIdStr, 10) || 0;
+
+        // Convert backdrop_path to array
+        const backdropPath = title.backdrop_path 
+          ? [`https://image.tmdb.org/t/p/w1280${title.backdrop_path}`]
+          : [];
+
         const seriesObj = {
-          series_id: title.title_id,
+          num: ++index,
           name: title.title,
-          series_name: title.title,
+          series_id: title.title_id,
           cover: title.poster_path ? `https://image.tmdb.org/t/p/w300${title.poster_path}` : '',
           plot: title.overview || '',
           cast: '',
           director: '',
           genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', '),
+          releaseDate: title.release_date || '',
           release_date: title.release_date || '',
-          last_modified: title.lastUpdated || title.createdAt || '',
+          last_modified: this._toUnixTimestamp(title.lastUpdated || title.createdAt),
           rating: title.vote_average?.toString() || '0',
-          rating_5based: ((title.vote_average || 0) / 2).toFixed(1),
-          category_id: this._getCategoryId(title.genres),
-          category_name: this._getCategoryName(title.genres),
-          backdrop_path: title.backdrop_path ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}` : '',
-          num: this._getEpisodeCount(title.media)
+          rating_5based: String(Math.round(((title.vote_average || 0) / 2) * 10) / 10),
+          backdrop_path: backdropPath,
+          youtube_trailer: '',
+          tmdb: String(title.title_id || ''),
+          episode_run_time: '0',
+          category_id: categoryIdStr,
+          category_ids: [categoryIdNum]
         };
 
         series.push(seriesObj);
@@ -307,9 +320,10 @@ class XtreamManager extends BaseWatchlistFormattingManager {
               overview: '',
               cover: '',
               cover_big: '',
-              episode_count: 0,
-              id: season,
-              vote_average: 0
+              episode_count: '0',
+              cover_tmdb: '',
+              releaseDate: '',
+              duration: '0'
             });
           }
           
@@ -325,21 +339,28 @@ class XtreamManager extends BaseWatchlistFormattingManager {
           episodesBySeason[season].push({
             id: `tvshows-${title.title_id}-${season}-${episode}`,
             episode_num: episode,
-            season_num: season,
             season: season,
             title: mediaItem.name || `S${seasonPadded}E${episodePadded}`,
-            episode_name: mediaItem.name || `S${seasonPadded}E${episodePadded}`,
             container_extension: 'mp4',
             info: {
+              movie_image: '',
+              crew: '',
+              rating: '',
+              releasedate: mediaItem.air_date || '',
+              tmdb_id: '',
+              duration_secs: 0,
+              duration: '',
               plot: mediaItem.overview || '',
-              release_date: mediaItem.air_date || '',
-              duration: ''
-            }
+              bitrate: 0
+            },
+            custom_sid: null,
+            added: this._toUnixTimestamp(mediaItem.createdAt || title.createdAt),
+            direct_source: ''
           });
           
           // Update episode count for this season
           const seasonData = seasonsMap.get(season);
-          seasonData.episode_count = episodesBySeason[season].length;
+          seasonData.episode_count = String(episodesBySeason[season].length);
         }
       }
 
@@ -352,22 +373,37 @@ class XtreamManager extends BaseWatchlistFormattingManager {
         episodes[String(seasonNum)] = episodeList;
       }
 
+      // Get category ID
+      const categoryIdStr = this._getCategoryId(title.genres);
+      const categoryIdNum = parseInt(categoryIdStr, 10) || 0;
+
+      // Convert backdrop_path to array
+      const backdropPath = title.backdrop_path 
+        ? [`https://image.tmdb.org/t/p/w1280${title.backdrop_path}`]
+        : [];
+
+      // Return with seasons first, then info (standard order)
       return {
+        seasons: seasons,
         info: {
-          tmdb_id: title.title_id,
           name: title.title,
           cover: title.poster_path ? `https://image.tmdb.org/t/p/w300${title.poster_path}` : '',
-          backdrop_path: title.backdrop_path ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}` : '',
           plot: title.overview || '',
           cast: '',
           director: '',
           genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', '),
+          releaseDate: title.release_date || '',
           release_date: title.release_date || '',
-          last_modified: title.lastUpdated || title.createdAt || '',
+          last_modified: this._toUnixTimestamp(title.lastUpdated || title.createdAt),
           rating: title.vote_average?.toString() || '0',
-          rating_5based: ((title.vote_average || 0) / 2).toFixed(1)
+          rating_5based: String(Math.round(((title.vote_average || 0) / 2) * 10) / 10),
+          backdrop_path: backdropPath,
+          tmdb: String(title.title_id || ''),
+          youtube_trailer: '',
+          episode_run_time: '0',
+          category_id: categoryIdStr,
+          category_ids: [categoryIdNum]
         },
-        seasons: seasons,
         episodes: episodes
       };
     } catch (error) {
