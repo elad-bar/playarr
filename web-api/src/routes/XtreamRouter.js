@@ -130,9 +130,9 @@ function buildServerInfo(req) {
     server_protocol: scheme,
     rtmp_port: '0',
     timezone,
-    timestamp_now: timestampNow.toString(),
+    timestamp_now: timestampNow,
     time_now: timeNow,
-    server_time_now: timeNow
+    process: true
   };
 }
 
@@ -254,8 +254,8 @@ class XtreamRouter extends BaseRouter {
         user_info: {
           username: username,
           password: password,
-          message: 'Active',
-          auth: '1',
+          message: '',
+          auth: 1,
           status: 'Active',
           exp_date: expDateSeconds.toString(),
           is_trial: (req.user?.is_trial ? '1' : '0'),
