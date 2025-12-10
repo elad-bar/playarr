@@ -289,7 +289,7 @@ export class XtreamProvider extends BaseIPTVProvider {
     const channels = [];
     if (Array.isArray(streams)) {
       for (const stream of streams) {
-        const streamId = String(stream.stream_id);
+        const streamId = stream.stream_id;
         if (!streamId) {
           continue; // Skip invalid streams
         }
@@ -308,11 +308,11 @@ export class XtreamProvider extends BaseIPTVProvider {
 
         const channel = {
           provider_id: providerId,
-          channel_id: epgChannelId, // Use epg_channel_id for EPG matching
-          channel_key: generateChannelKey(providerId, epgChannelId),
+          channel_id: Number(streamId), // NUMBER - use stream_id
+          channel_key: generateChannelKey(providerId, String(streamId)),
           name: stream.name || 'Unknown',
           url: streamUrl, // Constructed from stream_id
-          tvg_id: epgChannelId,
+          tvg_id: epgChannelId, // String for EPG matching
           tvg_name: stream.name || null,
           tvg_logo: stream.stream_icon || null,
           group_title: groupTitle,

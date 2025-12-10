@@ -140,14 +140,15 @@ export class AGTVProvider extends BaseIPTVProvider {
     const playlist = parseM3U(m3uContent);
     const channels = [];
 
-    for (const channelData of playlist.channels) {
-      // Determine channel_id - use tvgId if available, otherwise fallback to URL
-      const channelId = channelData.tvgId || channelData.url || 'unknown';
+    for (let index = 0; index < playlist.channels.length; index++) {
+      const channelData = playlist.channels[index];
+      // Use index-based numeric channel_id (starting from 10000)
+      const channelId = index + 10000;
       
       const channel = {
         provider_id: providerId,
-        channel_id: channelId,
-        channel_key: generateChannelKey(providerId, channelId),
+        channel_id: channelId, // NUMBER
+        channel_key: generateChannelKey(providerId, String(channelId)),
         name: channelData.name || 'Unknown',
         url: channelData.url || '',
         tvg_id: channelData.tvgId || null,

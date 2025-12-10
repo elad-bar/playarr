@@ -175,14 +175,24 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
     try {
       // Get channels for this provider from database to filter EPG programs
       const channels = await this._channelManager.findByProvider(providerId);
-      // Use tvg_id for EPG matching (EPG XML uses tvg_id values in <programme channel="...">)
-      const channelIds = new Set(channels.map(ch => ch.tvg_id).filter(id => id != null));
-      this.logger.debug(`Found ${formatNumber(channelIds.size)} channels in database for provider ${providerId}, filtering EPG programs`);
+      
+      // Build map: tvg_id -> channel_id (numeric) for EPG matching
+      const tvgIdToChannelIdMap = new Map();
+      const validTvgIds = new Set();
+      
+      for (const channel of channels) {
+        if (channel.tvg_id) {
+          validTvgIds.add(channel.tvg_id);
+          tvgIdToChannelIdMap.set(channel.tvg_id, channel.channel_id);
+        }
+      }
+      
+      this.logger.debug(`Found ${formatNumber(validTvgIds.size)} channels with tvg_id for provider ${providerId}, filtering EPG programs`);
       
       // Log sample channel IDs for debugging
-      if (channelIds.size > 0) {
-        const sampleIds = Array.from(channelIds).slice(0, 5);
-        this.logger.debug(`Sample channel IDs from database (using tvg_id): ${sampleIds.join(', ')}`);
+      if (validTvgIds.size > 0) {
+        const sampleIds = Array.from(validTvgIds).slice(0, 5);
+        this.logger.debug(`Sample tvg_ids from database: ${sampleIds.join(', ')}`);
       }
       
       // Check file size - use streaming parser for files > 10MB
@@ -191,16 +201,16 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
 
       if (useStreaming) {
         this.logger.info(`EPG file for provider ${providerId} is large (${formatFileSize(stats.size)}), using streaming parser`);
-        return await this._parseEPGStreaming(filePath, providerId, channelIds);
+        return await this._parseEPGStreaming(filePath, providerId, validTvgIds, tvgIdToChannelIdMap);
       } else {
         // Try standard parser first for smaller files
         try {
-          return await this._parseEPGStandard(filePath, providerId, channelIds);
+          return await this._parseEPGStandard(filePath, providerId, validTvgIds, tvgIdToChannelIdMap);
         } catch (error) {
           // If standard parser fails with stack overflow, fall back to streaming
           if (error.message.includes('stack') || error.message.includes('Maximum call stack')) {
             this.logger.warn(`Standard parser failed for provider ${providerId}, falling back to streaming parser`);
-            return await this._parseEPGStreaming(filePath, providerId, channelIds);
+            return await this._parseEPGStreaming(filePath, providerId, validTvgIds, tvgIdToChannelIdMap);
           }
           throw error;
         }
@@ -216,10 +226,11 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
    * @private
    * @param {string} filePath - Path to EPG XML file
    * @param {string} providerId - Provider ID
-   * @param {Set<string>} validChannelIds - Set of valid channel IDs from database
+   * @param {Set<string>} validChannelIds - Set of valid tvg_ids from database
+   * @param {Map<string, number>} tvgIdToChannelIdMap - Map of tvg_id to channel_id
    * @returns {Promise<Array>} Array of program objects
    */
-  async _parseEPGStandard(filePath, providerId, validChannelIds) {
+  async _parseEPGStandard(filePath, providerId, validChannelIds, tvgIdToChannelIdMap) {
     const content = await fs.readFile(filePath, 'utf8');
     const epg = parseXmltv(content);
     const programs = [];
@@ -238,7 +249,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
         const batch = epg.programmes.slice(i, i + BATCH_SIZE);
         
         for (const prog of batch) {
-          const program = this._extractProgram(prog, providerId, validChannelIds, programKeys);
+          const program = this._extractProgram(prog, providerId, validChannelIds, programKeys, tvgIdToChannelIdMap);
           if (program) {
             programs.push(program);
           }
@@ -337,10 +348,11 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
    * @private
    * @param {string} filePath - Path to EPG XML file
    * @param {string} providerId - Provider ID
-   * @param {Set<string>} validChannelIds - Set of valid channel IDs from database
+   * @param {Set<string>} validChannelIds - Set of valid tvg_ids from database
+   * @param {Map<string, number>} tvgIdToChannelIdMap - Map of tvg_id to channel_id
    * @returns {Promise<Array>} Array of program objects
    */
-  async _parseEPGStreaming(filePath, providerId, validChannelIds) {
+  async _parseEPGStreaming(filePath, providerId, validChannelIds, tvgIdToChannelIdMap) {
     return new Promise((resolve, reject) => {
       const programs = [];
       const programKeys = new Set();
@@ -427,9 +439,15 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
       parser.onclosetag = (tagName) => {
         if (tagName === 'programme' && currentProgram) {
           // Process the completed programme
-          const channelId = currentProgram.channel;
+          const epgChannelId = currentProgram.channel; // This is a tvg_id string from EPG
           // Only process if channel exists in our database
-          if (channelId && validChannelIds.has(channelId)) {
+          if (epgChannelId && validChannelIds.has(epgChannelId)) {
+            // Get the numeric channel_id from the tvg_id
+            const numericChannelId = tvgIdToChannelIdMap.get(epgChannelId);
+            if (!numericChannelId) {
+              return; // Shouldn't happen if validChannelIds check passed, but safety check
+            }
+            
             matchedCount++;
             try {
               // Parse XMLTV date format
@@ -442,19 +460,19 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
                 if (stop.getTime() <= start.getTime()) {
                   // Log first few invalid date ranges for debugging
                   if (matchedCount <= 5) {
-                    this.logger.debug(`Invalid date range for channel ${channelId}: start="${currentProgram.start}", stop="${currentProgram.stop}"`);
+                    this.logger.debug(`Invalid date range for channel ${epgChannelId}: start="${currentProgram.start}", stop="${currentProgram.stop}"`);
                   }
                   return; // Skip this program
                 }
                 
-                const programKey = `${providerId}-${channelId}-${start.getTime()}-${stop.getTime()}`;
+                const programKey = `${providerId}-${numericChannelId}-${start.getTime()}-${stop.getTime()}`;
                 
                 if (!programKeys.has(programKey)) {
                   programKeys.add(programKey);
 
                   const program = {
                     provider_id: providerId,
-                    channel_id: channelId,
+                    channel_id: numericChannelId, // Use numeric channel_id
                     start: start,
                     stop: stop,
                     title: currentProgram.title || 'Unknown',
@@ -470,7 +488,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
               } else {
                 // Log first few date parsing failures for debugging
                 if (matchedCount <= 5) {
-                  this.logger.debug(`Date parsing failed for channel ${channelId}: start="${currentProgram.start}", stop="${currentProgram.stop}"`);
+                  this.logger.debug(`Date parsing failed for channel ${epgChannelId}: start="${currentProgram.start}", stop="${currentProgram.stop}"`);
                 }
               }
             } catch (error) {
@@ -532,13 +550,20 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
    * @private
    * @param {Object} prog - Programme object from parser
    * @param {string} providerId - Provider ID
-   * @param {Set<string>} validChannelIds - Set of valid channel IDs from database
+   * @param {Set<string>} validChannelIds - Set of valid tvg_ids from database
    * @param {Set} programKeys - Set of already processed program keys
+   * @param {Map<string, number>} tvgIdToChannelIdMap - Map of tvg_id to channel_id
    * @returns {Object|null} Program object or null if invalid/duplicate
    */
-  _extractProgram(prog, providerId, validChannelIds, programKeys) {
-    const channelId = prog.channel;
-    if (!channelId || !validChannelIds.has(channelId)) return null;
+  _extractProgram(prog, providerId, validChannelIds, programKeys, tvgIdToChannelIdMap) {
+    const epgChannelId = prog.channel; // This is a tvg_id string from EPG
+    if (!epgChannelId || !validChannelIds.has(epgChannelId)) return null;
+
+    // Get the numeric channel_id from the tvg_id
+    const numericChannelId = tvgIdToChannelIdMap.get(epgChannelId);
+    if (!numericChannelId) {
+      return null; // Shouldn't happen if validChannelIds check passed, but safety check
+    }
 
     // Parse dates safely - use XMLTV date parser
     let start, stop;
@@ -570,10 +595,10 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
       return null;
     }
 
-    // Create unique key for deduplication
+    // Create unique key for deduplication using numeric channel_id
     const startTime = start.getTime();
     const stopTime = stop.getTime();
-    const programKey = `${providerId}-${channelId}-${startTime}-${stopTime}`;
+    const programKey = `${providerId}-${numericChannelId}-${startTime}-${stopTime}`;
 
     // Skip if we've already seen this program
     if (programKeys.has(programKey)) {
@@ -631,7 +656,7 @@ export class LiveTVProcessingManager extends BaseProcessingManager {
 
     return {
       provider_id: providerId,
-      channel_id: channelId,
+      channel_id: numericChannelId, // Use numeric channel_id, not tvg_id
       start: start,
       stop: stop,
       title: title,

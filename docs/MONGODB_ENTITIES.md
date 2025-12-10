@@ -405,7 +405,7 @@ The `channels` collection stores Live TV channel information per provider. Chann
 {
   _id: ObjectId,                     // MongoDB auto-generated ID
   provider_id: String,               // Provider identifier (references iptv_providers.id)
-  channel_id: String,                // Unique channel identifier (within provider)
+  channel_id: Number,                // Unique channel identifier (within provider) - numeric ID
   channel_key: String,                // Unique key per provider (format: "live-{providerId}-{channelId}")
   name: String,                      // Channel name
   url: String,                      // Stream URL
@@ -424,7 +424,7 @@ The `channels` collection stores Live TV channel information per provider. Chann
 
 | Index Fields | Type | Options | Purpose | Query Patterns |
 |--------------|------|---------|---------|----------------|
-| `{ provider_id: 1, channel_id: 1 }` | Unique Compound | `unique: true` | Primary lookup (unique compound key). Ensures one channel per provider per channel_id. | `findOne({ provider_id: "agtv", channel_id: "channel123" })` |
+| `{ provider_id: 1, channel_id: 1 }` | Unique Compound | `unique: true` | Primary lookup (unique compound key). Ensures one channel per provider per channel_id. | `findOne({ provider_id: "agtv", channel_id: 10000 })` |
 | `{ provider_id: 1 }` | Standard | - | Provider channels lookup. Finds all channels for a specific provider. | `find({ provider_id: "agtv" })` |
 | `{ channel_key: 1 }` | Standard | - | Channel key lookup (for watchlist queries). Enables fast lookup by channel_key for watchlist filtering. | `find({ channel_key: "live-agtv-channel123" })` |
 
@@ -463,7 +463,7 @@ The `programs` collection stores EPG (Electronic Program Guide) program informat
 {
   _id: ObjectId,                     // MongoDB auto-generated ID
   provider_id: String,               // Provider identifier (references iptv_providers.id)
-  channel_id: String,                // Channel identifier (references channels.channel_id)
+  channel_id: Number,                // Channel identifier (references channels.channel_id) - numeric ID
   start: ISODate,                    // Program start time
   stop: ISODate,                     // Program end time
   title: String,                     // Program title
@@ -480,8 +480,8 @@ The `programs` collection stores EPG (Electronic Program Guide) program informat
 
 | Index Fields | Type | Options | Purpose | Query Patterns |
 |--------------|------|---------|---------|----------------|
-| `{ provider_id: 1, channel_id: 1, start: 1, stop: 1 }` | Unique Compound | `unique: true` | Primary lookup (unique compound key). Ensures one program per provider per channel per time slot. | `findOne({ provider_id: "agtv", channel_id: "channel123", start: date1, stop: date2 })` |
-| `{ provider_id: 1, channel_id: 1 }` | Compound | - | Provider channel programs lookup. Finds all programs for a specific provider and channel. | `find({ provider_id: "agtv", channel_id: "channel123" })` |
+| `{ provider_id: 1, channel_id: 1, start: 1, stop: 1 }` | Unique Compound | `unique: true` | Primary lookup (unique compound key). Ensures one program per provider per channel per time slot. | `findOne({ provider_id: "agtv", channel_id: 10000, start: date1, stop: date2 })` |
+| `{ provider_id: 1, channel_id: 1 }` | Compound | - | Provider channel programs lookup. Finds all programs for a specific provider and channel. | `find({ provider_id: "agtv", channel_id: 10000 })` |
 
 ### Relationships
 

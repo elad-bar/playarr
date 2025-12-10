@@ -15,7 +15,7 @@ export class ChannelRepository extends BaseRepository {
       'channels',
       (doc) => `${doc.provider_id}-${doc.channel_id}`,
       'data',  // Collection type
-      'v2'     // Schema version (was v1 with username field)
+      'v3'     // Schema version (v2: channel_id String, v3: channel_id Number)
     );
   }
 
