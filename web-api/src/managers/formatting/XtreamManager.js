@@ -50,6 +50,7 @@ class XtreamManager extends BaseWatchlistFormattingManager {
       const watchlistTitles = await this._getWatchlistTitles(user, 'movies');
       const movies = [];
 
+      let index = 0;
       for (const [titleKey, title] of watchlistTitles.entries()) {
         // Check if movie has available media (media item with name === 'main')
         const media = title.media || [];
@@ -68,35 +69,27 @@ class XtreamManager extends BaseWatchlistFormattingManager {
           if (!hasCategory) continue;
         }
 
-        // Generate stream URL in Xtream Code API standard format
-        const streamUrl = `${baseUrl}/movie/${user.username}/${user.api_key}/movies-${title.title_id}.mp4`;
+        // Get category ID and convert to array
+        const categoryIdStr = this._getCategoryId(title.genres);
+        const categoryIdNum = parseInt(categoryIdStr, 10) || 0;
 
         const movie = {
-          stream_id: title.title_id,
+          num: ++index,
           name: title.title,
-          title: title.title,
-          container_extension: 'mp4',
-          info: {
-            tmdb_id: title.title_id,
-            name: title.title,
-            release_date: title.release_date || '',
-            rating: title.vote_average?.toString() || '0',
-            duration: title.runtime ? `${title.runtime} min` : '',
-            plot: title.overview || '',
-            cast: '',
-            director: '',
-            genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', '),
-            last_modified: title.lastUpdated || title.createdAt || ''
-          },
-          category_id: this._getCategoryId(title.genres),
-          category_name: this._getCategoryName(title.genres),
+          stream_type: 'movie',
+          stream_id: title.title_id,
           stream_icon: title.poster_path ? `https://image.tmdb.org/t/p/w300${title.poster_path}` : '',
           rating: title.vote_average?.toString() || '0',
-          rating_5based: ((title.vote_average || 0) / 2).toFixed(1),
-          added: title.createdAt || '',
-          release_date: title.release_date || '',
-          backdrop_path: title.backdrop_path ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}` : '',
-          stream_url: streamUrl
+          rating_5based: parseFloat(((title.vote_average || 0) / 2).toFixed(1)) || 0,
+          tmdb: String(title.title_id || ''),
+          trailer: '',
+          added: this._toUnixTimestamp(title.createdAt),
+          is_adult: 0,
+          category_id: categoryIdStr,
+          category_ids: [categoryIdNum],
+          container_extension: 'mp4',
+          custom_sid: null,
+          direct_source: ''
         };
 
         movies.push(movie);
@@ -208,10 +201,10 @@ class XtreamManager extends BaseWatchlistFormattingManager {
         ? `https://image.tmdb.org/t/p/w300${title.poster_path}` 
         : '';
 
-      // Build backdrop_path as string (not array)
+      // Build backdrop_path as array (not string)
       const backdropPath = title.backdrop_path 
-        ? `https://image.tmdb.org/t/p/w1280${title.backdrop_path}`
-        : '';
+        ? [`https://image.tmdb.org/t/p/w1280${title.backdrop_path}`]
+        : [];
 
       // Calculate duration_secs and format duration
       const durationSecs = title.runtime ? title.runtime * 60 : 0;
@@ -219,24 +212,32 @@ class XtreamManager extends BaseWatchlistFormattingManager {
 
       // Get category ID
       const categoryId = this._getCategoryId(title.genres);
+      const categoryIdNum = parseInt(categoryId, 10) || 0;
 
-      // Convert createdAt to Unix timestamp (as integer)
-      const added = parseInt(this._toUnixTimestamp(title.createdAt), 10);
+      // Convert createdAt to Unix timestamp (as string)
+      const added = this._toUnixTimestamp(title.createdAt);
 
       // Build info object with conditional duration_secs
       const infoObj = {
-        movie_image: movieImage,
         tmdb_id: title.title_id?.toString() || '',
-        backdrop_path: backdropPath,
-        genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(' / ') || '',
-        plot: title.overview || '',
-        cast: '',
-        rating: title.vote_average?.toString() || '0',
-        rating_5based: ((title.vote_average || 0) / 2).toFixed(1),
-        director: '',
-        release_date: title.release_date || '',
         name: title.title,
-        duration: duration
+        o_name: title.title,
+        cover_big: title.poster_path ? `https://image.tmdb.org/t/p/w500${title.poster_path}` : '',
+        movie_image: movieImage,
+        releasedate: title.release_date || '',
+        youtube_trailer: '',
+        director: '',
+        actors: '',
+        cast: '',
+        description: title.overview || '',
+        plot: title.overview || '',
+        age: '',
+        country: '',
+        genre: (title.genres || []).map(g => typeof g === 'string' ? g : g.name).join(', ') || '',
+        backdrop_path: backdropPath,
+        duration: duration,
+        rating: title.vote_average?.toString() || '0',
+        status: 'Released'
       };
 
       // Only include duration_secs if value > 0
@@ -250,9 +251,10 @@ class XtreamManager extends BaseWatchlistFormattingManager {
           stream_id: title.title_id,
           name: title.title,
           added: added,
-          category_id: categoryId.toString(),
+          category_id: categoryId,
+          category_ids: [categoryIdNum],
           container_extension: 'mp4',
-          custom_sid: '',
+          custom_sid: null,
           direct_source: ''
         }
       };
