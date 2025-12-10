@@ -515,7 +515,8 @@ class Application {
         this.managers.tmdbProcessing,
         this.managers.tmdb,
         this.managers.providerTitles,
-        this.managers.metrics
+        this.managers.metrics,
+        this.managers.titles
       ),
       new SyncLiveTVJob(
         'syncLiveTV',

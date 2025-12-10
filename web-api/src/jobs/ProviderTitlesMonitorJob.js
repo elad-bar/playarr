@@ -16,12 +16,14 @@ export class ProviderTitlesMonitorJob extends BaseJobWithSaveCoordinator {
    * @param {import('../managers/domain/TMDBManager.js').TMDBManager} tmdbManager - TMDB manager for API calls
    * @param {import('../managers/domain/ProviderTitlesManager.js').ProviderTitlesManager} providerTitlesManager - Provider titles manager
    * @param {import('../managers/orchestration/MetricsManager.js').default} metricsManager - Metrics manager for recording counters
+   * @param {import('../managers/domain/TitlesManager.js').TitlesManager} titlesManager - Titles manager instance
    */
-  constructor(jobName, jobHistoryManager, saveCoordinator, providersManager, tmdbProcessingManager, tmdbManager, providerTitlesManager, metricsManager) {
+  constructor(jobName, jobHistoryManager, saveCoordinator, providersManager, tmdbProcessingManager, tmdbManager, providerTitlesManager, metricsManager, titlesManager) {
     super(jobName, jobHistoryManager, saveCoordinator, providersManager, tmdbProcessingManager);
     this.tmdbManager = tmdbManager;
     this.providerTitlesManager = providerTitlesManager;
     this.metricsManager = metricsManager;
+    this.titlesManager = titlesManager;
   }
 
   /**
@@ -113,6 +115,8 @@ export class ProviderTitlesMonitorJob extends BaseJobWithSaveCoordinator {
       // Delegate main title processing to TMDBProcessingManager
       // It will only process titles that need regeneration based on provider title updates
       const result = await this.tmdbProcessingManager.processMainTitles(providerTitlesByProvider);
+
+      await this.titlesManager.refreshAllGenresCache();
 
       // Update metrics for processed main titles per provider
       if (result.byProvider) {

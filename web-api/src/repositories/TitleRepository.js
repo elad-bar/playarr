@@ -125,6 +125,11 @@ export class TitleRepository extends BaseRepository {
         key: { type: 1, 'media.sources.provider_id': 1 },
         options: {},
         description: 'Type + provider combination queries'
+      },
+      {
+        key: { type: 1, 'genres.id': 1 },
+        options: {},
+        description: 'Genres aggregation queries (type filter + genres.id grouping)'
       }
     ];
   }

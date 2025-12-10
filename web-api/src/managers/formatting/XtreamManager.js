@@ -26,26 +26,12 @@ class XtreamManager extends BaseWatchlistFormattingManager {
    */
   async getVodCategories(user) {
     try {
-      const watchlistTitles = await this._getWatchlistTitles(user, 'movies');
-      const categories = new Map();
-
-      // Extract unique categories from movies in watchlist
-      for (const [titleKey, title] of watchlistTitles.entries()) {
-        if (title.genres && Array.isArray(title.genres)) {
-          title.genres.forEach(genre => {
-            const genreName = typeof genre === 'string' ? genre : genre.name;
-            if (genreName && !categories.has(genreName)) {
-              categories.set(genreName, {
-                category_id: categories.size + 1,
-                category_name: genreName,
-                parent_id: 0
-              });
-            }
-          });
-        }
-      }
-
-      return Array.from(categories.values());
+      const genres = await this._titlesManager.getUniqueGenresByType('movies');
+      return genres.map(genre => ({
+        category_id: genre.id,
+        category_name: genre.name,
+        parent_id: 0
+      }));
     } catch (error) {
       this.logger.error('Error getting VOD categories:', error);
       return [];
@@ -130,27 +116,13 @@ class XtreamManager extends BaseWatchlistFormattingManager {
    */
   async getSeriesCategories(user) {
     try {
-      const watchlistTitles = await this._getWatchlistTitles(user, 'tvshows');
-      const categories = new Map();
-
-      // Extract unique categories from TV shows in watchlist
-      for (const [titleKey, title] of watchlistTitles.entries()) {
-        if (title.genres && Array.isArray(title.genres)) {
-          title.genres.forEach(genre => {
-            const genreName = typeof genre === 'string' ? genre : genre.name;
-            if (genreName && !categories.has(genreName)) {
-              categories.set(genreName, {
-                category_id: String(categories.size + 1),
-                category_name: genreName,
-                parent_id: 0,
-                category_type: 'series'
-              });
-            }
-          });
-        }
-      }
-
-      return Array.from(categories.values());
+      const genres = await this._titlesManager.getUniqueGenresByType('tvshows');
+      return genres.map(genre => ({
+        category_id: genre.id,
+        category_name: genre.name,
+        parent_id: 0,
+        category_type: 'series'
+      }));
     } catch (error) {
       this.logger.error('Error getting series categories:', error);
       return [];

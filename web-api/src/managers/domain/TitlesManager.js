@@ -59,6 +59,13 @@ class TitlesManager extends BaseDomainManager {
     this._providersCollection = toCollectionName(DatabaseCollections.IPTV_PROVIDERS);
     this._tmdbPosterPath = 'https://image.tmdb.org/t/p/w300';
     this._tmdbBackdropPath = 'https://image.tmdb.org/t/p/w300';
+    
+    /**
+     * In-memory cache for unique genres by type
+     * @private
+     * @type {Map<string, Array<{id: number, name: string}>>}
+     */
+    this._genresCache = new Map();
   }
 
   /**
@@ -719,6 +726,79 @@ class TitlesManager extends BaseDomainManager {
     ];
     
     return await this._repository.aggregate(pipeline);
+  }
+
+  /**
+   * Get unique genres from titles by media type
+   * Uses MongoDB aggregation to extract unique genres
+   * Caches results in memory for performance
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @returns {Promise<Array<{id: number, name: string}>>} Array of unique genre objects
+   */
+  async getUniqueGenresByType(type) {
+    // Check cache first
+    if (this._genresCache.has(type)) {
+      return this._genresCache.get(type);
+    }
+
+    // Cache miss - query database
+    const pipeline = [
+      {
+        $match: { type: type }
+      },
+      { 
+        $unwind: '$genres' 
+      },
+      {
+        $group: {
+          _id: '$genres.id',
+          name: { $first: '$genres.name' }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          id: '$_id',
+          name: 1
+        }
+      },
+      { 
+        $sort: { id: 1 } 
+      }
+    ];
+    
+    const genres = await this._repository.aggregate(pipeline);
+    
+    // Cache the result
+    this._genresCache.set(type, genres);
+    
+    return genres;
+  }
+
+  /**
+   * Refresh genres cache for a specific type
+   * Proactively refreshes cache after main titles are updated
+   * @param {string} type - Media type ('movies' or 'tvshows')
+   * @returns {Promise<Array<{id: number, name: string}>>} Array of unique genre objects
+   */
+  async refreshGenresCache(type) {
+    // Remove from cache to force refresh
+    this._genresCache.delete(type);
+    
+    // Fetch and cache new data
+    return await this.getUniqueGenresByType(type);
+  }
+
+  /**
+   * Refresh genres cache for all types
+   * Proactively refreshes cache after main titles are updated
+   * @returns {Promise<void>}
+   */
+  async refreshAllGenresCache() {
+    await Promise.all([
+      this.refreshGenresCache('movies'),
+      this.refreshGenresCache('tvshows')
+    ]);
   }
 
 }

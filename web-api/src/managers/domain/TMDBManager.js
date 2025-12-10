@@ -15,9 +15,6 @@ class TMDBManager extends BaseManager {
    */
   constructor(tmdbProvider) {
     super('TMDBManager');
-    if (!tmdbProvider) {
-      throw new Error('TMDBProvider is required');
-    }
     this._tmdbTokenKey = TMDB_TOKEN_KEY;
     this._tmdbProvider = tmdbProvider;
   }
