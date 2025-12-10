@@ -28,7 +28,7 @@ class XtreamManager extends BaseWatchlistFormattingManager {
     try {
       const genres = await this._titlesManager.getUniqueGenresByType('movies');
       return genres.map(genre => ({
-        category_id: genre.id,
+        category_id: String(genre.id),
         category_name: genre.name,
         parent_id: 0
       }));
@@ -111,10 +111,9 @@ class XtreamManager extends BaseWatchlistFormattingManager {
     try {
       const genres = await this._titlesManager.getUniqueGenresByType('tvshows');
       return genres.map(genre => ({
-        category_id: genre.id,
+        category_id: String(genre.id),
         category_name: genre.name,
-        parent_id: 0,
-        category_type: 'series'
+        parent_id: 0
       }));
     } catch (error) {
       this.logger.error('Error getting series categories:', error);
@@ -516,7 +515,7 @@ class XtreamManager extends BaseWatchlistFormattingManager {
       channels.forEach(channel => {
         if (channel.group_title && !categories.has(channel.group_title)) {
           categories.set(channel.group_title, {
-            category_id: categories.size + 1,
+            category_id: String(categories.size + 1),
             category_name: channel.group_title,
             parent_id: 0
           });
@@ -591,8 +590,9 @@ class XtreamManager extends BaseWatchlistFormattingManager {
           epg_channel_id: channel.tvg_id || channel.channel_id,
           added: channel.createdAt ? this._toUnixTimestamp(channel.createdAt) : Math.floor(Date.now() / 1000).toString(),
           category_id: String(categoryIdForChannel),
-          category_ids: [String(categoryIdForChannel)],
-          custom_sid: '',
+          category_ids: [categoryIdForChannel],
+          custom_sid: null,
+          is_adult: 0,
           tv_archive: 0,
           direct_source: streamUrl,
           tv_archive_duration: 0
