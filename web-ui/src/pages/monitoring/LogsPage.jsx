@@ -39,7 +39,7 @@ const SettingsLogger = () => {
   const [changingLevel, setChangingLevel] = useState(false);
   const logContainerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
-  const MAX_LINES = 100000;
+  const MAX_LINES = 10000;
 
   /**
    * Get color for log level

@@ -370,7 +370,7 @@ class Application {
 
     // Create LogStreamTransport with WebSocketService (required dependency)
     this.logStreamTransport = new LogStreamTransport({
-      maxLines: 100000,
+      maxLines: 10000,
       level: 'info',
       webSocketService: this.webSocketService
     });
