@@ -412,10 +412,19 @@ class LiveTVRouter extends BaseRouter {
         return this.returnErrorResponse(res, 400, 'Invalid channel key format');
       }
       
-      const [, providerId, channelId] = match;
+      const [, providerId, channelIdStr] = match;
+      // Convert channel_id to Number (channels use Number for channel_id in v3 schema)
+      const channelId = Number(channelIdStr);
+      
+      // Check if conversion was successful
+      if (isNaN(channelId)) {
+        return this.returnErrorResponse(res, 400, 'Invalid channel ID format');
+      }
+      
+      // Query by provider_id and channel_id (channels are per-provider, not per-user)
       const channel = await this._channelManager._repository.findOneByQuery({
         provider_id: providerId,
-        channel_id: channelId
+        channel_id: channelId  // Use Number, not string
       });
       
       if (!channel) {
