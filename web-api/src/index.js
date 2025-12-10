@@ -619,7 +619,7 @@ class Application {
       new PlaylistRouter(this.app, this.managers.playlist, this.managers.middleware),
       new TMDBRouter(this.app, this.managers.tmdb, this.managers.settings, this.managers.middleware),
       new HealthcheckRouter(this.app, this.managers.settings, this.managers.middleware),
-      new XtreamRouter(this.app, this.managers.xtream, this.managers.middleware, this.managers.channel, this.managers.program),
+      new XtreamRouter(this.app, this.managers.xtream, this.managers.middleware, this.managers.channel, this.managers.program, this.managers.liveTVFormatting),
       new JobsRouter(this.app, this.jobsManager, this.managers.middleware),
       new StremioRouter(this.app, this.managers.stremio, this.managers.middleware),
       new LiveTVRouter(this.app, this.managers.channel, this.managers.program, this.managers.liveTVFormatting, this.managers.user, this.managers.iptvProvider, this.managers.middleware, this.managers.metrics),

@@ -493,25 +493,30 @@ class XtreamManager extends BaseWatchlistFormattingManager {
    */
   async getLiveCategories(user) {
     try {
-      // Get active providers
-      const activeProviders = await this._iptvProviderManager.findByQuery({
-        type: { $in: ['agtv', 'xtream'] },
-        enabled: { $ne: false },
-        deleted: { $ne: true }
-      });
+      // Get enabled provider IDs
+      const enabledProviderIds = await this._iptvProviderManager.getEnabledProviderIds();
       
-      if (activeProviders.length === 0) {
+      if (!enabledProviderIds || enabledProviderIds.length === 0) {
         return [];
       }
 
-      const activeProviderIds = activeProviders.map(p => p.id);
-      const channels = await this._channelManager._repository.findByQuery({
-        provider_id: { $in: activeProviderIds }
+      // Get user watchlist for filtering
+      const userWatchlist = user?.watchlist || { movies: [], tvshows: [], live: [] };
+
+      // Get all channels using unified query builder
+      const result = await this._channelManager.getAllChannels({
+        enabledProviderIds,
+        watchlist: userWatchlist,
+        watchlistFilter: true, // Only show watchlist channels (consistent with VOD/Series)
+        perPage: 10000, // High limit to get all channels for category extraction
+        page: 1
       });
-      
+
+      const channels = result.items;
+
+      // Build category map
       const categories = new Map();
 
-      // Extract unique group titles
       channels.forEach(channel => {
         if (channel.group_title && !categories.has(channel.group_title)) {
           categories.set(channel.group_title, {
@@ -538,33 +543,43 @@ class XtreamManager extends BaseWatchlistFormattingManager {
    */
   async getLiveStreams(user, baseUrl, categoryId = null) {
     try {
-      // Get active providers
-      const activeProviders = await this._iptvProviderManager.findByQuery({
-        type: { $in: ['agtv', 'xtream'] },
-        enabled: { $ne: false },
-        deleted: { $ne: true }
-      });
+      // Get enabled provider IDs
+      const enabledProviderIds = await this._iptvProviderManager.getEnabledProviderIds();
       
-      if (activeProviders.length === 0) {
+      if (!enabledProviderIds || enabledProviderIds.length === 0) {
         return [];
       }
 
-      const activeProviderIds = activeProviders.map(p => p.id);
-      const channels = await this._channelManager._repository.findByQuery({
-        provider_id: { $in: activeProviderIds }
+      // Get user watchlist for filtering
+      const userWatchlist = user?.watchlist || { movies: [], tvshows: [], live: [] };
+
+      // Get all channels using unified query builder (with high limit for Xtream API)
+      // Xtream API typically expects all channels, not paginated
+      const result = await this._channelManager.getAllChannels({
+        enabledProviderIds,
+        watchlist: userWatchlist,
+        watchlistFilter: true, // Only show watchlist channels (consistent with VOD/Series)
+        perPage: 10000, // High limit to get all channels for Xtream API
+        page: 1
       });
-      
+
+      const channels = result.items;
+
+      if (channels.length === 0) {
+        return [];
+      }
+
+      // Build category map (category name -> numeric ID) for Xtream format
       const categories = new Map();
       let categoryCounter = 1;
 
-      // Build category map
       channels.forEach(channel => {
         if (channel.group_title && !categories.has(channel.group_title)) {
           categories.set(channel.group_title, categoryCounter++);
         }
       });
 
-      // Filter by category if specified
+      // Filter by category if specified (map numeric categoryId to category name)
       let filteredChannels = channels;
       if (categoryId) {
         const categoryName = Array.from(categories.entries()).find(([_, id]) => id === categoryId)?.[0];
@@ -577,7 +592,6 @@ class XtreamManager extends BaseWatchlistFormattingManager {
 
       // Convert to Xtream format
       return filteredChannels.map((channel, index) => {
-        // Use channel_key for stream URL: /api/livetv/stream/{channelKey}
         const streamUrl = `${baseUrl}/api/livetv/stream/${encodeURIComponent(channel.channel_key)}?api_key=${user.api_key}`;
         const categoryIdForChannel = channel.group_title ? categories.get(channel.group_title) : 0;
 

@@ -148,12 +148,14 @@ class XtreamRouter extends BaseRouter {
    * @param {import('../middleware/Middleware.js').default} middleware - Middleware instance
    * @param {import('../managers/domain/ChannelManager.js').ChannelManager} channelManager - Channel manager instance (for LiveTV)
    * @param {import('../managers/domain/ProgramManager.js').ProgramManager} programManager - Program manager instance (for LiveTV)
+   * @param {import('../managers/formatting/LiveTVFormattingManager.js').LiveTVFormattingManager} liveTVFormattingManager - Live TV formatting manager instance (for M3U and EPG)
    */
-  constructor(app, xtreamManager, middleware, channelManager, programManager) {
+  constructor(app, xtreamManager, middleware, channelManager, programManager, liveTVFormattingManager) {
     super(app, middleware, 'XtreamRouter');
     this._xtreamManager = xtreamManager;
     this._channelManager = channelManager;
     this._programManager = programManager;
+    this._liveTVFormattingManager = liveTVFormattingManager;
     
     // Action handlers configuration map
     this._actionHandlers = {
@@ -182,7 +184,7 @@ class XtreamRouter extends BaseRouter {
    * @returns {string[]} Base path(s) for this router
    */
   getBasePath() {
-    return ['/player_api.php', '/movie', '/series', '/live'];
+    return ['/player_api.php', '/get.php', '/xmltv.php', '/movie', '/series', '/live'];
   }
 
   /**
@@ -191,8 +193,10 @@ class XtreamRouter extends BaseRouter {
   setupRoutes() {
     /**
      * GET /
-     * Xtream Code API endpoint (mounted at /player_api.php)
-     * Query parameters: username, password (API key), action
+     * Xtream Code API endpoint (mounted at /player_api.php, /get.php, /xmltv.php)
+     * - /player_api.php: Query parameters: username, password (API key), action
+     * - /get.php: Query parameters: username, password (API key), type (m3u_plus or m3u), output (ts or m3u8) - Returns M3U playlist
+     * - /xmltv.php: Query parameters: username, password (API key) - Returns EPG XML
      */
     this.router.get('/', this.middleware.requireXtreamAuth, this._handleGetXtreamApi.bind(this));
 
@@ -213,6 +217,15 @@ class XtreamRouter extends BaseRouter {
    */
   async _handleGetXtreamApi(req, res) {
     try {
+      // Route to appropriate handler based on base URL
+      // When router is mounted at /get.php or /xmltv.php, route to those handlers
+      if (req.baseUrl === '/get.php') {
+        return await this._handleGetM3u(req, res);
+      }
+      if (req.baseUrl === '/xmltv.php') {
+        return await this._handleGetEpg(req, res);
+      }
+      
       // Set UTF-8 charset header for all JSON responses
       res.setHeader('Content-Type', 'application/json; charset=UTF-8');
       
@@ -545,6 +558,48 @@ class XtreamRouter extends BaseRouter {
 
     this.logger.debug(`Live TV stream request: username=${username}, channelId=${channelId}`);
     return res.redirect(channel.url);
+  }
+
+  /**
+   * Handle GET /get.php request (M3U playlist)
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   */
+  async _handleGetM3u(req, res) {
+    try {
+      const user = req.user; // Set by requireXtreamAuth middleware
+      const baseUrl = getBaseUrl(req);
+      
+      // Get M3U playlist using LiveTVFormattingManager (reuses existing code)
+      const m3uContent = await this._liveTVFormattingManager.getM3UPlaylist(user.username, baseUrl);
+      
+      // Replace {API_KEY} placeholder with actual API key
+      const finalContent = m3uContent.replace(/{API_KEY}/g, user.api_key);
+      
+      res.setHeader('Content-Type', 'text/plain');
+      return res.send(finalContent);
+    } catch (error) {
+      return this.returnErrorResponse(res, 500, 'Failed to get M3U playlist', `M3U error: ${error.message}`);
+    }
+  }
+
+  /**
+   * Handle GET /xmltv.php request (EPG XML)
+   * @param {import('express').Request} req - Express request object
+   * @param {import('express').Response} res - Express response object
+   */
+  async _handleGetEpg(req, res) {
+    try {
+      const user = req.user; // Set by requireXtreamAuth middleware
+      
+      // Get EPG content using LiveTVFormattingManager (reuses existing code)
+      const epgContent = await this._liveTVFormattingManager.getEPGContent(user.username);
+      
+      res.setHeader('Content-Type', 'application/xml');
+      return res.send(epgContent);
+    } catch (error) {
+      return this.returnErrorResponse(res, 500, 'Failed to get EPG', `EPG error: ${error.message}`);
+    }
   }
 
   /**
