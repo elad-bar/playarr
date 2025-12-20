@@ -384,14 +384,32 @@ export class BaseIPTVProcessingManager extends BaseProcessingManager {
   }
 
   /**
-   * Build processed title data object (provider-specific)
-   * @abstract
+   * Build processed title data object with only required fields
    * @param {Object} title - Title object after processing
    * @param {string} type - Media type ('movies' or 'tvshows')
    * @returns {Object} Clean title data object
    */
   _buildProcessedTitleData(title, type) {
-    throw new Error('_buildProcessedTitleData(title, type) must be implemented by subclass');
+    const config = this._typeConfig[type];
+    if (!config) {
+      throw new Error(`Unsupported type: ${type}`);
+    }
+
+    const titleId = title[config.idField] || null;
+
+    return {
+      provider_id: this.providerId,
+      title_id: titleId,
+      title: title.name,
+      tmdb_id: title.tmdb_id || null,
+      category_id: title.category_id || null,
+      release_date: title.release_date || null,
+      streams: title.streams || {},
+      ignored: title.ignored || false,
+      ignored_reason: title.ignored_reason || null,
+      type: type,
+      title_key: generateTitleKey(type, titleId)
+    };
   }
 
   /**

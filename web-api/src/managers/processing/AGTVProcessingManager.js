@@ -378,31 +378,5 @@ export class AGTVProcessingManager extends BaseIPTVProcessingManager {
       return false;
     }
   }
-
-  /**
-   * Build processed title data object
-   * @private
-   * @param {Object} title - Title object after processing
-   * @param {string} type - Media type ('movies' or 'tvshows')
-   * @returns {Object} Clean title data object
-   */
-  _buildProcessedTitleData(title, type) {
-    const config = this._typeConfig[type];
-    if (!config) {
-      throw new Error(`Unsupported type: ${type}`);
-    }
-
-    return {
-      provider_id: this.providerId,
-      title_id: title[config.idField] || null,
-      title: title.name,
-      tmdb_id: title.tmdb_id || null,
-      category_id: title.category_id || null,
-      release_date: title.release_date || null,
-      streams: title.streams || {},
-      ignored: title.ignored || false,
-      ignored_reason: title.ignored_reason || null
-    };
-  }
 }
 
