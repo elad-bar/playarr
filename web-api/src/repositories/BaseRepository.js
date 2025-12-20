@@ -293,13 +293,39 @@ export class BaseRepository {
         let totalInserted = 0;
         let totalModified = 0;
         let totalDeleted = 0;
+        let totalErrors = 0;
 
         for (let i = 0; i < operations.length; i += batchSize) {
           const batch = operations.slice(i, i + batchSize);
           const result = await collection.bulkWrite(batch, { ordered });
+          
+          // Check for write errors
+          if (result.writeErrors && result.writeErrors.length > 0) {
+            totalErrors += result.writeErrors.length;
+            for (const error of result.writeErrors) {
+              const globalIndex = i + error.index;
+              const operation = batch[error.index];
+              const operationType = Object.keys(operation)[0];
+              let docIdentifier = 'unknown';
+              
+              // Try to extract document identifier for logging
+              if (operationType === 'updateOne' && operation.updateOne?.filter) {
+                docIdentifier = JSON.stringify(operation.updateOne.filter);
+              } else if (operationType === 'insertOne' && operation.insertOne?.document) {
+                docIdentifier = operation.insertOne.document.title_key || operation.insertOne.document._id || 'unknown';
+              }
+              
+              this.logger.error(`Write error in ${this.collectionName} at index ${globalIndex} (${operationType} for ${docIdentifier}): ${error.errmsg}`);
+            }
+          }
+          
           totalInserted += result.insertedCount || 0;
           totalModified += result.modifiedCount || 0;
           totalDeleted += result.deletedCount || 0;
+        }
+
+        if (totalErrors > 0) {
+          this.logger.warn(`Bulk write completed with ${totalErrors} error(s) in ${this.collectionName}`);
         }
 
         return {
@@ -310,6 +336,26 @@ export class BaseRepository {
       } else {
         // Single bulk write
         const result = await collection.bulkWrite(operations, { ordered });
+        
+        // Check for write errors
+        if (result.writeErrors && result.writeErrors.length > 0) {
+          for (const error of result.writeErrors) {
+            const operation = operations[error.index];
+            const operationType = Object.keys(operation)[0];
+            let docIdentifier = 'unknown';
+            
+            // Try to extract document identifier for logging
+            if (operationType === 'updateOne' && operation.updateOne?.filter) {
+              docIdentifier = JSON.stringify(operation.updateOne.filter);
+            } else if (operationType === 'insertOne' && operation.insertOne?.document) {
+              docIdentifier = operation.insertOne.document.title_key || operation.insertOne.document._id || 'unknown';
+            }
+            
+            this.logger.error(`Write error in ${this.collectionName} at index ${error.index} (${operationType} for ${docIdentifier}): ${error.errmsg}`);
+          }
+          this.logger.warn(`Bulk write completed with ${result.writeErrors.length} error(s) in ${this.collectionName}`);
+        }
+        
         return {
           insertedCount: result.insertedCount || 0,
           modifiedCount: result.modifiedCount || 0,

@@ -231,7 +231,14 @@ export class BaseDomainManager extends BaseManager {
 
       try {
         const result = await this._repository.bulkWrite(bulkOps);
-        updatedCount = result.modifiedCount || updates.length;
+        updatedCount = result.modifiedCount || 0;
+        
+        // Log warning if documents weren't modified as expected
+        if (updatedCount === 0 && updates.length > 0) {
+          this.logger.warn(`bulkUpsert: 0 documents modified out of ${updates.length} update operations. Check for write errors or documents with no changes.`);
+        } else if (updatedCount < updates.length) {
+          this.logger.warn(`bulkUpsert: Only ${updatedCount} documents modified out of ${updates.length} update operations (${updates.length - updatedCount} unchanged).`);
+        }
       } catch (error) {
         this.logger.error('Error updating documents in bulkUpsert:', error);
         throw error;
